@@ -1,0 +1,10 @@
+fastapi==0.143.1
+uvicorn==0.54.0
+openai==2.54.0
+pydantic-settings==2.16.0
+httpx==0.28.1
+python-dotenv==1.2.4
+mcp==1.30.0
+websockets==15.0.1
+pypdf==7.0.0
+jsonschema==4.26.0

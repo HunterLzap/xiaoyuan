@@ -1,0 +1,32 @@
+# AtomS3R + Echo Base / v2.2.6 — 塔菲自定义唤醒 + 监听中唤醒 覆盖配置
+# 用法（与基础默认合并，后者覆盖前者）：
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.defaults.atoms3r-tafei" build
+# 说明：build_default_assets.py 在构建时读本 sdkconfig 生成 assets.bin 的 index.json.multinet_model。
+# 依赖：ESP-IDF >=5.5.2（main/idf_component.yml），esp-sr ~2.3.0；CONFIG_SR_MN_* 精确符号以组件就绪后 menuconfig 为准。
+
+# 板型 / Flash / 分区（覆盖 esp32s3 默认里的 16MB，改 8MB + v2/8m）
+CONFIG_BOARD_TYPE_M5STACK_ATOM_S3R_ECHO_BASE=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/v2/8m.csv"
+
+# PSRAM Octal（已在 sdkconfig.defaults.esp32s3 内含，此处显式保留）
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# 唤醒实现：自定义 MultiNet（choice 互斥，只设这一项为 y）
+CONFIG_USE_CUSTOM_WAKE_WORD=y
+CONFIG_CUSTOM_WAKE_WORD="ta fei"
+CONFIG_CUSTOM_WAKE_WORD_DISPLAY="塔菲"
+CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=20
+# 监听中唤醒（用户选择开启）
+CONFIG_WAKE_WORD_DETECTION_IN_LISTENING=y
+CONFIG_SEND_WAKE_WORD_DATA=y
+
+# 关键：必须选一个中文 MultiNet 模型，否则 build_default_assets.py 报错退出
+# 选 MULTINET7 → 打包 mn7_cn（并附带 fst）；如需 6 用 CONFIG_SR_MN_CN_MULTINET6_QUANT=y
+CONFIG_SR_MN_CN_MULTINET7_QUANT=y
+
+# 中文界面（默认即中文）
+CONFIG_LANGUAGE_ZH_CN=y

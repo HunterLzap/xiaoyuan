@@ -1,0 +1,20 @@
+[Unit]
+Description=Xiaodan voice assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=voice-assistant
+Group=voice-assistant
+WorkingDirectory=/opt/xiaodan
+EnvironmentFile=/etc/xiaodan/access.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/xiaodan/.venv/bin/python -m backend.run_devices --public
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

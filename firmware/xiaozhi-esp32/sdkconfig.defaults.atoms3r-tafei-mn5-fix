@@ -1,0 +1,10 @@
+# AtomS3R + Echo Base / v2.2.6 — 塔菲 mn5 修复试验覆盖（仅唤醒阈值；显示改动在板级 config.h）
+# 差异：CONFIG_CUSTOM_WAKE_WORD_THRESHOLD 20 → 5（更灵敏）
+# 其余沿用 sdkconfig.defaults.atoms3r-tafei-mn5（MN5Q8、8m_tafei_mn5.csv、8MB、板型、塔菲、监听中唤醒）
+# 显示修复（可回滚，在 main/boards/atoms3r-echo-base/config.h）：
+#   DISPLAY_OFFSET_Y 32→0、DISPLAY_MIRROR_X/Y false→true（屏幕下移+颠倒修正）
+# 构建（独立目录/配置，不碰现有 build 与 sdkconfig）：
+#   idf.py -B build-tafei-mn5-fix -DSDKCONFIG=sdkconfig.tafei-mn5-fix \
+#     -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.defaults.atoms3r-tafei-mn5;sdkconfig.defaults.atoms3r-tafei-mn5-fix" \
+#     -DTAFEI_MN5_SMALL_FONT=ON build
+CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=5

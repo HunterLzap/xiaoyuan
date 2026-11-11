@@ -1,0 +1,38 @@
+# AtomS3R + Echo Base / v2.2.6 — 塔菲唤醒（mn5q8 试验构建）覆盖配置
+# 用途：独立验证“mn5q8_cn + 14_1 字体”能否把 assets 压进 8MB 双 OTA 的 0x280000 分区。
+# 与 sdkconfig.defaults.atoms3r-tafei 的差异仅两处：
+#   1) 中文 MultiNet 由 MULTINET7 换成 MULTINET5(quant8) → 打包 mn5q8_cn；
+#   2) 分区表换成试验用的 partitions/v2/8m_tafei_mn5.csv（双 0x2b0000 + assets@0x580000/0x280000）。
+# 其余：8MB、板型 AtomS3R Echo Base、塔菲自定义唤醒、监听中唤醒、中文界面 全部保持一致。
+# 构建（独立 build/SDKCONFIG，不动现有 build 与根 sdkconfig）：
+#   idf.py -B build-tafei-mn5 -DSDKCONFIG=sdkconfig.tafei-mn5 \
+#     -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.defaults.atoms3r-tafei-mn5" \
+#     -DTAFEI_MN5_SMALL_FONT=ON build
+# 依赖：ESP-IDF >=5.5.2（main/idf_component.yml），esp-sr ~2.3.0。
+
+# 板型 / Flash / 分区
+CONFIG_BOARD_TYPE_M5STACK_ATOM_S3R_ECHO_BASE=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions/v2/8m_tafei_mn5.csv"
+
+# PSRAM Octal
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# 唤醒实现：自定义 MultiNet（choice 互斥，只设 mn5q8 这一项为 y）
+CONFIG_USE_CUSTOM_WAKE_WORD=y
+CONFIG_CUSTOM_WAKE_WORD="ta fei"
+CONFIG_CUSTOM_WAKE_WORD_DISPLAY="塔菲"
+CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=20
+# 监听中唤醒
+CONFIG_WAKE_WORD_DETECTION_IN_LISTENING=y
+CONFIG_SEND_WAKE_WORD_DATA=y
+
+# 关键：中文 MultiNet 选 mn5q8（build_default_assets.py 映射为 mn5q8_cn；mn5 不打包 fst）
+# 注意：不要同时设 MULTINET6/7，choice 互斥。
+CONFIG_SR_MN_CN_MULTINET5_RECOGNITION_QUANT8=y
+
+# 中文界面
+CONFIG_LANGUAGE_ZH_CN=y

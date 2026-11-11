@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>AtomS3R · 个人助理</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+  <script src="/voice.js" defer></script>
+</head>
+<body>
+  <svg class="icon-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 18l-2 3V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H5Z"/><path d="M7 8h10M7 12h6"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m15 4 5 5-11 11H4v-5L15 4Z"/><path d="m12 7 5 5"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></symbol>
+    <symbol id="i-theme" viewBox="0 0 24 24"><path d="M20.5 13A8.5 8.5 0 0 1 11 3.5 8.5 8.5 0 1 0 20.5 13Z"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 9h1m4 0h1m4 0h1M6 12h1m4 0h1m4 0h1M7 16h10"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7a9 9 0 1 0 1 8M20 3v5h-5"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></symbol>
+    <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0V7ZM12 17v5"/></symbol>
+    <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L3 18v3h3l6.4-6.4a4 4 0 0 0 5.3-5.3l-2.3 2.3-2-2 2.3-2.3Z"/></symbol>
+  </svg>
+  <div id="app-shell" class="app-shell">
+    <aside id="sidebar" class="sidebar" aria-label="导航和会话">
+      <div class="sidebar-brand"><a class="brand" href="/" data-view="chat"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><strong>AtomS3R</strong></a><button class="icon-button" id="collapse-sidebar" aria-label="收起侧栏"><svg><use href="#i-panel"/></svg></button></div>
+      <button id="new-session" class="nav-button"><svg><use href="#i-plus"/></svg><span>新对话</span><kbd>Ctrl Alt N</kbd></button>
+      <div class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="session-search" maxlength="200" type="search" placeholder="搜索对话" aria-label="搜索对话" autocomplete="off"><kbd>Ctrl K</kbd></div>
+      <div class="history-heading">最近对话</div>
+      <nav id="session-list" class="session-list" aria-label="历史会话"><p class="sidebar-empty">正在加载…</p></nav>
+      <div class="sidebar-bottom">
+        <a id="settings-button" class="nav-button" href="/settings" data-view="settings"><svg><use href="#i-settings"/></svg><span>设置</span></a>
+        <div class="local-profile"><span class="profile-avatar">小</span><div><strong>个人工作区</strong><span>Windows · 本机服务</span></div><button id="theme-toggle" class="icon-button" aria-label="切换主题" title="切换明暗主题"><svg><use href="#i-theme"/></svg></button></div>
+      </div>
+    </aside>
+    <button id="sidebar-overlay" class="sidebar-overlay" aria-label="关闭导航" hidden></button>
+    <main class="main-shell">
+      <header class="toolbar">
+        <div class="toolbar-left"><button id="open-sidebar" class="icon-button" aria-label="展开侧栏"><svg><use href="#i-panel"/></svg></button><span class="workspace-name">个人助理</span><span class="breadcrumb-divider">/</span><span id="view-title">新对话</span><form id="rename-form" hidden><label class="sr-only" for="rename-title">会话名称</label><input id="rename-title" maxlength="80" required><button type="submit" class="text-button">保存</button><button id="cancel-rename" type="button" class="text-button">取消</button></form></div>
+        <div class="toolbar-right"><button id="rename-session" class="icon-button thread-action" aria-label="重命名对话" title="重命名对话" disabled><svg><use href="#i-edit"/></svg></button><button id="export-session" class="icon-button thread-action" aria-label="导出对话" title="导出 Markdown" disabled><svg><use href="#i-download"/></svg></button><button id="delete-session" class="icon-button thread-action" aria-label="删除对话" title="删除对话" disabled><svg><use href="#i-trash"/></svg></button><button id="model-button" class="model-button" title="配置模型"><span id="model-label">未选择模型</span><svg><use href="#i-chevron"/></svg></button></div>
+      </header>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+      <section id="chat-view" class="chat-view" aria-label="对话">
+        <div id="chat-scroll" class="chat-scroll"><div id="empty-state" class="empty-state"><div class="assistant-mark" aria-hidden="true"><svg><use href="#i-chat"/></svg></div><h1>今天想做点什么？</h1><p>输入消息，或点麦克风说话。</p></div><div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div></div>
+        <div class="composer-wrap">
+          <form id="chat-form" class="composer">
+            <label class="sr-only" for="message">你的消息</label><textarea id="message" maxlength="4000" rows="1" placeholder="发消息…" required></textarea>
+            <div class="composer-bottom"><button id="use-knowledge" type="button" class="knowledge-toggle" aria-pressed="false" title="检索 M5Stack 官方资料后回答"><svg aria-hidden="true"><use href="#i-search"/></svg><span>资料</span></button><span id="composer-state" class="sr-only" role="status"></span><div class="composer-actions"><span id="character-count" class="character-count"></span><button id="voice-toggle" type="button" class="icon-button" aria-label="开始语音输入" aria-pressed="false" title="语音输入"><svg aria-hidden="true"><use href="#i-mic"/></svg></button><button id="send" class="send-button" type="submit" aria-label="发送消息" title="发送消息（Enter）" disabled><svg><use href="#i-arrow"/></svg></button></div></div>
+          </form>
+          <div class="composer-footnote"><span id="input-hint">Enter 发送 · Shift + Enter 换行</span><button id="configure-link" class="text-button">连接你的 AI 服务</button><span id="context-note" class="sr-only" hidden>仅最近 6 轮参与上下文</span></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <section id="voice-panel" class="voice-workspace" aria-label="语音对话" hidden>
+    <header class="voice-header">
+      <div class="voice-wordmark"><span class="voice-dot" aria-hidden="true"></span><span>AtomS3R 语音</span></div>
+      <span id="voice-session-title" class="voice-session-title">当前对话</span>
+    </header>
+    <div class="voice-center">
+      <div id="voice-orb" class="voice-orb" data-state="idle" aria-hidden="true"><span class="voice-orb-highlight"></span><span class="voice-wave"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <p id="voice-stage" class="voice-stage" role="status" aria-live="polite">正在开启麦克风…</p>
+      <div class="voice-transcript">
+        <p id="voice-current-user" class="voice-user-line" hidden></p>
+        <p id="voice-current-assistant" class="voice-assistant-line" hidden></p>
+      </div>
+    </div>
+    <div class="voice-dock">
+      <button id="voice-record" type="button" class="voice-record">开始录音</button>
+      <div class="voice-dock-actions">
+        <button id="voice-stop" type="button" class="voice-circle-button voice-stop-button" aria-label="停止回答" title="停止回答" hidden disabled><svg aria-hidden="true"><use href="#i-stop"/></svg></button>
+        <button id="voice-keyboard" type="button" class="voice-circle-button" aria-label="切换到文字输入" title="文字输入"><svg aria-hidden="true"><use href="#i-keyboard"/></svg></button>
+        <button id="voice-exit" type="button" class="voice-circle-button voice-exit-button" aria-label="结束语音模式" title="结束语音模式"><svg aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+    </div>
+  </section>
+  <div id="settings-page" class="settings-page" hidden>
+    <aside class="settings-sidebar" aria-label="设置导航">
+      <div class="settings-sidebar-head"><h2 id="settings-page-title">设置</h2><button id="settings-close" type="button" class="icon-button" aria-label="关闭设置"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <input id="settings-search" type="search" class="settings-search" placeholder="搜索设置" aria-label="搜索设置">
+      <nav id="settings-nav" class="settings-nav" aria-label="设置分类">
+        <p class="settings-group">助手</p>
+        <button type="button" data-view="role">助手配置</button>
+        <button type="button" data-view="connections">API 接入</button>
+        <p class="settings-group">能力</p>
+        <button type="button" data-view="capabilities">能力管理</button>
+        <button type="button" data-action="api-workbench">API 配置工作台</button>
+        <p class="settings-group">设备</p>
+        <button type="button" data-view="devices">设备连接</button>
+        <p class="settings-group">数据</p>
+        <button type="button" data-view="insights">数据洞察</button>
+      </nav>
+    </aside>
+    <div class="settings-main">
+      <div id="settings-notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <div class="settings-dialog-body">
+      <section id="settings-view" class="page-view" aria-label="助手配置" hidden><div class="page-content assistant-content">
+        <form id="assistant-form"><fieldset id="role-fields" disabled>
+          <section id="role-pane" class="assistant-section"><h2><label for="system_prompt">助手提示词</label></h2><textarea id="system_prompt" maxlength="4000" rows="8" required placeholder="写清楚它是谁、什么性格、怎么说话。例如：你是我的个人助理小圆，说话简短亲切，先说结论。"></textarea></section>
+          <section id="assistant-scope-pane" class="assistant-section" aria-label="本助手使用的能力">
+            <h2>本助手使用的能力</h2>
+            <div class="assistant-scope">
+              <div class="scope-block"><h3>API 能力</h3><div id="assistant-tool-select" class="scope-list" aria-live="polite"><p class="small-note">加载中…</p></div></div>
+              <div class="scope-block"><h3>知识库</h3><div id="assistant-kb-select" class="scope-list" aria-live="polite"><p class="small-note">加载中…</p></div></div>
+            </div>
+            <div class="scope-actions"><button id="assistant-selection-save" type="button" class="secondary-button" disabled>保存能力选择</button><span id="assistant-selection-status" class="small-note" role="status"></span></div>
+            <p id="assistant-scope-note" class="small-note">勾选＝加入本助手；一项都不勾＝不启用对应能力（不会默认全选）。某项全局是否可用在「能力管理」里启用/停用。</p>
+          </section>
+          <section id="voice-pane" class="assistant-section" aria-label="声音调节"><h2>声音调节</h2>
+            <div class="settings-row voice-row"><label for="device-volume">设备音量</label><div class="voice-inline tuning"><input id="device-volume" type="range" min="0" max="100" step="1" value="75"><span id="device-volume-value" class="tuning-value">75</span><button id="volume-apply" type="button" class="secondary-button">应用到设备</button><span id="volume-status" class="small-note" role="status"></span></div></div>
+            <div class="settings-row voice-row"><label for="tts_rate">语速</label><div class="voice-inline tuning"><input id="tts_rate" type="range" min="0.5" max="2" step="0.05" value="1"><span id="tts_rate-value" class="tuning-value">1.00x</span></div></div>
+            <div class="settings-row voice-row"><label for="tts_pitch">音调</label><div class="voice-inline tuning"><input id="tts_pitch" type="range" min="-8" max="8" step="1" value="0"><span id="tts_pitch-value" class="tuning-value">0</span><button id="tuning-reset" type="button" class="text-button">恢复默认</button></div></div>
+            <div class="voice-preview"><label class="sr-only" for="tts-text">试听文字</label><input id="tts-text" maxlength="500" value="你好，我是你的个人助理。很高兴认识你。"><button id="tts-preview" type="button" class="secondary-button" disabled>试听</button><button id="tts-cancel" type="button" class="secondary-button" hidden>取消合成</button></div><p id="tts-result" class="small-note" role="status" aria-live="polite"></p><audio id="tts-audio" controls preload="none" hidden aria-label="声音调节试听"></audio><p class="small-note usage-scope-note">用量口径：历史消息脚注只统计对话与语音回合；试听与声音复刻按实际用量结算，具体以供应商账单为准，不并入这里。</p>
+          </section>
+</fieldset><div class="settings-actions assistant-save"><span id="role-dirty-state">设置已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="assistant-reset" type="button" class="secondary-button">取消</button><button id="tts-save" type="submit" class="primary-button" disabled>保存</button></div></div></form>
+      </div></section>
+      <section id="connections-view" class="page-view" aria-label="API接入" hidden><div class="page-content">
+        <form id="config-form"><fieldset id="config-fields" class="compact-api" disabled>
+          <section class="api-panel api-routing">
+<div class="api-segments" role="radiogroup" aria-label="接入模式">
+<label><input type="radio" name="voice-route" value="realtime" checked><span>实时对话</span></label>
+<label><input type="radio" name="voice-route" value="pipeline"><span>分模型</span></label></div>
+<input id="voice_mode" type="hidden" value="realtime"></section>
+<section class="api-panel" id="rt-fields"><h2 class="api-panel-title"><span id="rt-service-name">阿里云百炼</span><small id="rt-region">北京</small></h2>
+<div class="api-group">
+<div class="settings-row"><label for="rt_provider">服务</label><select id="rt_provider"><option value="bailian">百炼 · 北京</option><option value="compatible">自定义实时接口</option></select></div>
+<div class="settings-row" id="rt-custom-row"><label for="rt_endpoint">接口地址</label><input id="rt_endpoint" placeholder="wss://" maxlength="500"></div>
+<div class="settings-row" id="rt-workspace-row"><div><label for="rt_workspace">业务空间 ID</label> <a class="text-button" href="https://help.aliyun.com/zh/model-studio/obtain-the-app-id-and-workspace-id" target="_blank" rel="noopener noreferrer" aria-label="查看业务空间 ID 获取位置">在哪看</a></div><input id="rt_workspace" aria-label="北京业务空间 ID" placeholder="粘贴 Workspace ID" pattern="[a-z0-9][a-z0-9\-]{0,62}" title="请粘贴业务空间 ID，不是空间名称" maxlength="63" autocomplete="off"></div>
+<div class="settings-row"><label for="rt_api_key">API Key</label><div class="api-secret"><input id="rt_api_key" type="password" autocomplete="new-password" spellcheck="false"><small id="rt-key-state" role="status"></small></div></div>
+<div class="settings-row"><label id="rt-voice-label" for="rt-voice-picker">音色</label><div class="voice-inline">
+<select id="rt-voice-picker"><option value="Tina" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/qxmfgt/f6009_%E7%94%9C%E7%94%9C_Tina.wav">甜甜</option>
+<option value="Cindy" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/qjtgkt/f1003_b_%E6%9E%97%E6%AC%A3%E5%AE%9C_Cindy.wav">林欣宜</option>
+<option value="Liora Mira" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/ltpizj/czr-f2810_%E6%B8%85%E6%AC%A2_LioraMira.wav">清欢</option>
+<option value="Raymond" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/jitmby/czr-m2831_%E6%9E%97%E5%B7%9D%E9%87%8E_Raymond.wav">林川野</option>
+<option value="Zane" data-sample="https://g-adoc.alcasset.com/media/maas_docs/sfm-cn/common/audios/6a4b3c2d1e0f9f7d.mp3">泽恩</option>
+<option value="Katerina" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/rvasao/f37_%E5%8D%A1%E6%8D%B7%E7%90%B3%E5%A8%9C_Katerina.wav">卡捷琳娜</option>
+<option value="Ryan" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/wuppzb/m36_%E7%94%9C%E8%8C%B6_Ryan.wav">甜茶</option>
+<option value="Mia" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/kqoghz/br_f094_%E6%B8%A9%E6%9F%94%E7%94%9F%E6%B4%BB%E5%8D%9A%E4%B8%BB%E8%88%92%E7%84%B6_Mia.wav">温柔生活博主-舒然</option>
+<option value="Cici" data-sample="https://g-adoc.alcasset.com/media/maas_docs/sfm-cn/common/audios/6a4b3c2d1e0f9f71.mp3">绵绵</option>
+<option value="Theo Calm" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/gnzkxr/m789_%E4%BA%88%E5%AE%89_TheoCalm.wav">予安</option>
+<option value="Serena" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/xflwmm/f05_%E8%8B%8F%E7%91%B6_Serena.wav">苏瑶</option>
+<option value="Maia" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/slktbw/f20_%E5%9B%9B%E6%9C%88_Maia.wav">四月</option>
+<option value="Evan" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/aolcny/m6005_%E6%B1%9F%E6%99%A8_Evan.wav">江晨</option>
+<option value="Qiao" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/ztylhk/f666_%E5%B0%8F%E4%B9%94%E5%A6%B9_Qiao.wav">小乔妹</option>
+<option value="Momo" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/lptahb/f30_%E8%8C%89%E5%85%94_Momo.wav">茉兔</option>
+<option value="Wil" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/qxvooz/m1012_%E4%BC%9F%E4%BC%A6_Wil.wav">伟伦</option>
+<option value="Angel" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/uzaese/br_f027_%E5%8F%B0%E6%99%AE%E5%AE%89%E7%90%AA_Angel.wav">台普-安琪</option>
+<option value="Li Cassian" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/sysvzh/br_m028_%E4%B8%9C%E5%8E%82%E6%9D%8E%E5%85%AC%E5%85%AC_LiCassian.wav">东厂-李公公</option>
+<option value="Joyner" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/mfvkpp/br_m079_%E5%96%9C%E5%89%A7%E6%8B%85%E5%BD%93%E9%98%BF%E9%80%97_Joyner.wav">喜剧担当-阿逗</option>
+<option value="Gold" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/yapcqz/m1005_%E9%87%91%E7%88%B7_Gold.wav">金爷</option>
+<option value="Jennifer" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/lwwmrc/f04_%E8%A9%B9%E5%A6%AE%E5%BC%97_Jennifer.wav">詹妮弗</option>
+<option value="Aiden" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/aenkkl/m11_%E8%89%BE%E7%99%BB_Aiden.wav">艾登</option>
+<option value="Mione" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/msnpho/f1015_%E6%95%8F%E5%84%BF_Mione.wav">敏儿</option>
+<option value="Sunny" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250910/jtrktt/Sunny.wav">四川-晴儿</option>
+<option value="Dylan" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250910/ultaxm/Dylan.wav">北京-晓东</option>
+<option value="Eric" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250910/qhbznw/Eric.wav">四川-程川</option>
+<option value="Peter" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250910/twvnsp/Peter.wav">天津-李彼得</option>
+<option value="Joseph Chen" data-sample="https://g-adoc.alcasset.com/media/maas_docs/sfm-cn/common/audios/6a4b3c2d1e0f9c86.mp3">阿樸伯</option>
+<option value="Marcus" data-sample="https://g-adoc.alcasset.com/media/maas_docs/sfm-cn/common/audios/6a4b3c2d1e0f9c85.mp3">陕西-秦川</option>
+<option value="Li" data-sample="https://g-adoc.alcasset.com/media/maas_docs/sfm-cn/common/audios/6a4b3c2d1e0f9c84.mp3">南京-老李</option>
+<option value="Rocky" data-sample="https://g-adoc.alcasset.com/media/maas_docs/sfm-cn/common/audios/6a4b3c2d1e0f9c9b.mp3">粤语-阿强</option>
+<option value="Kiki" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20250910/qwinef/KiKi.wav">粤语-阿清</option>
+<option value="Sohee" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/ajhcpe/f02_%E7%B4%A0%E7%86%99_Sohee.wav">素熙</option>
+<option value="Eliška" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/odtwlo/f2001_%E8%89%BE%E8%8E%89%E5%8D%A1_Elika.wav">艾莉卡</option>
+<option value="Alek" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/hwhyng/m03_%E9%98%BF%E5%88%97%E5%85%8B_Alek.wav">阿列克</option>
+<option value="Arda" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/eufhfw/m6010_%E9%98%BF%E5%B0%94%E8%BE%BE_Arda.wav">阿尔达</option>
+<option value="Dolce" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/nxfhdw/m04_%E5%A4%9A%E5%B0%94%E5%88%87_Dolce.wav">多尔切</option>
+<option value="Lenn" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/ibmjbb/m06_%E8%8E%B1%E6%81%A9_Lenn.wav">莱恩</option>
+<option value="Ono Anna" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/kgomea/f3001_%E5%B0%8F%E9%87%8E%E6%9D%8F_OnoAnna.wav">小野杏</option>
+<option value="Sonrisa" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/swdgee/f3002_%E7%B4%A2%E5%B0%BC%E8%8E%8E_Sonrisa.wav">索尼莎</option>
+<option value="Bodega" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/wvknzm/m10_%E5%8D%9A%E5%BE%B7%E5%8A%A0_Bodega.wav">博德加</option>
+<option value="Andre" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/fkuxjd/m40_%E5%AE%89%E5%BE%B7%E9%9B%B7_Andre.wav">安德雷</option>
+<option value="Radio Gol" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/hysmcw/m034_23_%E6%8B%89%E8%BF%AA%E5%A5%A5%E6%88%88%E5%B0%94_RadioGol.wav">拉迪奥·戈尔</option>
+<option value="Rizky" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/lgcvnt/m102_%E9%98%BF%E5%8A%9B_Rizky.wav">阿力</option>
+<option value="Roya" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/tvbxhr/f2008_%E8%90%9D%E9%9B%85_Roya.wav">萝雅</option>
+<option value="Hana" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/mwuxtf/f1001_%E9%98%BF%E5%B9%B8_Hana.wav">阿幸</option>
+<option value="Jakub" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/tsqolb/m109_%E9%9B%85%E5%85%8B_Jakub.wav">雅克</option>
+<option value="Griet" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/apntqc/f36_%E6%B5%B7%E5%A8%9C_Griet.wav">海娜</option>
+<option value="Marina" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/vopxld/f2003_%E7%8E%9B%E4%B8%BD%E5%A8%9C_Marina.wav">玛丽娜</option>
+<option value="Siiri" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/amptis/f6001_%E8%A5%BF%E8%8A%AE_Siiri.wav">西芮</option>
+<option value="Ingrid" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/cxovmu/f1002_%E6%9E%97%E6%81%A9_Ingrid.wav">林恩</option>
+<option value="Sigga" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/vbrpnv/f1006_%E6%B5%B7%E5%A8%9C_Sigga.wav">海娜</option>
+<option value="Bea" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/tynesj/f01_%E9%9B%85%E5%A8%9C_Bea.wav">雅娜</option>
+<option value="Chloe" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260322/ikcrfq/f07_msa_%E6%80%9D%E6%80%A1_Chloe.wav">思怡</option>
+<option value="Emilien" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/hwemvh/m1001_%E5%9F%83%E7%B1%B3%E5%B0%94%E5%AE%89_Emilien.wav">埃米尔安</option></select>
+<input id="rt_voice" maxlength="200" hidden><button type="button" id="rt-sample-button" class="secondary-button">试听</button><button type="button" id="rt-clone-button" class="secondary-button">新建复刻</button><button type="button" id="rt-delete-clone" class="text-button" hidden>删除</button>
+</div></div><p id="rt-sample-error" class="small-note" role="status" hidden></p>
+<audio id="rt-sample" preload="none" hidden></audio></div>
+<details class="api-disclosure"><summary>高级设置</summary><div class="api-group">
+<div class="settings-row"><label for="rt_model">实时模型</label><input id="rt_model" list="rt-models" maxlength="200"><datalist id="rt-models"><option value="qwen3.8-omni-flash-realtime"></datalist></div>
+</div></details></section>
+          <section class="api-text-settings" id="text-services" hidden><h2 id="text-services-title" hidden>分模型</h2><section class="api-panel">
+            <h2 class="api-panel-title">文字服务<span id="connection-summary" class="connection-label"></span></h2>
+            <div class="settings-row"><label for="provider">服务名称</label><input id="provider" maxlength="80" autocomplete="off" required value="tokendance"></div>
+            <div class="settings-row"><label for="base_url">接口地址</label><input id="base_url" type="url" maxlength="500" autocomplete="off" required></div>
+            <div class="settings-row"><label for="api_key">API Key</label><div class="key-input"><input id="api_key" type="password" autocomplete="new-password" spellcheck="false"><button id="show-key" type="button" class="text-button" aria-pressed="false">显示</button></div></div>
+            <div class="settings-row"><label for="models_protocol">获取模型</label><select id="models_protocol"><option value="auto">自动识别</option><option value="openai">OpenAI兼容列表</option><option value="disabled">只手动填写</option></select></div>
+            <div class="api-service-choice"><label class="checkbox-control"><input id="tts-separate-service" type="checkbox"><span>语音使用不同服务</span></label><span id="shared-service-note" class="small-note">文字与语音共用此API</span></div>
+            <section id="tts-separate-fields" hidden><div class="api-section-label">语音服务<span id="speech-api-state" class="connection-label"></span></div><div class="settings-row"><label for="tts_base_url">接口地址</label><input id="tts_base_url" type="url" maxlength="500" autocomplete="off" required></div><div class="settings-row"><label for="tts_api_key">API Key</label><div class="key-input"><input id="tts_api_key" type="password" autocomplete="new-password" spellcheck="false"><button id="tts-show-key" type="button" class="text-button" aria-pressed="false">显示</button></div></div></section>
+          </section>
+          <section class="api-panel api-models">
+            <h2 class="api-panel-title">对话模型</h2>
+            <div class="model-picker"><select id="model-options" aria-label="对话模型"><option value="">先接入API或刷新模型</option><option value="__manual__">手动填写模型 ID…</option></select><button id="fetch-models" type="button" class="secondary-button" disabled>刷新</button><button id="test" type="button" class="secondary-button" disabled>测试</button></div>
+            <input id="model" maxlength="200" autocomplete="off" placeholder="供应商提供的准确模型ID" hidden>
+            <p id="models-status" class="small-note" role="status" aria-live="polite"></p>
+            <div id="test-panel" class="test-panel" hidden><h2>模型测试</h2><p id="test-result"></p><div id="test-usage" class="metadata"></div></div>
+          </section>
+          <section class="api-panel"><h2 class="api-panel-title">语音识别</h2><div class="api-group"><div class="settings-row"><label>识别模型</label><span>SenseVoice · 本地</span></div></div></section>
+          <section class="api-panel"><h2 class="api-panel-title">语音合成</h2>
+            <div class="settings-row voice-row"><label for="tts_model">模型</label><div class="voice-inline"><select id="tts_model" aria-label="声音模型"><option value="mimo-v2.5-tts">mimo-v2.5-tts</option><option value="mimo-v2.5-tts-voicedesign">mimo-v2.5-tts-voicedesign</option><option value="mimo-v2.5-tts-voiceclone">mimo-v2.5-tts-voiceclone</option></select><button id="fetch-speech-models" type="button" class="secondary-button" disabled>刷新</button></div></div>
+            <div class="settings-row voice-row" id="voice-pick-row"><label for="tts_voice">音色</label><div class="voice-inline"><select id="tts_voice" aria-label="音色"><option value="mimo_default">默认</option><option>冰糖</option><option>茉莉</option><option>苏打</option><option>白桦</option><option>Mia</option><option>Chloe</option><option>Milo</option><option>Dean</option></select><button id="clone-new" type="button" class="secondary-button">新建复刻</button><button id="delete-clone" type="button" class="secondary-button" hidden>删除</button></div></div>
+          </section></section>
+          <section class="api-panel api-common"><button type="button" class="text-button" data-view="capabilities">管理工具与个人知识库 →</button><input id="m5stack_enabled" type="checkbox" checked hidden></section>
+        </fieldset><div class="settings-actions"><span id="dirty-state">接入已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="settings-api-cancel" type="button" class="secondary-button">取消</button><button id="save" type="submit" class="primary-button" disabled>保存并关闭</button></div></div></form>
+      </div></section>
+      <section id="devices-view" class="page-view" aria-label="设备" hidden><div class="page-content">
+        <div class="device-connection section-toolbar"><div><strong id="device-state">正在检查连接…</strong><p id="device-state-detail" class="small-note" hidden></p></div><button id="device-refresh" type="button" class="text-button"><svg aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button></div>
+        <details class="settings-advanced"><summary>接入与恢复<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary><form id="device-setup-form"><fieldset id="device-setup-fields"><section class="settings-section"><p class="section-description">先保存设备原服务器地址，再修改设备配网页中的地址。</p>
+          <div class="settings-row" id="device-host-row"><div><label for="device-host">电脑局域网 IP</label><p>设备与电脑必须能在局域网互相访问</p></div><input id="device-host" autocomplete="off" required placeholder="例如：192.168.1.20"></div>
+          <div class="settings-row"><div><label for="device-mac">设备 MAC 地址</label><p>可留空；设备首次使用接入地址连接后自动配对</p></div><input id="device-mac" autocomplete="off" placeholder="留空自动记录，或填写已知 MAC"></div>
+          <div class="settings-row"><div><label for="device-original">原服务器 OTA 地址</label><p>按设备配网页原样记录；若原值为空，切回时清空此字段</p></div><input id="device-original" type="url" autocomplete="off" spellcheck="false" placeholder="原值可能为空，表示使用固件默认服务器"></div>
+          <label class="checkbox-control"><input id="device-original-recorded" type="checkbox" required><span>我已核对设备的原 OTA 设置，包括原值为空的情况。</span></label>
+        </section></fieldset><div class="settings-actions"><span class="small-note">保存不会修改设备连接。</span><button type="submit" class="primary-button">保存接入信息</button></div></form>
+        <section class="settings-section device-address-section"><h2 id="device-address-title">设备接入地址</h2><p id="device-launch-note" class="small-note"></p><label class="sr-only" for="device-local-url">设备 OTA 接入地址</label><div class="device-url-row"><input id="device-local-url" readonly placeholder="保存接入信息后生成"><button id="device-copy-local" type="button" class="secondary-button" disabled>复制地址</button></div><p class="small-note">在设备配网页的高级选项中填写此地址，保存并按页面提示重新联网。按一下设备按钮建立控制连接。地址包含设备接入凭据，请仅用于自己的设备。</p></section>
+        </details><form id="device-preferences-form"><fieldset id="device-preferences-fields"><section class="settings-section">
+          <div class="settings-row"><div><label for="device-text">屏幕文字</label><p>收到指令后显示，实际效果请查看屏幕</p></div><input id="device-text" maxlength="120" required value="已连接电脑服务"></div>
+          <div class="settings-row"><div><label for="device-brightness">屏幕亮度</label><p>10–100，保留可见亮度便于恢复</p></div><input id="device-brightness" type="number" min="10" max="100" required value="60"></div>
+          <div class="settings-row"><div><label for="device-theme">屏幕主题</label><p>由设备固件支持情况决定</p></div><select id="device-theme"><option value="dark">深色</option><option value="light">浅色</option></select></div>
+        </section></fieldset><div class="settings-actions"><span id="device-preferences-note" class="small-note">保存与应用是两个独立操作。</span><button type="submit" class="secondary-button">保存设置</button><button id="device-apply" type="button" class="primary-button" disabled>应用已保存设置</button></div></form>
+        <div id="device-application" class="device-application" aria-live="polite"><p class="small-note">设备尚未连接，尚无实机验证结果。</p></div>
+        <details class="settings-advanced device-recovery"><summary>切回原服务<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary><ol><li>让设备重新进入配网设置，打开高级选项。</li><li>将保存的原 OTA 地址填回设备；若原值为空，清空设备中的 OTA 字段。保存并重新联网。</li><li>确认小智平台恢复在线，并用设备实际对话验证。</li></ol><p id="device-recovery-value" class="small-note">尚未保存原设备设置。</p><button id="device-copy-original" type="button" class="secondary-button" disabled>复制已保存的原地址</button><p class="small-note">现有固件需要在设备配网页切换；这里不会声称已经远程切回。无需解除原平台绑定。</p></details>
+      </div></section>
+      <section id="capabilities-view" class="page-view" aria-label="能力管理" hidden><div class="page-content capability-content">
+        <div class="section-toolbar"><span id="capability-integration">正在加载能力…</span><button id="capability-refresh" type="button" class="text-button">刷新</button></div>
+        <p id="capability-notice" class="small-note" role="status" aria-live="polite"></p>
+        <div class="insight-tabbar" role="tablist" aria-label="能力管理分类">
+          <button id="capabilities-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="capabilities-panel-tools" data-capability-tab="tools"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-wrench"/></svg><span>工具</span></button>
+          <button id="capabilities-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="capabilities-panel-kb" data-capability-tab="kb" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>知识库</span></button>
+        </div>
+        <section id="capabilities-panel-tools" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-tools">
+          <section class="capability-section" aria-labelledby="capability-tools-title">
+            <div class="capability-heading"><h2 id="capability-tools-title">API 能力</h2><button id="tool-new" type="button" class="secondary-button">API 配置工作台</button></div>
+            <p class="small-note">天气、M5 官方资料、自定义 API 统一在这里管理；「启用」后可在助手配置中选用（启用不等于选入）。</p>
+            <div class="cap-panes">
+              <div class="cap-list" id="capability-tools" role="list" aria-live="polite"></div>
+              <div class="cap-detail" id="capability-detail" aria-live="polite"></div>
+            </div>
+          </section>
+          <section class="capability-section" aria-labelledby="device-control-title">
+            <div class="capability-heading"><h2 id="device-control-title">设备控制</h2><button type="button" class="text-button" data-view="devices">管理设备连接 →</button></div>
+          </section>
+        </section>
+        <section id="capabilities-panel-kb" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-kb" hidden>
+          <div class="kb-layout">
+            <aside class="kb-libs" aria-label="知识库列表">
+              <div class="kb-libs-head"><strong>知识库</strong><button id="kb-new-library" type="button" class="text-button" disabled title="新建知识库">新建库</button></div>
+              <div id="kb-library-list" class="kb-library-list" aria-live="polite"><p class="small-note">默认库</p></div>
+              <p class="small-note">在这里新建、改名、删除知识库。</p>
+            </aside>
+            <div class="kb-main">
+          <section class="capability-section" aria-labelledby="kb-upload-title">
+            <div class="capability-heading"><h2 id="kb-upload-title">上传资料</h2><span id="kb-total" class="small-note"></span></div>
+            <p id="kb-file-types" class="small-note">支持 TXT、Markdown、DOCX，单份不超过 10MB。上传后自动解析并建立索引。</p>
+            <form id="kb-upload-form" class="capability-editor"><fieldset id="kb-upload-fields">
+              <div class="kb-upload-row"><label class="kb-upload-file">选择资料<input id="kb-file" type="file" accept=".txt,.md,.markdown,.docx" required></label>
+              <label>名称<input id="kb-title" maxlength="200" placeholder="留空使用文件名"></label>
+              <label>分组<input id="kb-group" maxlength="80" placeholder="可选"></label>
+              <div class="kb-upload-action"><button type="submit" class="secondary-button">上传并建立索引</button></div></div></fieldset></form>
+          </section>
+          <section class="capability-section" aria-labelledby="kb-docs-title">
+            <div class="capability-heading"><h2 id="kb-docs-title">资料列表</h2><span class="small-note">点「查看内容」看正文；资料状态、片段数、更新时间都在这。</span></div>
+            <div id="kb-documents" class="kb-doc-list" aria-live="polite"><p class="small-note">正在加载资料…</p></div>
+            <button id="kb-more" class="text-button" type="button" hidden>加载更多资料</button>
+            <input id="kb-replacement" type="file" accept=".txt,.md,.markdown,.docx" hidden aria-label="选择替换资料">
+          </section>
+          <section class="capability-section" aria-labelledby="kb-search-title">
+            <div class="capability-heading"><h2 id="kb-search-title">试查</h2><span class="small-note">试查＝当前查看的知识库（可含未选入助手的库）；正式对话仍只检索助手所选库。</span></div>
+            <form id="kb-search-form" class="capability-editor"><fieldset id="kb-search-fields">
+              <div class="kb-upload-row"><label class="kb-upload-file">输入问题<input id="kb-query" required maxlength="1000" placeholder="比如：下一步做什么"></label>
+              <label>限定分组<input id="kb-search-group" maxlength="80" placeholder="留空查全部分组"></label>
+              <div class="kb-upload-action"><button type="submit" class="secondary-button">查询</button></div></div></fieldset></form>
+            <div id="kb-results" class="kb-results" aria-live="polite"></div>
+          </section>
+            </div>
+          </div>
+        </section>
+      </div></section>
+      <section id="insights-view" class="page-view" aria-label="数据洞察" hidden><div class="page-content capability-content">
+        <div id="insights-list-view">
+        <div class="section-toolbar insight-toolbar"><span id="insights-intro" class="sr-only">数据洞察</span><button id="insights-refresh" type="button" class="text-button">刷新</button></div>
+        <p id="insights-notice" class="small-note" role="status" aria-live="polite"></p>
+        <div class="insight-tabbar" role="tablist" aria-label="数据洞察分类">
+          <button id="insights-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="insights-panel-kb" data-insight-tab="kb"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>知识库记录</span><span class="insight-hint" data-tip="问题、回答类型、答案与时间；点「详情」看引用片段与调用记录。没有真实生成时显示“暂无生成回答”；检索分数不代表答案准确率。">ⓘ</span></button>
+          <button id="insights-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-tools" data-insight-tab="tools" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-plug"/></svg><span>API记录</span><span class="insight-hint" data-tip="工具名称、请求摘要、状态与耗时；缺失字段显示「未提供」，此处不计算费用。点「详情」查看请求与响应。">ⓘ</span></button>
+        </div>
+        <section id="insights-panel-kb" class="capability-section insight-panel" role="tabpanel" aria-labelledby="insights-tab-kb">
+          <div class="insight-filters">
+            <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-kb-q" type="search" maxlength="200" placeholder="搜索问题或答案" aria-label="搜索知识库记录"></label>
+            <select id="insights-kb-type" aria-label="按回答类型筛选"><option value="">全部类型</option><option value="rag">资料辅助回答</option><option value="tool_answer">工具续答</option><option value="model_answer">模型回答</option><option value="retrieval_only">仅检索</option><option value="tool_only">仅工具调用</option></select>
+            <div class="insight-daterange"><input id="insights-kb-since" type="date" aria-label="起始日期"><span>至</span><input id="insights-kb-until" type="date" aria-label="结束日期"></div>
+            <button id="insights-kb-reset" type="button" class="text-button insight-reset">重置</button>
+            <button id="insights-kb-clear" type="button" class="text-button insight-clear" disabled>清空筛选结果</button>
+            <span id="insights-kb-meta" class="insight-count"></span>
+          </div>
+          <div id="insights-kb" class="insight-list" aria-live="polite"><p class="small-note">尚未加载记录。</p></div>
+          <div class="insight-pagination"><button id="insights-kb-prev" type="button" class="text-button" disabled>上一页</button><span id="insights-kb-page" class="small-note"></span><button id="insights-kb-next" type="button" class="text-button" disabled>下一页</button></div>
+        </section>
+        <section id="insights-panel-tools" class="capability-section insight-panel" role="tabpanel" aria-labelledby="insights-tab-tools" hidden>
+          <div class="insight-filters">
+            <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-tools-q" type="search" maxlength="200" placeholder="搜索工具或请求摘要" aria-label="搜索 API 记录"></label>
+            <select id="insights-tools-status" aria-label="按状态筛选"><option value="">全部状态</option><option value="ok">成功</option><option value="empty">未命中</option><option value="error">失败</option><option value="unavailable">不可用</option><option value="not_requested">未调用</option><option value="cancelled">已取消</option><option value="failed">执行失败</option><option value="interrupted">已打断</option></select>
+            <input id="insights-tools-name" class="insight-tool-filter" maxlength="80" placeholder="工具名称（精确）" aria-label="按工具名称精确筛选">
+            <div class="insight-daterange"><input id="insights-tools-since" type="date" aria-label="起始日期"><span>至</span><input id="insights-tools-until" type="date" aria-label="结束日期"></div>
+            <button id="insights-tools-reset" type="button" class="text-button insight-reset">重置</button>
+            <button id="insights-tools-clear" type="button" class="text-button insight-clear" disabled>清空筛选结果</button>
+            <span id="insights-tools-meta" class="insight-count"></span>
+          </div>
+          <div id="insights-tools" class="insight-list" aria-live="polite"><p class="small-note">尚未加载记录。</p></div>
+          <div class="insight-pagination"><button id="insights-tools-prev" type="button" class="text-button" disabled>上一页</button><span id="insights-tools-page" class="small-note"></span><button id="insights-tools-next" type="button" class="text-button" disabled>下一页</button></div>
+        </section>
+        </div>
+        <div id="insights-detail-view" hidden>
+          <div class="insight-detail-bar"><button id="insights-detail-back" type="button" class="text-button">← 返回列表</button><span id="insights-detail-meta" class="small-note"></span></div>
+          <div id="insights-detail" aria-live="polite"></div>
+        </div>
+      </div></section>
+    </div>
+    </div>
+  </div>
+  <dialog id="insight-delete-dialog" aria-labelledby="insight-delete-title" aria-describedby="insight-delete-note">
+    <form id="insight-delete-form">
+      <h2 id="insight-delete-title">删除记录</h2>
+      <p id="insight-delete-count"></p>
+      <div id="insight-delete-scope" class="insight-delete-scope"></div>
+      <p id="insight-delete-note">删除后无法恢复。只删除审计记录与详情，知识库原文、工具配置和聊天历史不受影响。</p>
+      <p id="insight-delete-status" role="status" aria-live="polite"></p>
+      <div class="dialog-actions"><button id="insight-delete-cancel" type="button" class="secondary-button">取消</button><button id="insight-delete-confirm" type="submit" class="primary-button" disabled>确认删除</button></div>
+    </form>
+  </dialog>
+  <div id="api-workbench" class="api-workbench-page" hidden aria-label="API 配置工作台">
+    <header class="api-workbench-header"><div><h2 id="api-workbench-title">API 配置工作台</h2><p class="small-note">调试业务接口，再保存为助手工具。模型连接仍在「API接入」管理。</p></div><button id="api-workbench-close" type="button" class="icon-button" aria-label="关闭 API 工作台"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <div class="api-workbench-layout">
+      <aside class="api-request-sidebar" aria-label="保存的接口"><div class="api-sidebar-heading"><strong>接口列表</strong><button id="api-new-request" type="button" class="text-button">新建</button></div><input id="api-request-search" type="search" placeholder="搜索接口" aria-label="搜索保存的接口"><div id="api-request-list"></div></aside>
+      <div class="api-request-main">
+        <div class="api-request-title"><strong id="api-current-name">未保存的请求</strong><span id="api-draft-state" class="small-note"></span><button id="api-json-test" type="button" class="secondary-button" hidden>测试草稿</button></div>
+        <nav class="api-workbench-tabs" aria-label="配置方式"><button id="api-mode-visual" type="button" aria-pressed="true">可视化配置</button><button id="api-mode-json" type="button" aria-pressed="false">JSON 定义</button></nav>
+        <section id="api-json-panel" hidden><label for="api-definition">接口完整定义</label><p class="small-note">与可视化配置同步。已保存敏感值以 null 保留，空字符串清除；更换地址须重新填写凭据。复杂对象、数组与嵌套规则可在此编辑。</p><textarea id="api-definition" rows="18" spellcheck="false" aria-label="接口 JSON 定义"></textarea><p id="api-definition-status" class="small-note" role="status"></p></section>
+        <div id="api-workbench-notice" class="small-note" role="status" aria-live="polite"></div>
+        <form id="tool-editor" class="api-visual-form">
+          <fieldset id="api-request-fields">
+            <div class="api-topbar">
+              <label class="sr-only" for="tool-method">请求方式</label><select id="tool-method"><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option></select>
+              <div class="api-url-wrap"><label class="sr-only" for="tool-url">请求地址</label><input id="tool-url" type="url" required maxlength="1000" placeholder="https://…"><button id="api-url-clear" type="button" class="api-url-clear" aria-label="清空地址" title="清空地址">×</button></div>
+              <button id="api-send" type="button" class="secondary-button">测试</button>
+              <button id="api-show-save" type="button" class="primary-button">保存</button>
+            </div>
+            <div class="api-desc-row"><label for="tool-description">接口描述：<span class="api-req">*</span></label><input id="tool-description" maxlength="1000" required placeholder="何时调用、用途与返回内容"></div>
+            <nav id="api-request-tabs" class="api-workbench-tabs" role="tablist" aria-label="请求内容"><button type="button" role="tab" id="api-tab-params" aria-controls="api-pane-params" aria-selected="true" data-api-tab="params">参数</button><button type="button" role="tab" id="api-tab-headers" aria-controls="api-pane-headers" aria-selected="false" data-api-tab="headers">请求头</button><button type="button" role="tab" id="api-tab-auth" aria-controls="api-pane-auth" aria-selected="false" data-api-tab="auth">身份验证</button><button type="button" role="tab" id="api-tab-body" aria-controls="api-pane-body" aria-selected="false" data-api-tab="body">请求体</button></nav>
+            <section id="api-pane-params" role="tabpanel" aria-labelledby="api-tab-params" class="api-request-pane"><div class="api-pane-title">查询参数</div><div id="api-params" class="api-keyvalue-table"></div><button id="api-add-param" type="button" class="text-button">＋ 添加</button></section>
+            <section id="api-pane-headers" role="tabpanel" aria-labelledby="api-tab-headers" class="api-request-pane" hidden><div class="api-pane-title">请求头</div><div id="api-headers" class="api-keyvalue-table"></div><button id="api-add-header" type="button" class="text-button">＋ 添加</button></section>
+            <section id="api-pane-auth" role="tabpanel" aria-labelledby="api-tab-auth" class="api-request-pane" hidden><div class="api-auth-grid"><label>鉴权类型<select id="api-auth-type"><option value="none">无鉴权</option><option value="bearer">Bearer Token</option><option value="header">自定义请求头</option><option value="basic">Basic Auth</option></select></label><label id="api-secret-action-row">已存凭据<select id="api-secret-action"><option value="keep">保留</option><option value="replace">替换</option><option value="clear">清除</option></select></label><label id="api-auth-header-row">鉴权请求头<input id="tool-auth-header" value="Authorization" maxlength="64"></label><label id="api-auth-scheme-row">前缀<select id="tool-auth-scheme"><option value="Bearer">Bearer</option><option value="raw">原值</option></select></label><label id="api-auth-username-row">用户名<input id="api-auth-username" autocomplete="off"></label><label id="api-auth-token-row">Token<input id="tool-key" type="password" autocomplete="new-password" spellcheck="false"></label><label id="api-auth-password-row">密码<input id="api-auth-password" type="password" autocomplete="new-password"></label></div><p id="tool-key-state" class="small-note">密钥仅保存于服务端，不写入浏览器存储。</p></section>
+            <section id="api-pane-body" role="tabpanel" aria-labelledby="api-tab-body" class="api-request-pane" hidden><div class="api-pane-title">请求体（模型参数）</div><div class="api-schema-section"><div class="capability-heading"><h3 id="api-input-title">参数</h3><button id="api-input-add" type="button" class="text-button">＋ 添加参数</button></div><div id="api-input-table" class="api-schema-table"></div></div></section>
+            <section class="api-output-block" aria-labelledby="api-output-title"><div class="capability-heading"><h3 id="api-output-title">输出</h3><button id="api-output-add" type="button" class="text-button">＋ 添加</button></div><div id="api-output-table" class="api-schema-table"></div></section>
+          </fieldset>
+          <fieldset id="tool-editor-fields">
+            <details class="api-advanced"><summary>高级设置</summary>
+              <h3 id="tool-editor-title" hidden>接口定义</h3>
+              <div class="capability-grid"><label>接口名称<input id="tool-name" required pattern="[a-z][a-z0-9_]{0,47}" maxlength="48" placeholder="英文字母与下划线"></label><label>接口分组<input id="tool-group" maxlength="80" placeholder="可选"></label></div>
+              <div class="api-request-options"><label>操作权限 <select id="tool-permission"><option value="read">查询</option><option value="write">修改 / 删除</option><option value="paid">付费</option></select></label><label>超时 <input id="api-timeout" type="number" min="1" max="60" value="20"> 秒</label><label>模型参数注入位置 <select id="api-argument-target"><option value="auto">自动</option><option value="query">Query 参数</option><option value="body">JSON Body</option></select></label></div>
+              <label class="checkbox-control"><input id="tool-enabled" type="checkbox">保存后启用</label>
+              <label class="api-body-mode">正文类型<select id="api-body-mode"><option value="none">无正文</option><option value="json">JSON</option><option value="text">Text</option><option value="form">Form（urlencoded）</option></select></label>
+              <div id="api-body-secret-controls"><label class="checkbox-control"><input id="api-body-secret" type="checkbox">正文包含敏感信息（保存后隐藏）</label><label id="api-body-secret-action-row" class="api-body-mode" hidden>已存正文<select id="api-body-secret-action"><option value="keep">保留</option><option value="replace">替换</option><option value="clear">清除</option></select></label></div>
+              <label id="api-body-text-row" hidden><span class="sr-only">请求正文</span><textarea id="api-body-text" rows="5" spellcheck="false" placeholder="请求正文"></textarea></label>
+              <div id="api-body-form-row" hidden><div id="api-form-fields" class="api-keyvalue-table"></div><button id="api-add-form" type="button" class="text-button">＋ 添加字段</button></div>
+              <textarea id="tool-schema" hidden aria-label="参数 JSON Schema"></textarea><textarea id="tool-output-schema" hidden aria-label="输出 JSON Schema"></textarea>
+              <p id="tool-editor-status" class="small-note" role="status"></p>
+              <button id="api-save-tool" type="submit" hidden>保存</button>
+            </details>
+          </fieldset>
+        </form>
+        <div id="api-inflight" class="api-inflight" hidden><span>请求发送中…</span><button id="api-cancel-request" type="button" class="secondary-button">取消请求</button></div>
+        <section id="api-response" class="api-response" aria-labelledby="api-response-title" hidden><div class="api-response-heading"><h3 id="api-response-title">响应</h3><span id="api-response-meta" class="small-note">尚未发送</span></div><nav class="api-workbench-tabs" aria-label="响应内容"><button id="api-response-body-tab" type="button" aria-pressed="true">Body</button><button id="api-response-headers-tab" type="button" aria-pressed="false">Headers</button><button id="api-pretty-response" type="button" class="text-button" hidden>格式化 JSON</button></nav><pre id="api-response-body" tabindex="0">发送后在这里显示实际响应。</pre><div id="api-response-headers" hidden></div></section>
+      </div>
+    </div>
+  </div>
+  <dialog id="api-send-dialog" aria-labelledby="api-send-title"><form id="api-send-form"><h2 id="api-send-title">核对本次请求</h2><p class="small-note">发送的是当前草稿；不会自动保存为工具，敏感值在下方隐藏。</p><pre id="api-send-preview"></pre><label id="api-send-confirm-row" class="checkbox-control" hidden><input id="api-send-confirm" type="checkbox">确认本次修改或付费请求；取消请求不保证外部操作撤销。</label><div class="dialog-actions"><button id="api-send-back" type="button" class="secondary-button">返回修改</button><button type="submit" class="primary-button">发送本次请求</button></div></form></dialog>
+  <dialog id="tool-call-dialog" aria-labelledby="tool-call-title"><form id="tool-call-form"><h2 id="tool-call-title">手动调用工具</h2><p id="tool-call-description"></p><label for="tool-call-arguments">本次参数（JSON）</label><textarea id="tool-call-arguments" rows="6" spellcheck="false" required></textarea><p id="tool-call-warning" class="small-note"></p><label id="tool-call-confirm-row" class="checkbox-control" hidden><input id="tool-call-confirm" type="checkbox">我已核对以上工具和参数，确认本次修改或付费操作</label><p id="tool-call-status" class="small-note" role="status"></p><pre id="tool-call-result" hidden></pre><div class="dialog-actions"><button id="tool-call-close" type="button" class="secondary-button">关闭</button><button id="tool-call-submit" class="primary-button" type="submit">执行一次</button></div></form></dialog>
+  <dialog id="kb-rename-dialog" aria-labelledby="kb-rename-heading"><form id="kb-rename-form"><h2 id="kb-rename-heading">编辑资料信息</h2><label>名称<input id="kb-rename-title" maxlength="200" required></label><label>分组<input id="kb-rename-group" maxlength="80"></label><p id="kb-rename-status" class="small-note" role="status"></p><div class="dialog-actions"><button id="kb-rename-cancel" type="button" class="secondary-button">取消</button><button id="kb-rename-submit" type="submit" class="primary-button">保存</button></div></form></dialog>
+  <dialog id="kb-library-dialog" aria-labelledby="kb-library-dialog-title"><form id="kb-library-form"><h2 id="kb-library-dialog-title">新建知识库</h2><label>知识库名称<input id="kb-library-name" maxlength="80" required placeholder="例如：产品手册"></label><p id="kb-library-status" class="small-note" role="status"></p><div class="dialog-actions"><button id="kb-library-cancel" type="button" class="secondary-button">取消</button><button id="kb-library-submit" type="submit" class="primary-button">保存</button></div></form></dialog>
+  <dialog id="kb-content-dialog" aria-labelledby="kb-content-title">
+    <div class="kb-content-head"><h2 id="kb-content-title">资料内容</h2><button id="kb-content-close" type="button" class="icon-button" aria-label="关闭资料内容"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <div id="kb-content-meta" class="kb-content-meta"></div>
+    <div class="kb-content-tabs" role="tablist" aria-label="内容查看"><button id="kb-content-tab-text" type="button" role="tab" aria-selected="true" data-kb-content-tab="text">正文</button><button id="kb-content-tab-chunks" type="button" role="tab" aria-selected="false" data-kb-content-tab="chunks">分段片段</button></div>
+    <div id="kb-content-text" class="kb-content-pane" aria-live="polite"></div>
+    <div id="kb-content-chunks" class="kb-content-pane" aria-live="polite" hidden></div>
+    <div class="dialog-actions"><a id="kb-content-download" class="secondary-button" href="#" download>下载原文</a><button id="kb-content-cancel" type="button" class="secondary-button">关闭</button></div>
+  </dialog>
+  <dialog id="delete-dialog"><form method="dialog"><h2>删除这段对话？</h2><p>对话和本机历史记录将被删除，无法恢复。</p><div class="dialog-actions"><button class="secondary-button" value="cancel">取消</button><button class="danger-button" value="delete">删除对话</button></div></form></dialog>
+  <dialog id="clone-dialog" aria-label="克隆新声音"><form id="clone-form">
+    <h2>克隆新声音</h2>
+    <p class="small-note">上传一段清晰的人声（wav 或 mp3，10MB 以内，建议 6–15 秒、没有背景音乐）。系统会自动去掉首尾静音并压缩，处理后的样本越小，合成越快。</p>
+    <div class="settings-row"><label for="clone-name">声音名字</label><input id="clone-name" maxlength="24" required placeholder="例如：塔菲"></div>
+    <div class="settings-row"><label for="clone-file">参考音频</label><input id="clone-file" type="file" accept=".wav,.mp3,audio/wav,audio/mpeg" required></div>
+    <p id="clone-status" class="small-note" role="status" aria-live="polite"></p>
+    <div class="dialog-actions"><button id="clone-cancel" type="button" class="secondary-button">取消</button><button id="clone-submit" type="submit" class="primary-button">开始克隆</button></div>
+  </form></dialog>
+  <dialog id="qwen-clone-dialog" aria-label="复刻实时音色"><form id="qwen-clone-form">
+    <h2>复刻实时音色</h2>
+    <p class="small-note">上传 10–20 秒单人清录音，支持 WAV、MP3 或 M4A，最长 60 秒。创建约 ¥0.01；录音仅上传百炼用于生成本次音色，本机完成后不保留。</p>
+    <div class="settings-row"><label for="qwen-clone-name">音色名字</label><input id="qwen-clone-name" maxlength="24" required placeholder="例如：我的声音"></div>
+    <div class="settings-row"><label for="qwen-clone-file">参考录音</label><input id="qwen-clone-file" type="file" accept=".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4" required></div>
+    <p id="qwen-clone-status" class="small-note" role="status" aria-live="polite"></p>
+    <div class="dialog-actions"><button id="qwen-clone-cancel" type="button" class="secondary-button">取消</button><button id="qwen-clone-submit" type="submit" class="primary-button">开始复刻</button></div>
+  </form></dialog>
+</body>
+</html>

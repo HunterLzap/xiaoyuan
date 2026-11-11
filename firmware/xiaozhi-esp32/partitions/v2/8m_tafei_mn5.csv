@@ -1,0 +1,11 @@
+# ESP-IDF Partition Table — 塔菲 mn5q8 试验专用（8MB，双 OTA，压缩 assets）
+# 目的：在 8MB 单板内保留双 OTA 升级，同时给 assets 留出 0x280000(2,621,440B)。
+# 与官方 partitions/v2/8m.csv 的差异：app 槽 0x2f0000→0x2b0000，assets 从 0x600000/2M → 0x580000/0x280000。
+# 注意：这是试验分区，不替换官方 8m.csv；仅在 build-tafei-mn5 / sdkconfig.tafei-mn5 下使用。
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x4000,
+otadata,  data, ota,     0xd000,   0x2000,
+phy_init, data, phy,     0xf000,   0x1000,
+ota_0,    app,  ota_0,   0x20000,  0x2b0000,
+ota_1,    app,  ota_1,   ,         0x2b0000,
+assets,   data, spiffs,  0x580000, 0x280000,
