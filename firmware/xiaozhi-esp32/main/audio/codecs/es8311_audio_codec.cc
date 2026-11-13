@@ -111,7 +111,8 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
     if (codec_if_ == nullptr) {
         ESP_LOGE(TAG, "Failed to create Es8311AudioCodec");
     } else {
-        ESP_LOGI(TAG, "Es8311AudioCodec initialized");
+        ESP_LOGI(TAG, "Es8311AudioCodec initialized, clock_source=%s input_reference=%d",
+                 use_mclk ? "MCLK" : "BCLK", static_cast<int>(input_reference_));
     }
 }
 

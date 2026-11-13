@@ -443,8 +443,8 @@ class DeviceConnection:
         try:
             await self.initialize()
             # Keep the firmware's control channel active using a read-only status query.
-            # WebSocket transport pings alone don't update its application-level timeout,
-            # and EspTcp's receive loop can fail at ~20s when no server packet arrives.
+            # WebSocket transport pings alone don't update its application-level timeout.
+            # 15s is a proactive keepalive interval, not a confirmed EspTcp receive timeout.
             while True:
                 await asyncio.sleep(15)
                 async with self.hub.lock:

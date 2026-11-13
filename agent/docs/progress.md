@@ -1,5 +1,12 @@
 # 当前进度与证据
 
+## 设备全双工与原始收音定位（2026-11-13）
+
+- `d8cad77` 增加设备 AEC 能力声明、软件参考环形缓冲及打断清队列；`4d789cb` 增加分段音频 RMS 日志、15 秒控制查询保活和连接关闭异常捕获。Windows Agent 报告两版均编译/仅刷应用成功，设备相关测试各为 7 passed；不代表全双工可用。
+- `4d789cb` 真机反馈：待机及按键进入 listening 后，`mic_raw ret=0` 但 RMS/peak 全零，重采样、AFE、Opus 和后端解码也全零；接收 534 帧、无丢帧、无转写/回答。问题已缩到原始麦克风/codec/I2S 采集，不能归因于 AEC 后级消音。
+- 源码核对发现板级没有 MCLK 输出（GPIO_NUM_NC），却省略构造参数并沿用 `use_mclk=true`。M5Stack [官方 M5Unified](https://github.com/m5stack/M5Unified/blob/master/src/M5Unified.inl) 的 `_microphone_enabled_cb_atomic_echo` 明确将 ES8311 时钟配置为 MCLK=BCLK；Espressif [ES8311 驱动](https://github.com/espressif/esp-adf/blob/master/components/esp_codec_dev/device/es8311/es8311.c) 在 `use_mclk=false` 时选择 BCLK 并设置内部时钟倍频。此次仅为 AtomS3R Echo Base 显式传入 `false`，新增启动日志 `clock_source=BCLK`；AEC、采样率和音色保留。此修正尚待 Windows 编译及真机非零收音验证，不能写成根因已修复。
+- 撤回此前“固定 20 秒 EspTcp 接收超时”的判断：Windows 核对实际依赖 `78__esp-ml307/src/esp/esp_tcp.cc` 未设置 SO_RCVTIMEO，PING 有独立 PONG 处理；本轮约 32 秒断开。15 秒查询保留为主动保活，不当作断线已修复。TCP 断线原因仍未确定，需实际 errno/关闭码证据。
+
 ## 最新进展（2026-11-10～11-11：设备屏幕与像素动画）
 
 - 设备屏幕根因与修复：确认新批次 AtomS3R 使用 ST7735 面板（非旧 GC9107），改用 st7789 驱动 + 面板 gap(2,1) + invert(true)、offset 归零后，方向/花屏/颜色恢复正常；此前 offset 写成 32 导致画面顶出可视区。经串口日志确认帧资源加载成功，问题在绘制层而非数据。

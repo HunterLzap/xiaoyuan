@@ -476,7 +476,8 @@ public:
             AUDIO_I2S_GPIO_DIN,
             AUDIO_CODEC_GPIO_PA,
             AUDIO_CODEC_ES8311_ADDR,
-            AUDIO_INPUT_REFERENCE);  // 从 config.h 读取（已定义为 true）
+            AUDIO_INPUT_REFERENCE,
+            false);  // Echo Base 无独立 MCLK，ES8311 从 BCLK 派生内部时钟（与 M5Unified 一致）
         return &audio_codec;
     }
 
