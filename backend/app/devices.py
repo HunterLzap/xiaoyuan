@@ -18,6 +18,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from websockets.exceptions import ConnectionClosed
 
 from .config import ROOT
 from .llm import ProviderError
@@ -442,9 +443,10 @@ class DeviceConnection:
         try:
             await self.initialize()
             # Keep the firmware's control channel active using a read-only status query.
-            # WebSocket transport pings alone don't update its application-level timeout.
+            # WebSocket transport pings alone don't update its application-level timeout,
+            # and EspTcp's receive loop can fail at ~20s when no server packet arrives.
             while True:
-                await asyncio.sleep(30)
+                await asyncio.sleep(15)
                 async with self.hub.lock:
                     if self.hub.connection is not self:
                         return
@@ -652,7 +654,7 @@ def create_gateway(hub: DeviceHub):
                             await realtime.turn.finish()
                         elif not realtime_mode:
                             await hub.flush_audio()
-        except (WebSocketDisconnect, TimeoutError, json.JSONDecodeError, RuntimeError) as error:
+        except (WebSocketDisconnect, ConnectionClosed, TimeoutError, json.JSONDecodeError, RuntimeError) as error:
             hub.last_error = "设备控制连接已结束；按设备按钮可重新建立连接。"
             logger.info("device_connection_closed reason=%s frames_received=%s frames_dropped=%s listening=%s",
                         type(error).__name__, conn.frames_received, conn.frames_dropped, conn.listening)

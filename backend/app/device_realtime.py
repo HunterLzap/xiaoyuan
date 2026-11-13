@@ -3,6 +3,7 @@ import base64
 import ctypes as c
 from ctypes.util import find_library
 from contextlib import suppress
+import logging
 import os
 from array import array
 from math import ceil
@@ -13,6 +14,8 @@ from .community import AudioRateController
 from .config import ROOT
 from .llm import ProviderError
 from .realtime import RealtimeTurn
+
+logger = logging.getLogger(__name__)
 
 
 # Text markers that identify a blocked control turn (see tool_dialogue.control_error).
@@ -135,6 +138,9 @@ class DeviceRealtime:
         self.max_send_duration_ms = 0
         self.queue_exhaustions = 0
         self.playback_metrics = PlaybackMetrics()
+        self._rx_diag_frames = 0
+        self._rx_diag_max_rms = 0.0
+        self._rx_diag_last_log = monotonic()
         self.turn = RealtimeTurn(hub.voice.service,conn.voice_session_id,"device_voice",self.emit,manual)
         self.turn.continuous = self.client_aec and not manual
 
@@ -161,8 +167,17 @@ class DeviceRealtime:
         pcm = self.codec.decode(packet)
         samples = array("h")
         samples.frombytes(pcm)
-        if samples and (sum(sample * sample for sample in samples) / len(samples)) ** 0.5 > 100:
-            self.last_voice_at = monotonic()
+        rms = (sum(sample * sample for sample in samples) / len(samples)) ** 0.5 if samples else 0.0
+        self._rx_diag_frames += 1
+        if rms > self._rx_diag_max_rms:
+            self._rx_diag_max_rms = rms
+        now = monotonic()
+        if self._rx_diag_frames == 1 or now - self._rx_diag_last_log >= 1.0:
+            logger.info("device_audio_rx frames=%s bytes=%s rms=%.1f max_rms=%.1f",
+                        self._rx_diag_frames, len(packet), rms, self._rx_diag_max_rms)
+            self._rx_diag_last_log = now
+        if rms > 100:
+            self.last_voice_at = now
             self.publish_metrics()
         await self.turn.append(pcm)
 

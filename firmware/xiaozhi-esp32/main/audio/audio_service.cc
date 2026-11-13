@@ -1,6 +1,31 @@
 #include "audio_service.h"
+#include <cmath>
+#include <cstdint>
 #include <esp_log.h>
 #include <cstring>
+
+namespace {
+void ComputeInterleavedStats(const int16_t* data, size_t total_samples, int channels, int ch_idx,
+                             long* out_rms, int* out_peak) {
+    if (data == nullptr || channels <= 0 || ch_idx < 0 || ch_idx >= channels || total_samples < static_cast<size_t>(channels)) {
+        *out_rms = 0;
+        *out_peak = 0;
+        return;
+    }
+    int64_t sum_sq = 0;
+    size_t count = 0;
+    int peak = 0;
+    for (size_t i = static_cast<size_t>(ch_idx); i < total_samples; i += static_cast<size_t>(channels)) {
+        int v = data[i];
+        int av = v < 0 ? -v : v;
+        if (av > peak) peak = av;
+        sum_sq += static_cast<int64_t>(v) * v;
+        count++;
+    }
+    *out_rms = count > 0 ? static_cast<long>(std::sqrt(static_cast<double>(sum_sq) / count)) : 0;
+    *out_peak = peak;
+}
+}  // namespace
 
 #define RATE_CVT_CFG(_src_rate, _dest_rate, _channel)        \
     (esp_ae_rate_cvt_cfg_t)                                  \
@@ -215,6 +240,19 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     /* Update the last input time */
     last_input_time_ = std::chrono::steady_clock::now();
     debug_statistics_.input_count++;
+    if ((debug_statistics_.input_count % 100) == 1) {
+        long mic_rms = 0;
+        int mic_peak = 0;
+        long ref_rms = 0;
+        int ref_peak = 0;
+        int ch = codec_->input_channels();
+        ComputeInterleavedStats(data.data(), data.size(), ch, 0, &mic_rms, &mic_peak);
+        if (ch > 1) {
+            ComputeInterleavedStats(data.data(), data.size(), ch, 1, &ref_rms, &ref_peak);
+        }
+        ESP_LOGI(TAG, "input_16k frames=%u ch=%d mic_rms=%ld mic_peak=%d ref_rms=%ld",
+                 static_cast<unsigned>(ch > 0 ? data.size() / ch : 0), ch, mic_rms, mic_peak, ref_rms);
+    }
 
 #if CONFIG_USE_AUDIO_DEBUGGER
     // 音频调试：发送原始音频数据
@@ -416,6 +454,13 @@ void AudioService::OpusCodecTask() {
                 };
                 auto ret = esp_opus_enc_process(opus_encoder_, &in, &out);
                 if (ret == ESP_AUDIO_ERR_OK) {
+                    if ((debug_statistics_.encode_count % 16) == 0) {
+                        long pcm_rms = 0;
+                        int pcm_peak = 0;
+                        ComputeInterleavedStats(task->pcm.data(), task->pcm.size(), 1, 0, &pcm_rms, &pcm_peak);
+                        ESP_LOGI(TAG, "opus_tx bytes=%u pcm_rms=%ld pcm_peak=%d",
+                                 static_cast<unsigned>(out.encoded_bytes), pcm_rms, pcm_peak);
+                    }
                     packet->payload.assign(buf.data(), buf.data() + out.encoded_bytes);
 
                     if (task->type == kAudioTaskTypeEncodeToSendQueue) {

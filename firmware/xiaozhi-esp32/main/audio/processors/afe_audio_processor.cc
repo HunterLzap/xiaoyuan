@@ -1,4 +1,6 @@
 #include "afe_audio_processor.h"
+#include <cmath>
+#include <cstdint>
 #include <esp_log.h>
 
 #define PROCESSOR_RUNNING 0x01
@@ -165,6 +167,20 @@ void AfeAudioProcessor::AudioProcessorTask() {
 
         if (output_callback_) {
             size_t samples = res->data_size / sizeof(int16_t);
+            static uint32_t s_afe_diag_count = 0;
+            if ((++s_afe_diag_count % 50) == 1 && samples > 0 && res->data != nullptr) {
+                int64_t sum_sq = 0;
+                int peak = 0;
+                for (size_t k = 0; k < samples; ++k) {
+                    int v = res->data[k];
+                    int av = v < 0 ? -v : v;
+                    if (av > peak) peak = av;
+                    sum_sq += static_cast<int64_t>(v) * v;
+                }
+                long rms = static_cast<long>(std::sqrt(static_cast<double>(sum_sq) / samples));
+                ESP_LOGI(TAG, "afe_out samples=%u rms=%ld peak=%d vad=%d",
+                         static_cast<unsigned>(samples), rms, peak, static_cast<int>(res->vad_state));
+            }
             
             // Add data to buffer
             output_buffer_.insert(output_buffer_.end(), res->data, res->data + samples);

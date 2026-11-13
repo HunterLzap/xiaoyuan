@@ -1,10 +1,48 @@
 #include "es8311_audio_codec.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <esp_log.h>
 
 #define TAG "Es8311AudioCodec"
+
+namespace {
+void ComputeMonoStats(const int16_t* samples, int count, long* out_rms, int* out_peak) {
+    if (samples == nullptr || count <= 0) {
+        *out_rms = 0;
+        *out_peak = 0;
+        return;
+    }
+    int64_t sum_sq = 0;
+    int peak = 0;
+    for (int i = 0; i < count; ++i) {
+        int v = samples[i];
+        int av = v < 0 ? -v : v;
+        if (av > peak) peak = av;
+        sum_sq += static_cast<int64_t>(v) * v;
+    }
+    *out_rms = static_cast<long>(std::sqrt(static_cast<double>(sum_sq) / count));
+    *out_peak = peak;
+}
+
+void ReadMicWithDiag(esp_codec_dev_handle_t dev, int16_t* dst, int mic_samples, int channels) {
+    static uint32_t s_read_diag_count = 0;
+    static esp_err_t s_last_ret = ESP_OK;
+    esp_err_t read_ret = esp_codec_dev_read(dev, (void*)dst, mic_samples * sizeof(int16_t));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(read_ret);
+    uint32_t n = ++s_read_diag_count;
+    if ((n % 100) == 1 || read_ret != s_last_ret) {
+        s_last_ret = read_ret;
+        long rms = 0;
+        int peak = 0;
+        ComputeMonoStats(dst, mic_samples, &rms, &peak);
+        ESP_LOGI(TAG, "mic_raw ret=%d samples=%d rms=%ld peak=%d ch=%d",
+                 static_cast<int>(read_ret), mic_samples, rms, peak, channels);
+    }
+}
+}  // namespace
 
 // 软件回采起播前置垫零（毫秒）：补偿 Write() 到 I2S TX DMA/DAC/扬声器出声的固定硬件延迟，
 // 可按真机录音实测微调（例如 20~60ms）。
@@ -278,7 +316,7 @@ int Es8311AudioCodec::Read(int16_t* dest, int samples) {
     if (input_enabled_) {
         if (!input_reference_) {
             // 单声道模式：直接读麦克风
-            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(dev_, (void*)dest, samples * sizeof(int16_t)));
+            ReadMicWithDiag(dev_, dest, samples, input_channels_);
         } else {
             // 双声道模式（麦克风 + 软件回采参考）
             const int mic_samples = samples / input_channels_;
@@ -287,7 +325,7 @@ int Es8311AudioCodec::Read(int16_t* dest, int samples) {
             }
 
             // 读麦克风单声道数据
-            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(dev_, (void*)mic_scratch_.data(), mic_samples * sizeof(int16_t)));
+            ReadMicWithDiag(dev_, mic_scratch_.data(), mic_samples, input_channels_);
 
             // 交织：dest[0]=mic, dest[1]=ref, ...；无播报或欠载时参考通道严格补 0，绝不读旧残留
             std::lock_guard<std::mutex> lock(ref_mutex_);
