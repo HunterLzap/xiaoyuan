@@ -9,6 +9,8 @@ from array import array
 from math import ceil
 from time import monotonic
 
+from websockets.exceptions import ConnectionClosed
+
 from .audio_metrics import PlaybackMetrics
 from .community import AudioRateController
 from .config import ROOT
@@ -179,7 +181,23 @@ class DeviceRealtime:
         if rms > 100:
             self.last_voice_at = now
             self.publish_metrics()
-        await self.turn.append(pcm)
+        try:
+            await self.turn.append(pcm)
+        except ConnectionClosed:
+            await self._upstream_closed()
+
+    async def finish(self):
+        try:
+            await self.turn.finish()
+        except ConnectionClosed:
+            await self._upstream_closed()
+
+    async def _upstream_closed(self):
+        # Only called for provider sends, never for the device WebSocket transport.
+        logger.exception("device_realtime_upstream_closed turn_id=%s", self.turn.turn_id)
+        self.turn.input_closed = True
+        await self.turn.close()
+        await self.emit("error", "百炼实时连接已关闭，请重新发起对话。")
 
     def publish_metrics(self):
         # A turn that never heard speech and produced no audio must not overwrite the last
@@ -544,7 +562,8 @@ class DeviceRealtime:
                 await self.prepare_playback()
                 await self.show_text(data)
             else:
-                await self.stop_audio()
+                await self.stop_audio(interrupt=True)
+                await self.show_text(data)
 
     async def stop_audio(self, interrupt: bool = False):
         self.playback_metrics.mark("stop_audio")

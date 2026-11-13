@@ -18,7 +18,6 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from websockets.exceptions import ConnectionClosed
 
 from .config import ROOT
 from .llm import ProviderError
@@ -651,10 +650,10 @@ def create_gateway(hub: DeviceHub):
                     elif message.get("type") == "listen" and message.get("state") == "stop":
                         conn.listening = False
                         if realtime:
-                            await realtime.turn.finish()
+                            await realtime.finish()
                         elif not realtime_mode:
                             await hub.flush_audio()
-        except (WebSocketDisconnect, ConnectionClosed, TimeoutError, json.JSONDecodeError, RuntimeError) as error:
+        except (WebSocketDisconnect, TimeoutError, json.JSONDecodeError, RuntimeError) as error:
             hub.last_error = "设备控制连接已结束；按设备按钮可重新建立连接。"
             logger.info("device_connection_closed reason=%s frames_received=%s frames_dropped=%s listening=%s",
                         type(error).__name__, conn.frames_received, conn.frames_dropped, conn.listening)

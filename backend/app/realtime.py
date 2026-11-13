@@ -342,9 +342,11 @@ class RealtimeTurn:
             await self.send("input_audio_buffer.append", audio=base64.b64encode(bytes(32000)).decode())
 
     async def receive(self):
+        kind = "awaiting_event"
         try:
             while True:
                 try:
+                    kind = "awaiting_event"
                     event = json.loads(await asyncio.wait_for(self.ws.recv(), 30 if self.saved else 150))
                 except TimeoutError:
                     if self.saved:
@@ -409,7 +411,7 @@ class RealtimeTurn:
                     self.required_controls = {action["tool"] for action in self.control_plan_cache}
 
                     # Check for conversation end intent
-                    if self._is_end_intent(self.user):
+                    if _is_end_intent(self.user):
                         if self.active_response:
                             self.ignore_responses.add(self.active_response)
                         await self.audio.close()
@@ -531,12 +533,23 @@ class RealtimeTurn:
                             "sources":self.tool_context.sources(),"tool_calls":self.tool_context.summaries()})
                     if not self.continuous or self.input_closed:
                         return
-        except (ConnectionClosed, TimeoutError, ValueError, KeyError, OSError, RuntimeError):
+        except asyncio.CancelledError:
+            logger.info("realtime_receive_cancelled event=%s turn_id=%s", kind, self.turn_id, exc_info=True)
+            raise
+        except Exception as error:
+            self.input_closed = True
+            logger.exception("realtime_receive_failed event=%s error_type=%s turn_id=%s",
+                             kind, type(error).__name__, self.turn_id)
             if self.control_continuation and self.control_notice and not self.saved:
                 await self.finish_notice_as_text()
             else:
-                await self.emit("error","实时语音中断，请检查百炼连接或剩余额度。")
+                message = ("百炼实时连接中断，请重新发起对话。"
+                           if isinstance(error, (ConnectionClosed, TimeoutError, OSError))
+                           else "服务端实时语音处理失败，请重新发起对话；具体原因已记录到后端日志。")
+                await self.emit("error", message)
         finally:
+            # Stop new appends before cleanup awaits: the device may still be streaming.
+            self.input_closed = True
             if self.tool_task:
                 self.tool_task.cancel()
                 await asyncio.gather(self.tool_task, return_exceptions=True)
