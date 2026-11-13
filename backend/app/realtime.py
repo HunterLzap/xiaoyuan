@@ -410,9 +410,12 @@ class RealtimeTurn:
 
                     # Check for conversation end intent
                     if self._is_end_intent(self.user):
-                        await self.emit("notice", "好的，我先休息了")
+                        if self.active_response:
+                            self.ignore_responses.add(self.active_response)
+                        await self.audio.close()
                         await self.send("session.update", session={"turn_detection": None})
-                        self.conn.voice_session_id = None
+                        await self.emit("notice", "好的，我先休息了")
+                        await self.emit("idle", {"reason": "end_intent"})
                         return
 
                     await self.refresh_tools()

@@ -22,10 +22,18 @@ private:
     bool pa_inverted_ = false;
     std::mutex data_if_mutex_;
 
-    // AEC software playback reference (similar to BoxAudioCodecLite)
+    // AEC software playback reference (thread-safe ring buffer + alignment prefill)
+    std::mutex ref_mutex_;
     std::vector<int16_t> ref_buffer_;
-    int read_pos_ = 0;
-    int write_pos_ = 0;
+    std::vector<int16_t> mic_scratch_;
+    size_t ref_read_pos_ = 0;
+    size_t ref_write_pos_ = 0;
+    size_t ref_count_ = 0;
+    size_t ref_empty_reads_ = 0;
+    bool ref_primed_ = false;
+
+    void PushReferenceZerosLocked(size_t count);
+    void PushReferenceSamplesLocked(const int16_t* data, size_t count);
 
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);
     void UpdateDeviceState();
@@ -42,6 +50,7 @@ public:
     virtual void SetOutputVolume(int volume) override;
     virtual void EnableInput(bool enable) override;
     virtual void EnableOutput(bool enable) override;
+    virtual void ResetReference() override;
 };
 
 #endif // _ES8311_AUDIO_CODEC_H

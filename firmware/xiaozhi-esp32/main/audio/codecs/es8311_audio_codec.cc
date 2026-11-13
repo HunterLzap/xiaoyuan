@@ -1,8 +1,16 @@
 #include "es8311_audio_codec.h"
 
+#include <algorithm>
+#include <cstring>
 #include <esp_log.h>
 
 #define TAG "Es8311AudioCodec"
+
+// 软件回采起播前置垫零（毫秒）：补偿 Write() 到 I2S TX DMA/DAC/扬声器出声的固定硬件延迟，
+// 可按真机录音实测微调（例如 20~60ms）。
+#ifndef ES8311_AEC_REF_PREFILL_MS
+#define ES8311_AEC_REF_PREFILL_MS 35
+#endif
 
 Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port, int input_sample_rate, int output_sample_rate,
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
@@ -16,11 +24,15 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
     pa_inverted_ = pa_inverted;
     input_gain_ = 30;
 
-    // 初始化软件回采缓冲（16KB = 8192 samples = 512ms @ 16kHz）
+    // 初始化软件回采环形缓冲（至少 500ms @ output_sample_rate_，24kHz 下为 12000 samples）
     if (input_reference_) {
-        ref_buffer_.resize(8192, 0);
-        read_pos_ = 0;
-        write_pos_ = 0;
+        const size_t cap = std::max<size_t>(8192, static_cast<size_t>(output_sample_rate_ / 2));
+        ref_buffer_.assign(cap, 0);
+        ref_read_pos_ = 0;
+        ref_write_pos_ = 0;
+        ref_count_ = 0;
+        ref_empty_reads_ = 0;
+        ref_primed_ = false;
     }
 
     assert(input_sample_rate_ == output_sample_rate_);
@@ -178,6 +190,9 @@ void Es8311AudioCodec::EnableInput(bool enable) {
     if (enable == input_enabled_) {
         return;
     }
+    if (!enable) {
+        ResetReference();
+    }
     AudioCodec::EnableInput(enable);
     UpdateDeviceState();
 }
@@ -190,8 +205,73 @@ void Es8311AudioCodec::EnableOutput(bool enable) {
     if (enable == output_enabled_) {
         return;
     }
+    if (!enable) {
+        ResetReference();
+    }
     AudioCodec::EnableOutput(enable);
     UpdateDeviceState();
+}
+
+void Es8311AudioCodec::ResetReference() {
+    std::lock_guard<std::mutex> lock(ref_mutex_);
+    ref_read_pos_ = 0;
+    ref_write_pos_ = 0;
+    ref_count_ = 0;
+    ref_empty_reads_ = 0;
+    ref_primed_ = false;
+}
+
+void Es8311AudioCodec::PushReferenceZerosLocked(size_t count) {
+    const size_t cap = ref_buffer_.size();
+    if (cap == 0 || count == 0) {
+        return;
+    }
+    if (count >= cap) {
+        std::fill(ref_buffer_.begin(), ref_buffer_.end(), 0);
+        ref_read_pos_ = 0;
+        ref_write_pos_ = 0;
+        ref_count_ = cap;
+        return;
+    }
+    if (ref_count_ + count > cap) {
+        const size_t drop = (ref_count_ + count) - cap;
+        ref_read_pos_ = (ref_read_pos_ + drop) % cap;
+        ref_count_ -= drop;
+    }
+    const size_t first = std::min(count, cap - ref_write_pos_);
+    std::fill_n(ref_buffer_.data() + ref_write_pos_, first, 0);
+    if (count > first) {
+        std::fill_n(ref_buffer_.data(), count - first, 0);
+    }
+    ref_write_pos_ = (ref_write_pos_ + count) % cap;
+    ref_count_ += count;
+}
+
+void Es8311AudioCodec::PushReferenceSamplesLocked(const int16_t* data, size_t count) {
+    const size_t cap = ref_buffer_.size();
+    if (cap == 0 || data == nullptr || count == 0) {
+        return;
+    }
+    if (count >= cap) {
+        const int16_t* tail = data + (count - cap);
+        std::memcpy(ref_buffer_.data(), tail, cap * sizeof(int16_t));
+        ref_read_pos_ = 0;
+        ref_write_pos_ = 0;
+        ref_count_ = cap;
+        return;
+    }
+    if (ref_count_ + count > cap) {
+        const size_t drop = (ref_count_ + count) - cap;
+        ref_read_pos_ = (ref_read_pos_ + drop) % cap;
+        ref_count_ -= drop;
+    }
+    const size_t first = std::min(count, cap - ref_write_pos_);
+    std::memcpy(ref_buffer_.data() + ref_write_pos_, data, first * sizeof(int16_t));
+    if (count > first) {
+        std::memcpy(ref_buffer_.data(), data + first, (count - first) * sizeof(int16_t));
+    }
+    ref_write_pos_ = (ref_write_pos_ + count) % cap;
+    ref_count_ += count;
 }
 
 int Es8311AudioCodec::Read(int16_t* dest, int samples) {
@@ -201,24 +281,48 @@ int Es8311AudioCodec::Read(int16_t* dest, int samples) {
             ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(dev_, (void*)dest, samples * sizeof(int16_t)));
         } else {
             // 双声道模式（麦克风 + 软件回采参考）
-            int size = samples / input_channels_;  // 实际麦克风样本数
-            std::vector<int16_t> mic_data(size);
-
-            // 读麦克风单声道数据
-            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(dev_, (void*)mic_data.data(), size * sizeof(int16_t)));
-
-            // 交织：dest[0]=mic, dest[1]=ref, dest[2]=mic, dest[3]=ref, ...
-            int j = 0;
-            int i = 0;
-            while (i < samples) {
-                dest[i++] = mic_data[j++];  // 麦克风通道
-                dest[i++] = ref_buffer_[read_pos_];  // 播放参考通道
-                read_pos_ = (read_pos_ + 1) % ref_buffer_.size();
+            const int mic_samples = samples / input_channels_;
+            if (static_cast<int>(mic_scratch_.size()) != mic_samples) {
+                mic_scratch_.resize(mic_samples);
             }
 
-            // 清空缓冲（避免累积）
-            if (read_pos_ == write_pos_) {
-                read_pos_ = write_pos_ = 0;
+            // 读麦克风单声道数据
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(dev_, (void*)mic_scratch_.data(), mic_samples * sizeof(int16_t)));
+
+            // 交织：dest[0]=mic, dest[1]=ref, ...；无播报或欠载时参考通道严格补 0，绝不读旧残留
+            std::lock_guard<std::mutex> lock(ref_mutex_);
+            const size_t cap = ref_buffer_.size();
+            const bool can_read_ref = output_enabled_ && cap > 0;
+            int j = 0;
+            int i = 0;
+            if (!can_read_ref || ref_count_ == 0) {
+                while (j < mic_samples) {
+                    dest[i++] = mic_scratch_[j++];
+                    dest[i++] = 0;
+                }
+                if (ref_primed_) {
+                    ref_empty_reads_++;
+                    // 连续约 100ms 无播报样本时复位起播状态，保证下一轮重新按前置延迟对齐
+                    if (ref_empty_reads_ >= 10) {
+                        ref_read_pos_ = 0;
+                        ref_write_pos_ = 0;
+                        ref_count_ = 0;
+                        ref_empty_reads_ = 0;
+                        ref_primed_ = false;
+                    }
+                }
+            } else {
+                ref_empty_reads_ = 0;
+                while (j < mic_samples) {
+                    dest[i++] = mic_scratch_[j++];
+                    if (ref_count_ > 0) {
+                        dest[i++] = ref_buffer_[ref_read_pos_];
+                        ref_read_pos_ = (ref_read_pos_ + 1) % cap;
+                        ref_count_--;
+                    } else {
+                        dest[i++] = 0;
+                    }
+                }
             }
         }
     }
@@ -229,26 +333,16 @@ int Es8311AudioCodec::Write(const int16_t* data, int samples) {
     if (output_enabled_) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(dev_, (void*)data, samples * sizeof(int16_t)));
 
-        // 如果启用软件回采，缓存播放数据
-        if (input_reference_ && input_enabled_) {
-            // 检查缓冲溢出（参考 BoxLite line 257-261）
-            if (write_pos_ - read_pos_ + samples > (int)ref_buffer_.size()) {
-                // 写溢出，只保留最近的数据
-                read_pos_ = write_pos_ + samples - ref_buffer_.size();
+        // 如果启用软件回采，线程安全地缓存播放数据并在起播时垫入对齐零样本
+        if (input_reference_ && input_enabled_ && samples > 0) {
+            std::lock_guard<std::mutex> lock(ref_mutex_);
+            if (!ref_primed_) {
+                const size_t prefill = static_cast<size_t>(output_sample_rate_) * ES8311_AEC_REF_PREFILL_MS / 1000;
+                PushReferenceZerosLocked(prefill);
+                ref_primed_ = true;
             }
-
-            // 移动数据到缓冲区头部（避免循环写越界）
-            if (read_pos_ > 0) {
-                if (write_pos_ != read_pos_) {
-                    memmove(ref_buffer_.data(), ref_buffer_.data() + read_pos_, (write_pos_ - read_pos_) * sizeof(int16_t));
-                }
-                write_pos_ -= read_pos_;
-                read_pos_ = 0;
-            }
-
-            // 拷贝播放数据到缓冲
-            memcpy(&ref_buffer_[write_pos_], data, samples * sizeof(int16_t));
-            write_pos_ += samples;
+            PushReferenceSamplesLocked(data, static_cast<size_t>(samples));
+            ref_empty_reads_ = 0;
         }
     }
     return samples;

@@ -666,6 +666,9 @@ void AudioService::WaitForPlaybackQueueEmpty() {
 }
 
 void AudioService::ResetDecoder() {
+    if (codec_ != nullptr) {
+        codec_->ResetReference();
+    }
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
     std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
     if (opus_decoder_ != nullptr) {

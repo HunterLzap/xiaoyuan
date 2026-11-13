@@ -417,8 +417,8 @@ class DeviceRealtime:
             if phase == "answer":
                 self.answer_started = True
 
-    async def prepare_playback(self):
-        await self.stop_audio()
+    async def prepare_playback(self, interrupt: bool = True):
+        await self.stop_audio(interrupt=interrupt)
         self.controller = AudioRateController(frame_duration=60)
 
     async def emit(self,kind,data):
@@ -428,7 +428,7 @@ class DeviceRealtime:
         if kind == "ready":
             conn.voice_session_id = self.turn.sid
         elif kind == "next":
-            await self.prepare_playback()
+            await self.prepare_playback(interrupt=True)
             self.first_audio_at = None
             self.first_packet_at = None
             self.tts_started_at = None
@@ -453,6 +453,11 @@ class DeviceRealtime:
             self._last_text = None
         elif kind == "idle":
             conn.voice_session_id = None
+            conn.close_after_chat = True
+            is_end_intent = isinstance(data, dict) and data.get("reason") == "end_intent"
+            await self.stop_audio(interrupt=is_end_intent)
+            with suppress(Exception):
+                await conn.ws.close()
         elif kind=="user":
             self.hub.last_utterance = {"at":self.hub.now(),"state":"recognized","text":data}
             await conn.send({"type":"stt","text":data})
@@ -526,7 +531,7 @@ class DeviceRealtime:
             else:
                 await self.stop_audio()
 
-    async def stop_audio(self):
+    async def stop_audio(self, interrupt: bool = False):
         self.playback_metrics.mark("stop_audio")
         timer = self.prebuffer_timer
         self._reset_stream_state()
@@ -545,13 +550,16 @@ class DeviceRealtime:
             await asyncio.gather(*tasks, return_exceptions=True)
         self.publish_metrics()
         if speaking:
-            await self.conn.send({"type":"tts","state":"stop"})
+            payload = {"type": "tts", "state": "stop"}
+            if interrupt:
+                payload["interrupt"] = True
+            await self.conn.send(payload)
 
     async def close(self):
         try:
             await self.turn.close()
         finally:
             try:
-                await self.stop_audio()
+                await self.stop_audio(interrupt=True)
             finally:
                 self.codec.close()

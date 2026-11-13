@@ -529,7 +529,12 @@ void Application::InitializeProtocol() {
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
-                Schedule([this]() {
+                auto interrupt = cJSON_GetObjectItem(root, "interrupt");
+                bool is_interrupt = cJSON_IsBool(interrupt) && cJSON_IsTrue(interrupt);
+                Schedule([this, is_interrupt]() {
+                    if (is_interrupt) {
+                        audio_service_.ResetDecoder();
+                    }
                     if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -936,6 +941,7 @@ void Application::Schedule(std::function<void()>&& callback) {
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
+    audio_service_.ResetDecoder();
     if (protocol_) {
         protocol_->SendAbortSpeaking(reason);
     }
