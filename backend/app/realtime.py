@@ -19,6 +19,7 @@ from .order_confirmation import RealtimeOrderGuard
 from .speech_text import normalize_for_speech, function_call_output_payload
 from .prompt_builder import build_system_prompt
 from .audio_fx import RealtimeAudio
+from .audit_store import redact_value
 
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class RealtimeTurn:
         self.reader = None
         self.committed = False
         self.user = ""
+        self.transcription_done = False
         self.reply = ""            # 跨全部模型响应的完整转写（含工具续答），不覆盖已输出文本
         self._response_text = ""   # 当前这一次模型响应自身的转写
         self._transcript_seq = 0   # 响应分段序号：每个 response.created 自增，兼容无 response_id 的响应
@@ -383,6 +385,7 @@ class RealtimeTurn:
                         self.session.active_turn_id = self.turn_id
                         self.previous_item = self.item
                         self.reply = self.user = ""
+                        self.transcription_done = False
                         self._response_text = ""
                         self._transcript_seq = 0
                         self.saved = self.response_done = False
@@ -397,13 +400,14 @@ class RealtimeTurn:
                     self.active_response = rid
                     self._start_response_segment()
                 if kind == "error":
-                    raise ValueError()
+                    raise self.upstream_error(event)
                 if kind in {"input_audio_buffer.speech_stopped","input_audio_buffer.committed"}:
                     if not self.continuous:
                         self.input_closed = True
                     await self.emit("thinking", {})
                 elif kind == "conversation.item.input_audio_transcription.completed":
                     self.user = event.get("transcript","")
+                    self.transcription_done = True
                     self.tool_context.question = self.user
                     self.tool_context.begin_order_turn(self.user, self.session.history)
                     self.order_guard.begin(self.user, self.tool_context.allowed)
@@ -424,7 +428,7 @@ class RealtimeTurn:
                     await self.emit("user",self.user)
                     await self.release_output()
                 elif kind == "conversation.item.input_audio_transcription.failed":
-                    raise ValueError()
+                    raise self.upstream_error(event)
                 elif kind == "response.audio_transcript.delta":
                     self._note_early_output()
                     self._append_transcript_delta(event["delta"])
@@ -450,10 +454,17 @@ class RealtimeTurn:
                 elif kind == "response.function_call_arguments.done":
                     self.pending_tools.setdefault(event["call_id"], {}).update(event)
                 elif kind == "response.done":
+                    logger.info("realtime_response_done %s", json.dumps({
+                        "session_id": str(self.sid), "turn_id": str(self.turn_id),
+                        "response_id": rid, "status": event["response"].get("status"),
+                        "status_reason": (event["response"].get("status_details") or {}).get("reason"),
+                        "transcript_chars": len(self._response_text),
+                        "response_segments": self._transcript_seq,
+                    }, ensure_ascii=False))
                     if self.continuous and event["response"].get("status") == "cancelled":
                         continue
                     if event["response"].get("status") != "completed":
-                        raise ValueError()
+                        raise self.upstream_error(event)
                     for item in event["response"].get("output", []):
                         if item.get("type") == "function_call":
                             self.pending_tools[item["call_id"]] = item
@@ -499,7 +510,7 @@ class RealtimeTurn:
                         continue
                     self.order_guard.finish_without_tools()
                     self.response_done = True
-                if self.response_done and self.user and not self.saved:
+                if self.response_done and self.transcription_done and not self.saved:
                     error = None if self.control_continuation else self.tool_context.control_error(self.required_controls, self.reply)
                     if error:
                         status = None
@@ -560,6 +571,21 @@ class RealtimeTurn:
             await self.ws.close()
             if not self.saved:
                 await self.persist("interrupted")
+
+    def upstream_error(self, event):
+        response = event.get("response") or {}
+        details = {
+            "session_id": str(self.sid), "turn_id": str(self.turn_id),
+            "event": event.get("type"), "event_id": event.get("event_id"),
+            "request_id": event.get("request_id"), "response_id": event.get("response_id") or response.get("id"),
+            "error": event.get("error"), "status": response.get("status"),
+            "status_details": response.get("status_details"),
+        }
+        secrets = [self.config.rt_api_key.get_secret_value(),
+                   self.config.api_key.get_secret_value(), self.config.tts_api_key.get_secret_value()]
+        secrets.extend(getattr(self.tool_context, "secrets", ()))
+        return ProviderError(502, "realtime_upstream_error",
+                             json.dumps(redact_value(details, secrets), ensure_ascii=False))
 
     async def run_tools(self, items, turn_id, context):
         try:

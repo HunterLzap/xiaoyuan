@@ -52,7 +52,7 @@ class RealtimeAudio:
             if self.segment[0] is not None:
                 self.queue = asyncio.Queue(maxsize=32)
                 self.task = asyncio.create_task(self._run(speed, pitch))
-        self.metrics.record("input", len(data))
+        self.metrics.record_pcm("input", data)
         if self.segment[0] is None:
             self.metrics.record_pcm("output", data)
             await self.emit(data)

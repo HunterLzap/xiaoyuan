@@ -17,6 +17,7 @@ WebsocketProtocol::WebsocketProtocol() {
 }
 
 WebsocketProtocol::~WebsocketProtocol() {
+    CloseAudioChannel();
     vEventGroupDelete(event_group_handle_);
 }
 
@@ -26,7 +27,8 @@ bool WebsocketProtocol::Start() {
 }
 
 bool WebsocketProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
-    if (websocket_ == nullptr || !websocket_->IsConnected()) {
+    auto websocket = websocket_.load();
+    if (websocket == nullptr || !websocket->IsConnected()) {
         return false;
     }
 
@@ -41,7 +43,7 @@ bool WebsocketProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
         bp2->payload_size = htonl(packet->payload.size());
         memcpy(bp2->payload, packet->payload.data(), packet->payload.size());
 
-        return websocket_->Send(serialized.data(), serialized.size(), true);
+        return websocket->Send(serialized.data(), serialized.size(), true);
     } else if (version_ == 3) {
         std::string serialized;
         serialized.resize(sizeof(BinaryProtocol3) + packet->payload.size());
@@ -51,19 +53,20 @@ bool WebsocketProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
         bp3->payload_size = htons(packet->payload.size());
         memcpy(bp3->payload, packet->payload.data(), packet->payload.size());
 
-        return websocket_->Send(serialized.data(), serialized.size(), true);
+        return websocket->Send(serialized.data(), serialized.size(), true);
     } else {
-        return websocket_->Send(packet->payload.data(), packet->payload.size(), true);
+        return websocket->Send(packet->payload.data(), packet->payload.size(), true);
     }
 }
 
 bool WebsocketProtocol::SendText(const std::string& text) {
-    if (websocket_ == nullptr || !websocket_->IsConnected()) {
+    auto websocket = websocket_.load();
+    if (websocket == nullptr || !websocket->IsConnected()) {
         return false;
     }
 
-    if (!websocket_->Send(text)) {
-        ESP_LOGE(TAG, "Failed to send text: %s", text.c_str());
+    if (!websocket->Send(text)) {
+        ESP_LOGE(TAG, "Failed to send control message");
         SetError(Lang::Strings::SERVER_ERROR);
         return false;
     }
@@ -72,12 +75,17 @@ bool WebsocketProtocol::SendText(const std::string& text) {
 }
 
 bool WebsocketProtocol::IsAudioChannelOpened() const {
-    return websocket_ != nullptr && websocket_->IsConnected() && !error_occurred_ && !IsTimeout();
+    auto websocket = websocket_.load();
+    return websocket != nullptr && websocket->IsConnected() && !error_occurred_ && !IsTimeout();
 }
 
 void WebsocketProtocol::CloseAudioChannel(bool send_goodbye) {
     (void)send_goodbye;  // Websocket doesn't need to send goodbye message
-    websocket_.reset();
+    ++channel_epoch_;
+    auto websocket = websocket_.exchange(nullptr);
+    if (websocket && on_audio_channel_closed_) {
+        on_audio_channel_closed_();
+    }
 }
 
 bool WebsocketProtocol::OpenAudioChannel() {
@@ -92,8 +100,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
     error_occurred_ = false;
 
     auto network = Board::GetInstance().GetNetwork();
-    websocket_ = network->CreateWebSocket(1);
-    if (websocket_ == nullptr) {
+    auto epoch = ++channel_epoch_;
+    std::shared_ptr<WebSocket> websocket = network->CreateWebSocket(1);
+    if (websocket == nullptr) {
         ESP_LOGE(TAG, "Failed to create websocket");
         return false;
     }
@@ -103,13 +112,16 @@ bool WebsocketProtocol::OpenAudioChannel() {
         if (token.find(" ") == std::string::npos) {
             token = "Bearer " + token;
         }
-        websocket_->SetHeader("Authorization", token.c_str());
+        websocket->SetHeader("Authorization", token.c_str());
     }
-    websocket_->SetHeader("Protocol-Version", std::to_string(version_).c_str());
-    websocket_->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
-    websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
+    websocket->SetHeader("Protocol-Version", std::to_string(version_).c_str());
+    websocket->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
+    websocket->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
 
-    websocket_->OnData([this](const char* data, size_t len, bool binary) {
+    websocket->OnData([this, epoch](const char* data, size_t len, bool binary) {
+        if (epoch != channel_epoch_) {
+            return;
+        }
         if (binary) {
             if (on_incoming_audio_ != nullptr) {
                 if (version_ == 2) {
@@ -165,7 +177,10 @@ bool WebsocketProtocol::OpenAudioChannel() {
         last_incoming_time_ = std::chrono::steady_clock::now();
     });
 
-    websocket_->OnDisconnected([this]() {
+    websocket->OnDisconnected([this, epoch]() {
+        if (epoch != channel_epoch_) {
+            return;
+        }
         ESP_LOGI(TAG, "Websocket disconnected");
         if (on_audio_channel_closed_ != nullptr) {
             on_audio_channel_closed_();
@@ -173,12 +188,13 @@ bool WebsocketProtocol::OpenAudioChannel() {
     });
 
     ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
-    if (!websocket_->Connect(url.c_str())) {
-        ESP_LOGE(TAG, "Failed to connect to websocket server, code=%d", websocket_->GetLastError());
+    if (!websocket->Connect(url.c_str())) {
+        ESP_LOGE(TAG, "Failed to connect to websocket server, code=%d", websocket->GetLastError());
         SetError(Lang::Strings::SERVER_NOT_CONNECTED);
         return false;
     }
 
+    websocket_.store(websocket);
     // Send hello message to describe the client
     auto message = GetHelloMessage();
     if (!SendText(message)) {

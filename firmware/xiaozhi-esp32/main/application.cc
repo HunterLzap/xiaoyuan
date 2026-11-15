@@ -12,6 +12,7 @@
 
 #include <cstring>
 #include <esp_log.h>
+#include <esp_rom_crc.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
@@ -73,9 +74,14 @@ void Application::Initialize() {
     audio_service_.Initialize(codec);
     audio_service_.Start();
 
+    auto send_task_created = xTaskCreate([](void* arg) {
+        static_cast<Application*>(arg)->AudioSendTask();
+    }, "audio_send", 4096, this, 3, &audio_send_task_handle_);
+    ESP_ERROR_CHECK(send_task_created == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+
     AudioServiceCallbacks callbacks;
     callbacks.on_send_queue_available = [this]() {
-        xEventGroupSetBits(event_group_, MAIN_EVENT_SEND_AUDIO);
+        xTaskNotifyGive(audio_send_task_handle_);
     };
     callbacks.on_wake_word_detected = [this](const std::string& wake_word) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_WAKE_WORD_DETECTED);
@@ -168,7 +174,6 @@ void Application::Run() {
 
     const EventBits_t ALL_EVENTS = 
         MAIN_EVENT_SCHEDULE |
-        MAIN_EVENT_SEND_AUDIO |
         MAIN_EVENT_WAKE_WORD_DETECTED |
         MAIN_EVENT_VAD_CHANGE |
         MAIN_EVENT_CLOCK_TICK |
@@ -217,14 +222,6 @@ void Application::Run() {
             HandleStopListeningEvent();
         }
 
-        if (bits & MAIN_EVENT_SEND_AUDIO) {
-            while (auto packet = audio_service_.PopPacketFromSendQueue()) {
-                if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
-                    break;
-                }
-            }
-        }
-
         if (bits & MAIN_EVENT_WAKE_WORD_DETECTED) {
             HandleWakeWordDetectedEvent();
         }
@@ -253,6 +250,29 @@ void Application::Run() {
             // Print debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
+            }
+        }
+    }
+}
+
+void Application::AudioSendTask() {
+    while (true) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+            std::shared_ptr<Protocol> protocol;
+            {
+                std::lock_guard<std::mutex> lock(protocol_mutex_);
+                protocol = protocol_;
+            }
+            if (!protocol) {
+                continue;
+            }
+            int64_t started = esp_timer_get_time();
+            bool sent = protocol->SendAudio(std::move(packet));
+            int64_t elapsed_ms = (esp_timer_get_time() - started) / 1000;
+            if (elapsed_ms > OPUS_FRAME_DURATION_MS || !sent) {
+                ESP_LOGW(TAG, "audio_uplink_send duration_ms=%ld success=%d",
+                         static_cast<long>(elapsed_ms), sent);
             }
         }
     }
@@ -478,12 +498,12 @@ void Application::InitializeProtocol() {
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
     if (ota_->HasMqttConfig()) {
-        protocol_ = std::make_unique<MqttProtocol>();
+        SetProtocol(std::make_shared<MqttProtocol>());
     } else if (ota_->HasWebsocketConfig()) {
-        protocol_ = std::make_unique<WebsocketProtocol>();
+        SetProtocol(std::make_shared<WebsocketProtocol>());
     } else {
         ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
-        protocol_ = std::make_unique<MqttProtocol>();
+        SetProtocol(std::make_shared<MqttProtocol>());
     }
 
     protocol_->OnConnected([this]() {
@@ -496,8 +516,16 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        if (GetDeviceState() == kDeviceStateSpeaking) {
-            audio_service_.PushPacketToDecodeQueue(std::move(packet));
+        if (receiving_tts_audio_) {
+            ++received_audio_packets_;
+            received_audio_crc_ = esp_rom_crc32_le(received_audio_crc_, packet->payload.data(), packet->payload.size());
+            if (!audio_service_.PushPacketToDecodeQueue(std::move(packet))) {
+                ++dropped_audio_packets_;
+                if (dropped_audio_packets_ == 1 || dropped_audio_packets_ % 16 == 0) {
+                    ESP_LOGW(TAG, "audio_downlink_drop turn_id=%s packets=%u",
+                             audio_turn_id_.c_str(), static_cast<unsigned>(dropped_audio_packets_));
+                }
+            }
         }
     });
     
@@ -510,6 +538,7 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnAudioChannelClosed([this, &board]() {
+        receiving_tts_audio_ = false;
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
@@ -524,17 +553,30 @@ void Application::InitializeProtocol() {
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
+                receiving_tts_audio_ = false;
+                audio_service_.ResetDecoder();
+                auto turn_id = cJSON_GetObjectItem(root, "turn_id");
+                audio_turn_id_ = cJSON_IsString(turn_id) ? turn_id->valuestring : "";
+                received_audio_packets_ = 0;
+                received_audio_crc_ = 0;
+                dropped_audio_packets_ = 0;
+                receiving_tts_audio_ = true;
+                ESP_LOGI(TAG, "audio_downlink_start turn_id=%s", audio_turn_id_.c_str());
                 Schedule([this]() {
                     aborted_ = false;
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
+                receiving_tts_audio_ = false;
+                ESP_LOGI(TAG, "audio_downlink_stop turn_id=%s received_packets=%u dropped_packets=%u crc32=%08lx",
+                         audio_turn_id_.c_str(), static_cast<unsigned>(received_audio_packets_),
+                         static_cast<unsigned>(dropped_audio_packets_), static_cast<unsigned long>(received_audio_crc_));
                 auto interrupt = cJSON_GetObjectItem(root, "interrupt");
                 bool is_interrupt = cJSON_IsBool(interrupt) && cJSON_IsTrue(interrupt);
-                Schedule([this, is_interrupt]() {
-                    if (is_interrupt) {
-                        audio_service_.ResetDecoder();
-                    }
+                if (is_interrupt) {
+                    audio_service_.ResetDecoder();
+                }
+                Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
@@ -794,8 +836,8 @@ void Application::HandleWakeWordDetectedEvent() {
         // Play popup sound immediately on wake (before OpenAudioChannel delay)
         audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
 
+        SetDeviceState(kDeviceStateConnecting);
         if (!protocol_->IsAudioChannelOpened()) {
-            SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update),
             // then continue with OpenAudioChannel which may block for ~1 second
             Schedule([this, wake_word]() {
@@ -835,7 +877,7 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
 
     if (!protocol_->IsAudioChannelOpened()) {
         if (!protocol_->OpenAudioChannel()) {
-            audio_service_.EnableWakeWordDetection(true);
+            SetDeviceState(kDeviceStateIdle);
             return;
         }
     }
@@ -918,7 +960,6 @@ void Application::HandleStateChangedEvent() {
                 // Only AFE wake word can be detected in speaking mode
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
-            audio_service_.ResetDecoder();
             break;
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
@@ -962,7 +1003,7 @@ void Application::Reboot() {
     if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->CloseAudioChannel();
     }
-    protocol_.reset();
+    SetProtocol(nullptr);
     audio_service_.Stop();
 
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -1118,7 +1159,12 @@ void Application::ResetProtocol() {
             protocol_->CloseAudioChannel();
         }
         // Reset protocol
-        protocol_.reset();
+        SetProtocol(nullptr);
     });
+}
+
+void Application::SetProtocol(std::shared_ptr<Protocol> protocol) {
+    std::lock_guard<std::mutex> lock(protocol_mutex_);
+    protocol_.swap(protocol);
 }
 

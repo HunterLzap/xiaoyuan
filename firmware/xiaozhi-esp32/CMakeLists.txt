@@ -11,3 +11,11 @@ idf_build_set_property(MINIMAL_BUILD ON)
 
 set(PROJECT_VER "2.2.6")
 project(xiaozhi)
+
+idf_component_get_property(network_library 78__esp-ml307 COMPONENT_LIB)
+get_target_property(network_sources ${network_library} SOURCES)
+list(FILTER network_sources EXCLUDE REGEX "src/esp/esp_(tcp|network)\\.cc$")
+set_property(TARGET ${network_library} PROPERTY SOURCES "${network_sources}")
+target_sources(${network_library} PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/main/network/esp_tcp.cc"
+    "${CMAKE_CURRENT_LIST_DIR}/main/network/esp_network.cc")

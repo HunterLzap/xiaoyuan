@@ -587,7 +587,7 @@ def create_gateway(hub: DeviceHub):
                     if conn.audio_frame(packet["bytes"]):
                         if realtime_mode:
                             if realtime:
-                                await realtime.append(packet["bytes"])
+                                realtime.queue_audio(packet["bytes"])
                             else:
                                 # Realtime mode with no live turn: the frame would be
                                 # swallowed, so count it as dropped instead.
@@ -625,13 +625,7 @@ def create_gateway(hub: DeviceHub):
                         if realtime_mode:
                             from .device_realtime import DeviceRealtime
                             realtime = DeviceRealtime(hub,conn,mode=="manual")
-                            try:
-                                await realtime.turn.open()
-                            except ProviderError as error:
-                                hub.last_error = error.message
-                                await realtime.close()
-                                realtime = None
-                                await conn.send({"type":"tts","state":"stop"})
+                            realtime.start()
                         else:
                             await hub.speech.ensure_ready(mode)
                     elif message.get("type") == "abort":
@@ -650,7 +644,7 @@ def create_gateway(hub: DeviceHub):
                     elif message.get("type") == "listen" and message.get("state") == "stop":
                         conn.listening = False
                         if realtime:
-                            await realtime.finish()
+                            realtime.queue_audio(None)
                         elif not realtime_mode:
                             await hub.flush_audio()
         except (WebSocketDisconnect, TimeoutError, json.JSONDecodeError, RuntimeError) as error:

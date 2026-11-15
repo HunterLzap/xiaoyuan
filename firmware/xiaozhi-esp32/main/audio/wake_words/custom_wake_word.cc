@@ -133,7 +133,12 @@ void CustomWakeWord::OnWakeWordDetected(std::function<void(const std::string& wa
 }
 
 void CustomWakeWord::Start() {
+    std::lock_guard<std::mutex> lock(input_buffer_mutex_);
+    multinet_->clean(multinet_model_data_);
+    input_buffer_.clear();
     running_ = true;
+    ESP_LOGI(TAG, "Wake detection started model=%s commands=%u", mn_name_,
+             static_cast<unsigned>(commands_.size()));
 }
 
 void CustomWakeWord::Stop() {

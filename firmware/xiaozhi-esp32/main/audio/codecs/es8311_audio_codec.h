@@ -7,6 +7,7 @@
 #include <driver/gpio.h>
 #include <esp_codec_dev.h>
 #include <esp_codec_dev_defaults.h>
+#include <array>
 #include <mutex>
 
 
@@ -22,18 +23,18 @@ private:
     bool pa_inverted_ = false;
     std::mutex data_if_mutex_;
 
-    // AEC software playback reference (thread-safe ring buffer + alignment prefill)
-    std::mutex ref_mutex_;
-    std::vector<int16_t> ref_buffer_;
+    static constexpr size_t REFERENCE_SAMPLES = (AUDIO_CODEC_DMA_DESC_NUM - 1) * AUDIO_CODEC_DMA_FRAME_NUM;
+    static constexpr size_t MIC_DELAY_SAMPLES = 2 * AUDIO_CODEC_DMA_FRAME_NUM;
+    portMUX_TYPE ref_mutex_ = portMUX_INITIALIZER_UNLOCKED;
+    std::array<int16_t, REFERENCE_SAMPLES> ref_buffer_{};
+    std::array<int16_t, MIC_DELAY_SAMPLES> mic_delay_{};
     std::vector<int16_t> mic_scratch_;
     size_t ref_read_pos_ = 0;
     size_t ref_write_pos_ = 0;
     size_t ref_count_ = 0;
-    size_t ref_empty_reads_ = 0;
-    bool ref_primed_ = false;
+    size_t mic_delay_pos_ = 0;
 
-    void PushReferenceZerosLocked(size_t count);
-    void PushReferenceSamplesLocked(const int16_t* data, size_t count);
+    static bool IRAM_ATTR OnPlaybackSent(i2s_chan_handle_t channel, i2s_event_data_t* event, void* context);
 
     void CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din);
     void UpdateDeviceState();

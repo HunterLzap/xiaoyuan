@@ -6,6 +6,7 @@ from time import monotonic
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
+from pydantic import SecretStr
 
 from websockets.exceptions import ConnectionClosedOK
 
@@ -39,6 +40,7 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
         turn.previous_item = None
         turn.active_response = None
         turn.response_done = False
+        turn.transcription_done = False
         turn.saved = False
         turn.input_closed = False
         turn.control_continuation = False
@@ -85,6 +87,65 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
         turn.ws.send.assert_not_awaited()
         self.assertIn("百炼实时连接中断", turn.emit.await_args.args[1])
 
+    async def test_empty_transcription_finishes_answer_after_transcription_event(self):
+        turn = self.make_turn()
+        turn.sid = uuid4()
+        turn.reply = "在呢，喊我有什么事？"
+        turn.response_done = True
+        turn.required_controls = set()
+        turn.control_failure = None
+        turn.config = SimpleNamespace(rt_model="qwen3.8-omni-flash-realtime")
+        turn.provider = "百炼"
+        turn.usage = None
+        turn.session.history_persisted = False
+        turn.tool_context.control_error = Mock(return_value=None)
+        turn.tool_context.sources = Mock(return_value=[])
+        turn.tool_context.summaries = Mock(return_value=[])
+        turn.audio.finish = AsyncMock()
+        turn.continuous = True
+        turn.ws.recv.side_effect = [
+            json.dumps({"type": "input_audio_buffer.speech_stopped"}),
+            json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": ""}),
+            asyncio.CancelledError(),
+        ]
+
+        async def persist(*args, **kwargs):
+            turn.saved = True
+
+        turn.persist.side_effect = persist
+        with self.assertLogs("backend.app.realtime", level="INFO"):
+            with self.assertRaises(asyncio.CancelledError):
+                await turn.receive()
+        turn.audio.finish.assert_awaited_once()
+        turn.persist.assert_awaited_once_with("complete", audio_status="streamed")
+        kinds = [call.args[0] for call in turn.emit.await_args_list]
+        self.assertEqual(kinds, ["thinking", "user", "done"])
+        self.assertTrue(turn.saved)
+
+    async def test_provider_error_retains_details_without_credentials(self):
+        turn = self.make_turn()
+        turn.sid = uuid4()
+        credential = "provider-credential-for-redaction-check"
+        turn.config = SimpleNamespace(
+            rt_api_key=SecretStr(credential), api_key=SecretStr(""), tts_api_key=SecretStr(""),
+        )
+        turn.ws.recv.side_effect = [json.dumps({
+            "type": "error", "event_id": "event-volume-failure", "request_id": "request-volume-failure",
+            "error": {"type": "invalid_request_error", "code": "invalid_value", "param": "session.tools",
+                      "message": f"Invalid tools; credential={credential}", "Authorization": f"Bearer {credential}"},
+        })]
+        with self.assertLogs("backend.app.realtime", level="ERROR") as logs:
+            await turn.receive()
+        text = "\n".join(logs.output)
+        self.assertIn("invalid_value", text)
+        self.assertIn("session.tools", text)
+        self.assertIn("request-volume-failure", text)
+        self.assertIn("event-volume-failure", text)
+        self.assertIn("Traceback", text)
+        self.assertNotIn(credential, text)
+        self.assertNotIn("Bearer ", text)
+        turn.ws.close.assert_awaited_once()
+
     def make_bridge(self):
         bridge = DeviceRealtime.__new__(DeviceRealtime)
         bridge.conn = SimpleNamespace(frames_dropped=0, ws=SimpleNamespace(close=AsyncMock()))
@@ -98,12 +159,51 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
         bridge._rx_diag_frames = 0
         bridge._rx_diag_max_rms = 0.0
         bridge._rx_diag_last_log = monotonic()
+        bridge.metrics_turn_id = str(bridge.turn.turn_id)
+        bridge.uplink_frames = 0
+        bridge.uplink_stalls = 0
+        bridge.max_uplink_send_ms = 0
+        bridge.input_queue = asyncio.Queue(maxsize=40)
+        bridge.input_task = None
+        bridge.uplink_queue_dropped = 0
+        bridge.max_uplink_queue_ms = 0
+        bridge._archive_metrics = AsyncMock()
         bridge.hub = SimpleNamespace(last_error=None)
         bridge.playback_metrics = SimpleNamespace(mark=Mock())
         bridge._last_text = None
         bridge.stop_audio = AsyncMock()
         bridge.show_text = AsyncMock()
         return bridge
+
+    async def test_device_input_queues_during_provider_open_and_finishes_in_order(self):
+        bridge = self.make_bridge()
+        opening = asyncio.Event()
+
+        async def open_provider():
+            await opening.wait()
+
+        bridge.turn.open = open_provider
+        bridge.turn.append = AsyncMock()
+        bridge.turn.finish = AsyncMock()
+        bridge.codec.decode = lambda packet: packet
+        first_packet, second_packet = bytes([1, 0]), bytes([2, 0])
+        bridge.start()
+        try:
+            bridge.queue_audio(first_packet)
+            bridge.queue_audio(second_packet)
+            bridge.queue_audio(None)
+            await asyncio.sleep(0)
+            self.assertEqual(bridge.input_queue.qsize(), 3)
+            bridge.turn.append.assert_not_awaited()
+            opening.set()
+            await asyncio.wait_for(bridge.input_task, 1)
+            self.assertEqual([call.args[0] for call in bridge.turn.append.await_args_list],
+                             [first_packet, second_packet])
+            bridge.turn.finish.assert_awaited_once()
+            self.assertEqual(bridge.conn.frames_dropped, 0)
+        finally:
+            bridge.input_task.cancel()
+            await asyncio.gather(bridge.input_task, return_exceptions=True)
 
     async def test_provider_append_close_does_not_close_device(self):
         bridge = self.make_bridge()

@@ -4,10 +4,12 @@ import ctypes as c
 from ctypes.util import find_library
 from contextlib import suppress
 import logging
+import json
 import os
 from array import array
 from math import ceil
 from time import monotonic
+from threading import Lock
 
 from websockets.exceptions import ConnectionClosed
 
@@ -36,6 +38,7 @@ PREBUFFER_LIMIT_MS = 420
 FRAME_MS = 60
 # A send-start gap over 1.5 frames is a pacing anomaly, not proof of speaker silence.
 STARVE_GAP_MS = 90
+AUDIO_METRICS_LOCK = Lock()
 
 class DeviceCodec:
     def __init__(self):
@@ -119,6 +122,7 @@ class DeviceRealtime:
         self.last_send_at = None
         self.outbound_starvations = 0
         self.max_send_gap_ms = 0
+        self.max_send_gap_at = None
         # Opening-greeting cache is retired: the first sound is the answer's first sentence.
         # Kept ack-phase measurements so a reloaded build still reports an empty ack segment.
         self.ack_last_error = None
@@ -145,6 +149,53 @@ class DeviceRealtime:
         self._rx_diag_last_log = monotonic()
         self.turn = RealtimeTurn(hub.voice.service,conn.voice_session_id,"device_voice",self.emit,manual)
         self.turn.continuous = self.client_aec and not manual
+        self.metrics_turn_id = str(self.turn.turn_id)
+        self.metrics_session_id = str(self.turn.sid)
+        self.metrics_started_at = self.hub.now()
+        self.metrics_recorded = False
+        self.uplink_frames = 0
+        self.uplink_stalls = 0
+        self.max_uplink_send_ms = 0
+        self.input_queue = asyncio.Queue(maxsize=40)
+        self.input_task = None
+        self.uplink_queue_dropped = 0
+        self.max_uplink_queue_ms = 0
+
+    def start(self):
+        self.input_task = asyncio.create_task(self._receive_audio())
+
+    def queue_audio(self, packet):
+        if self.input_task.done():
+            self.frames_dropped_after_turn += 1
+            self.conn.frames_dropped += 1
+            return
+        if self.input_queue.full():
+            self.input_queue.get_nowait()
+            self.conn.frames_dropped += 1
+            self.uplink_queue_dropped += 1
+            if self.uplink_queue_dropped == 1 or self.uplink_queue_dropped % 16 == 0:
+                logger.warning("device_upstream_queue_congested turn_id=%s dropped_frames=%s",
+                               self.metrics_turn_id, self.uplink_queue_dropped)
+        self.input_queue.put_nowait((monotonic(), packet))
+
+    async def _receive_audio(self):
+        try:
+            await self.turn.open()
+            while True:
+                received_at, packet = await self.input_queue.get()
+                self.max_uplink_queue_ms = max(self.max_uplink_queue_ms,
+                                               round((monotonic() - received_at) * 1000))
+                if packet is None:
+                    await self.finish()
+                    return
+                await self.append(packet)
+                if not self.accepting_audio():
+                    return
+        except Exception:
+            logger.exception("device_realtime_input_failed turn_id=%s", self.metrics_turn_id)
+            self.turn.input_closed = True
+            await self.turn.close()
+            await self.emit("error", "实时语音输入连接失败，请重新发起对话；具体原因已记录到后端日志。")
 
     def accepting_audio(self) -> bool:
         """True while the provider turn is still live (reader running).
@@ -181,8 +232,20 @@ class DeviceRealtime:
         if rms > 100:
             self.last_voice_at = now
             self.publish_metrics()
+        started = monotonic()
+        turn_id = self.metrics_turn_id
         try:
-            await self.turn.append(pcm)
+            try:
+                await self.turn.append(pcm)
+            finally:
+                if turn_id == self.metrics_turn_id:
+                    elapsed_ms = (monotonic() - started) * 1000
+                    self.uplink_frames += 1
+                    self.max_uplink_send_ms = max(self.max_uplink_send_ms, round(elapsed_ms))
+                    if elapsed_ms > FRAME_MS:
+                        self.uplink_stalls += 1
+                        logger.warning("device_upstream_send_slow turn_id=%s duration_ms=%s",
+                                       turn_id, round(elapsed_ms))
         except ConnectionClosed:
             await self._upstream_closed()
 
@@ -199,10 +262,10 @@ class DeviceRealtime:
         await self.turn.close()
         await self.emit("error", "百炼实时连接已关闭，请重新发起对话。")
 
-    def publish_metrics(self):
+    def publish_metrics(self, force=False):
         # A turn that never heard speech and produced no audio must not overwrite the last
         # real measurement (the earlier all-null snapshot came from exactly that).
-        if self.first_audio_at is None and self.last_voice_at is None and self.speech_stopped_at is None:
+        if not force and self.first_audio_at is None and self.last_voice_at is None and self.speech_stopped_at is None:
             return
 
         def since(base, later):
@@ -219,11 +282,21 @@ class DeviceRealtime:
         #   are gateway observations and do not establish when the device speaker played.
         snapshot = {
             "at": self.hub.now(),
+            "started_at": self.metrics_started_at,
+            "session_id": self.metrics_session_id,
+            "turn_id": self.metrics_turn_id,
             "aec": self.client_aec,
             "continuous": self.turn.continuous,
             "frames_dropped_after_turn": self.frames_dropped_after_turn,
+            "uplink_frames": self.uplink_frames,
+            "uplink_stalls": self.uplink_stalls,
+            "max_uplink_send_ms": self.max_uplink_send_ms,
+            "uplink_queue_dropped": self.uplink_queue_dropped,
+            "max_uplink_queue_ms": self.max_uplink_queue_ms,
+            "reply_chars": len(self._last_text or ""),
             "outbound_starvations": self.outbound_starvations,
             "max_send_gap_ms": self.max_send_gap_ms,
+            "max_send_gap_at_ms": since(self.speech_stopped_at or self.turn.started, self.max_send_gap_at),
             "starvation_total_ms": round(self.starvation_total_ms),
             "gap_phases": dict(self.gap_phases),
             "queue_exhaustions": self.queue_exhaustions,
@@ -262,8 +335,33 @@ class DeviceRealtime:
         previous = self.hub.last_realtime_latency
         if (self.first_audio_at is None and isinstance(previous, dict)
                 and (previous.get("from_speech_stopped") or {}).get("first_audio_ms") is not None):
-            return
+            return snapshot
         self.hub.last_realtime_latency = snapshot
+        return snapshot
+
+    @staticmethod
+    def _write_metrics(snapshot):
+        directory = ROOT / "logs"
+        directory.mkdir(parents=True, exist_ok=True)
+        with AUDIO_METRICS_LOCK, (directory / "device-audio-turns.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(snapshot, ensure_ascii=False) + "\n")
+
+    async def _archive_metrics(self, reason):
+        if self.metrics_recorded:
+            return
+        snapshot = self.publish_metrics(force=True)
+        if snapshot is None:
+            return
+        self.metrics_recorded = True
+        snapshot["end_reason"] = reason
+        try:
+            await asyncio.to_thread(self._write_metrics, snapshot)
+        except OSError:
+            logger.exception("device_audio_metrics_write_failed turn_id=%s", snapshot["turn_id"])
+        logger.info("device_audio_turn turn_id=%s end_reason=%s sent_packets=%s max_send_gap_ms=%s",
+                    snapshot["turn_id"], reason,
+                    snapshot["gateway_audio"]["phases"]["answer"]["sent_packets"],
+                    snapshot["max_send_gap_ms"])
 
     def _is_control_failure(self, data) -> bool:
         if not isinstance(data, str) or not data.strip():
@@ -341,7 +439,7 @@ class DeviceRealtime:
     async def _queue_frames(self, frames, phase):
         if not frames:
             return
-        self.playback_metrics.encoded(phase, len(frames))
+        self.playback_metrics.encoded(phase, frames)
         now = monotonic()
         if self.buffer_state is not None and (not self.sender_started or not self.answer_started):
             self.buffer_target_ms = self.buffer_state["target_ms"]
@@ -392,7 +490,9 @@ class DeviceRealtime:
         now = monotonic()
         if self.last_send_at is not None:
             gap_ms = (now - self.last_send_at) * 1000
-            self.max_send_gap_ms = max(self.max_send_gap_ms, round(gap_ms))
+            if round(gap_ms) > self.max_send_gap_ms:
+                self.max_send_gap_ms = round(gap_ms)
+                self.max_send_gap_at = now
             if gap_ms > STARVE_GAP_MS:
                 self.outbound_starvations += 1
                 self.starvation_total_ms += max(0, gap_ms - FRAME_MS)
@@ -416,7 +516,7 @@ class DeviceRealtime:
             await self.conn.send_audio(packet)
             completed = True
         finally:
-            metrics.send_end(phase, started, len(packet), completed)
+            metrics.send_end(phase, started, packet, completed)
         self.max_send_duration_ms = max(self.max_send_duration_ms, round((monotonic() - now) * 1000))
         if not self.controller.queue and not self.producer_done:
             self.queue_exhaustions += 1
@@ -436,7 +536,7 @@ class DeviceRealtime:
         controller = self.controller
         if not self.speaking:
             self.speaking = True
-            await self.conn.send({"type": "tts", "state": "start"})
+            await self.conn.send({"type": "tts", "state": "start", "turn_id": self.metrics_turn_id})
             if epoch != self.stream_epoch:
                 return
             if self.tts_started_at is None:
@@ -462,12 +562,14 @@ class DeviceRealtime:
             conn.voice_session_id = self.turn.sid
         elif kind == "next":
             await self.prepare_playback(interrupt=True)
+            await self._archive_metrics("interrupted" if not self.metrics_finalized else "complete")
             self.first_audio_at = None
             self.first_packet_at = None
             self.tts_started_at = None
             self.done_at = None
             self.outbound_starvations = 0
             self.max_send_gap_ms = 0
+            self.max_send_gap_at = None
             self.last_voice_at = None
             self.speech_stopped_at = None
             self.starvation_total_ms = 0
@@ -484,11 +586,22 @@ class DeviceRealtime:
             self.turn.audio.metrics.reset()
             self.metrics_finalized = False
             self._last_text = None
+            self.metrics_turn_id = str(self.turn.turn_id)
+            self.metrics_session_id = str(self.turn.sid)
+            self.metrics_started_at = self.hub.now()
+            self.metrics_recorded = False
+            self.frames_dropped_after_turn = 0
+            self.uplink_frames = 0
+            self.uplink_stalls = 0
+            self.max_uplink_send_ms = 0
+            self.uplink_queue_dropped = 0
+            self.max_uplink_queue_ms = 0
         elif kind == "idle":
             conn.voice_session_id = None
             conn.close_after_chat = True
             is_end_intent = isinstance(data, dict) and data.get("reason") == "end_intent"
             await self.stop_audio(interrupt=is_end_intent)
+            await self._archive_metrics("end_intent" if is_end_intent else "idle")
             with suppress(Exception):
                 await conn.ws.close()
         elif kind=="user":
@@ -531,7 +644,7 @@ class DeviceRealtime:
                     await self.show_text(reply)
             self.producer_done = True
             tail = list(self.codec.encode(b"", True))
-            self.playback_metrics.encoded("answer", len(tail))
+            self.playback_metrics.encoded("answer", tail)
             self.prebuffer_frames.extend((frame, "answer") for frame in tail)
             if self.prebuffer_frames:
                 await self._flush_prebuffer(force=True)
@@ -549,10 +662,13 @@ class DeviceRealtime:
                     if epoch == self.stream_epoch:
                         self._finish_metrics()
                         await self.stop_audio()
+                        await self._archive_metrics("complete")
                 if self.turn.continuous:
                     self.drain = asyncio.create_task(drain())
                 else:
                     await drain()
+            else:
+                await self._archive_metrics("text_only" if text_only else "no_audio")
         elif kind=="error":
             self.hub.last_error = data
             if self._is_control_failure(data):
@@ -564,6 +680,7 @@ class DeviceRealtime:
             else:
                 await self.stop_audio(interrupt=True)
                 await self.show_text(data)
+            await self._archive_metrics("error")
 
     async def stop_audio(self, interrupt: bool = False):
         self.playback_metrics.mark("stop_audio")
@@ -590,10 +707,14 @@ class DeviceRealtime:
             await self.conn.send(payload)
 
     async def close(self):
+        if self.input_task is not None:
+            self.input_task.cancel()
+            await asyncio.gather(self.input_task, return_exceptions=True)
         try:
             await self.turn.close()
         finally:
             try:
                 await self.stop_audio(interrupt=True)
+                await self._archive_metrics("closed")
             finally:
                 self.codec.close()

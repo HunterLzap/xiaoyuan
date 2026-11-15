@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -100,6 +101,8 @@ struct DebugStatistics {
     uint32_t decode_count = 0;
     uint32_t encode_count = 0;
     uint32_t playback_count = 0;
+    uint32_t encode_dropped = 0;
+    uint32_t send_dropped = 0;
 };
 
 class AudioService {
@@ -163,7 +166,8 @@ private:
     // Audio encode / decode
     TaskHandle_t audio_input_task_handle_ = nullptr;
     TaskHandle_t audio_output_task_handle_ = nullptr;
-    TaskHandle_t opus_codec_task_handle_ = nullptr;
+    TaskHandle_t opus_encoder_task_handle_ = nullptr;
+    TaskHandle_t opus_decoder_task_handle_ = nullptr;
     std::mutex audio_queue_mutex_;
     std::condition_variable audio_queue_cv_;
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_decode_queue_;
@@ -171,6 +175,7 @@ private:
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_testing_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
+    std::atomic<uint32_t> decoder_epoch_{0};
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;
 
@@ -186,7 +191,8 @@ private:
 
     void AudioInputTask();
     void AudioOutputTask();
-    void OpusCodecTask();
+    void AudioEncodeTask();
+    void AudioDecodeTask();
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
