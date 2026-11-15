@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>AtomS3R · 个人助理</title>
-  <link rel="stylesheet" href="/app.css">
-  <script src="/app.js" defer></script>
-  <script src="/voice.js" defer></script>
+  <meta name="app-base-path" content="__APP_BASE_PATH__">
+  <link rel="stylesheet" href="__APP_BASE_PATH__/app.css">
+  <script src="__APP_BASE_PATH__/paths.js" defer></script>
+  <script src="__APP_BASE_PATH__/app.js" defer></script>
+  <script src="__APP_BASE_PATH__/voice.js" defer></script>
 </head>
 <body>
   <svg class="icon-defs" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -34,14 +36,14 @@
   </svg>
   <div id="app-shell" class="app-shell">
     <aside id="sidebar" class="sidebar" aria-label="导航和会话">
-      <div class="sidebar-brand"><a class="brand" href="/" data-view="chat"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><strong>AtomS3R</strong></a><button class="icon-button" id="collapse-sidebar" aria-label="收起侧栏"><svg><use href="#i-panel"/></svg></button></div>
+      <div class="sidebar-brand"><a class="brand" href="__APP_BASE_PATH__/" data-view="chat"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><strong>AtomS3R</strong></a><button class="icon-button" id="collapse-sidebar" aria-label="收起侧栏"><svg><use href="#i-panel"/></svg></button></div>
       <button id="new-session" class="nav-button"><svg><use href="#i-plus"/></svg><span>新对话</span><kbd>Ctrl Alt N</kbd></button>
       <div class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="session-search" maxlength="200" type="search" placeholder="搜索对话" aria-label="搜索对话" autocomplete="off"><kbd>Ctrl K</kbd></div>
       <div class="history-heading">最近对话</div>
       <nav id="session-list" class="session-list" aria-label="历史会话"><p class="sidebar-empty">正在加载…</p></nav>
       <div class="sidebar-bottom">
-        <a id="settings-button" class="nav-button" href="/settings" data-view="settings"><svg><use href="#i-settings"/></svg><span>设置</span></a>
-        <div class="local-profile"><span class="profile-avatar">小</span><div><strong>个人工作区</strong><span>Windows · 本机服务</span></div><button id="theme-toggle" class="icon-button" aria-label="切换主题" title="切换明暗主题"><svg><use href="#i-theme"/></svg></button></div>
+        <a id="settings-button" class="nav-button" href="__APP_BASE_PATH__/settings" data-view="settings"><svg><use href="#i-settings"/></svg><span>设置</span></a>
+        <div class="local-profile"><span class="profile-avatar">小</span><div><strong>个人工作区</strong></div><button id="theme-toggle" class="icon-button" aria-label="切换主题" title="切换明暗主题"><svg><use href="#i-theme"/></svg></button></div>
       </div>
     </aside>
     <button id="sidebar-overlay" class="sidebar-overlay" aria-label="关闭导航" hidden></button>

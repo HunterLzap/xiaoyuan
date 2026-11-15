@@ -12,6 +12,8 @@ from uuid import UUID, uuid4
 from .config import Settings
 from .llm import ChatProvider, Completion, ProviderError
 from .history_store import HistoryStore
+from .conversation_memory import active_context, ConversationHistoryTool
+from .tools import ToolRegistry
 from .knowledge import KnowledgeProvider
 from .community import ConnectionHandler
 from .tool_dialogue import ToolConversation, TurnTools, TOOL_INSTRUCTIONS, combine_usage
@@ -35,6 +37,7 @@ class Session:
     history_persisted: bool | None = None
     active_task: asyncio.Task | None = None
     active_turn_id: UUID | None = None
+    context_complete_turn_ids: set[str] = field(default_factory=set)
 
 
 class ChatService:
@@ -67,8 +70,14 @@ class ChatService:
 
     def tool_context(self, session_id, turn_id, source, question=""):
         secrets = self.tool_secrets() if self.tool_secrets else []
-        return TurnTools(self.tools, self.audit, secrets, session_id, turn_id, source, question,
-                         current_registry=lambda: self.tools,
+        history_tool = ConversationHistoryTool(self.get_session(session_id), turn_id)
+        def current_registry():
+            registry = self.tools
+            if history_tool.archived():
+                return registry.with_tool(history_tool) if registry else ToolRegistry([history_tool])
+            return registry
+        return TurnTools(current_registry(), self.audit, secrets, session_id, turn_id, source, question,
+                         current_registry=current_registry,
                          order_store=self.order_confirmations)
 
     def summary(self, session_id: UUID) -> SessionSummary:
@@ -111,20 +120,9 @@ class ChatService:
                 del self.sessions[session_id]
                 self.order_confirmations.clear_session(session_id)
 
-    @staticmethod
-    def rebuild_context(session: Session, turns: int) -> None:
-        pairs = []
-        question = None
-        for message in session.history:
-            if message.role == "user":
-                question = message if message.status == "complete" else None
-            elif question is not None and message.content.strip() and message.status == "complete":
-                pairs.extend([
-                    {"role": "user", "content": question.content},
-                    {"role": "assistant", "content": message.content},
-                ])
-                question = None
-        session.messages = pairs[-2 * turns:]
+    def rebuild_context(self, session: Session, turns: int) -> None:
+        session.messages, session.context_complete_turn_ids = active_context(
+            session.history, turns, self.settings.context_history_chars)
 
     def list_sessions(self, limit: int | None = None, offset: int = 0, q: str = "") -> list[SessionSummary]:
         cached = [self.summary(sid) for sid, session in self.sessions.items() if session.history]
@@ -317,7 +315,7 @@ class ChatService:
                 tool_provider = ToolConversation(provider, tool_context)
             adapter = tts_factory(config) if tts_factory else None
             if config.voice_mode != "realtime":
-                tool_names = ([item["name"] for item in tool_context.registry.definitions()]
+                tool_names = ([item["name"] for item in tool_context.definitions()]
                               if tool_context.allowed and tool_context.registry is not None else [])
                 messages[0]["content"] = build_system_prompt(
                     config, "voice" if adapter is not None else "text", tool_names,

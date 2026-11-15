@@ -594,6 +594,13 @@ void Application::InitializeProtocol() {
                     });
                 }
             }
+        } else if (strcmp(type->valuestring, "ui") == 0) {
+            auto state = cJSON_GetObjectItem(root, "state");
+            if (cJSON_IsString(state)) {
+                Schedule([display, activity = std::string(state->valuestring)]() {
+                    display->SetEmotion(activity.c_str());
+                });
+            }
         } else if (strcmp(type->valuestring, "stt") == 0) {
             auto text = cJSON_GetObjectItem(root, "text");
             if (cJSON_IsString(text)) {
@@ -837,6 +844,7 @@ void Application::HandleWakeWordDetectedEvent() {
         audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
 
         SetDeviceState(kDeviceStateConnecting);
+        Board::GetInstance().GetDisplay()->SetEmotion("wake");
         if (!protocol_->IsAudioChannelOpened()) {
             // Schedule to let the state change be processed first (UI update),
             // then continue with OpenAudioChannel which may block for ~1 second
@@ -986,6 +994,7 @@ void Application::AbortSpeaking(AbortReason reason) {
     if (protocol_) {
         protocol_->SendAbortSpeaking(reason);
     }
+    Board::GetInstance().GetDisplay()->SetEmotion("cancel");
 }
 
 void Application::SetListeningMode(ListeningMode mode) {

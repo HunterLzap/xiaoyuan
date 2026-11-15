@@ -6,6 +6,7 @@
 #include "config.h"
 #include "i2c_device.h"
 #include "assets/lang_config.h"
+#include "robot_display.h"
 
 #include <esp_log.h>
 #include <driver/i2c_master.h>
@@ -22,176 +23,6 @@
 #include <cstdio>
 
 #define TAG "AtomS3R+EchoBase"
-
-// v1 像素 UI：整屏居中显示状态表情 + 底部小状态图标；不改语音链
-enum class PixelUiState { Idle, Listening, Thinking, Speaking };
-
-class PixelUiDisplay : public SpiLcdDisplay {
-public:
-    PixelUiDisplay(esp_lcd_panel_io_handle_t io, esp_lcd_panel_handle_t panel,
-                   int w, int h, int ox, int oy, bool mx, bool my, bool swap)
-        : SpiLcdDisplay(io, panel, w, h, ox, oy, mx, my, swap) {}
-
-    void SetupUI() override {
-        if (IsSetupUICalled()) return;
-        SpiLcdDisplay::SetupUI();
-        DisplayLockGuard lock(this);
-        lv_obj_t* screen = lv_screen_active();
-        lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
-        if (top_bar_) lv_obj_add_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
-        if (status_bar_) lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
-        if (content_) lv_obj_add_flag(content_, LV_OBJ_FLAG_HIDDEN);
-        if (emoji_label_) lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
-        if (emoji_box_) lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
-        if (emoji_image_) lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
-        if (preview_image_) lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
-        ui_img_ = lv_image_create(screen);
-        lv_obj_set_size(ui_img_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_align(ui_img_, LV_ALIGN_CENTER, 0, -14);
-        lv_image_set_scale(ui_img_, 256); // 帧原生 88px，1:1
-        lv_obj_remove_flag(ui_img_, LV_OBJ_FLAG_HIDDEN);
-        BuildStatusIcons(screen);
-        LoadFrames();
-        SwitchState(PixelUiState::Idle);
-        timer_ = lv_timer_create(&PixelUiDisplay::TimerCb, 80, this); // 12.5fps
-    }
-
-    void SetStatus(const char* status) override {
-        if (!IsSetupUICalled() || status == nullptr) return;
-        DisplayLockGuard lock(this);
-        if (strcmp(status, Lang::Strings::STANDBY) == 0) SwitchState(PixelUiState::Idle);
-        else if (strcmp(status, Lang::Strings::LISTENING) == 0) SwitchState(PixelUiState::Listening);
-        else if (strcmp(status, Lang::Strings::SPEAKING) == 0) SwitchState(PixelUiState::Speaking);
-        else if (strcmp(status, Lang::Strings::CONNECTING) == 0) SwitchState(PixelUiState::Thinking);
-    }
-    void SetEmotion(const char* emotion) override { (void)emotion; }
-    void SetChatMessage(const char* role, const char* content) override { (void)role; (void)content; }
-    void ShowNotification(const char* n, int d = 3000) override { (void)n; (void)d; }
-    void UpdateStatusBar(bool update_all = false) override { (void)update_all; }
-
-private:
-    std::vector<std::unique_ptr<LvglRawImage>> idle_frames_, listen_, think_, speak_;
-    lv_timer_t* timer_ = nullptr;
-    lv_obj_t* ui_img_ = nullptr;
-    PixelUiState state_ = PixelUiState::Idle;
-    uint32_t tick_ = 0;
-    int frame_ = 0;
-    bool load_tried_ = false;
-    lv_obj_t* ring_ = nullptr;
-    lv_obj_t* dots_[3] = {nullptr, nullptr, nullptr};
-    lv_obj_t* bars_[3] = {nullptr, nullptr, nullptr};
-
-    lv_obj_t* MakeDot(lv_obj_t* parent, int x, int y, int sz, uint32_t color) {
-        lv_obj_t* o = lv_obj_create(parent);
-        lv_obj_set_size(o, sz, sz);
-        lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
-        lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(o, 0, 0);
-        lv_obj_set_style_pad_all(o, 0, 0);
-        lv_obj_align(o, LV_ALIGN_BOTTOM_MID, x, y);
-        lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
-        return o;
-    }
-
-    void BuildStatusIcons(lv_obj_t* parent) {
-        ring_ = lv_obj_create(parent);
-        lv_obj_set_size(ring_, 18, 18);
-        lv_obj_set_style_radius(ring_, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_opa(ring_, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(ring_, 2, 0);
-        lv_obj_set_style_border_color(ring_, lv_color_hex(0x1E90FF), 0);
-        lv_obj_set_style_pad_all(ring_, 0, 0);
-        lv_obj_align(ring_, LV_ALIGN_BOTTOM_MID, 0, -3);
-        lv_obj_add_flag(ring_, LV_OBJ_FLAG_HIDDEN);
-        for (int i = 0; i < 3; i++) dots_[i] = MakeDot(parent, (i - 1) * 10, -6, 5, 0xE0E0E0);
-        const int hs[3] = {6, 12, 8};
-        for (int i = 0; i < 3; i++) {
-            bars_[i] = lv_obj_create(parent);
-            lv_obj_set_size(bars_[i], 4, hs[i]);
-            lv_obj_set_style_radius(bars_[i], 1, 0);
-            lv_obj_set_style_bg_color(bars_[i], lv_color_hex(0x1E90FF), 0);
-            lv_obj_set_style_bg_opa(bars_[i], LV_OPA_COVER, 0);
-            lv_obj_set_style_border_width(bars_[i], 0, 0);
-            lv_obj_set_style_pad_all(bars_[i], 0, 0);
-            lv_obj_align(bars_[i], LV_ALIGN_BOTTOM_MID, (i - 1) * 8, -4);
-            lv_obj_add_flag(bars_[i], LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-
-    static void TimerCb(lv_timer_t* t) {
-        auto* self = static_cast<PixelUiDisplay*>(lv_timer_get_user_data(t));
-        if (self) self->OnTick();
-    }
-
-    void LoadSet(const char* prefix, int n, std::vector<std::unique_ptr<LvglRawImage>>& out) {
-        out.clear();
-        for (int i = 0; i < n; i++) {
-            char name[40];
-            snprintf(name, sizeof(name), "%s-%02d.png", prefix, i);
-            void* ptr = nullptr; size_t size = 0;
-            if (Assets::GetInstance().GetAssetData(name, ptr, size)) {
-                out.emplace_back(new LvglRawImage(ptr, size));
-            } else {
-                ESP_LOGW(TAG, "missing frame %s", name);
-            }
-        }
-        ESP_LOGI(TAG, "loaded %d/%d %s frames", (int)out.size(), n, prefix);
-    }
-
-    void LoadFrames() {
-        LoadSet("idle", 16, idle_frames_);
-        LoadSet("listen", 12, listen_);
-        LoadSet("think", 10, think_);
-        LoadSet("speak", 10, speak_);
-        load_tried_ = !idle_frames_.empty() || !listen_.empty() || !think_.empty() || !speak_.empty();
-    }
-
-    void ShowFrame(std::vector<std::unique_ptr<LvglRawImage>>& set, int idx) {
-        if (set.empty() || !ui_img_) return;
-        if (idx < 0 || idx >= (int)set.size()) idx = 0;
-        lv_image_set_src(ui_img_, set[idx]->image_dsc());
-        lv_obj_remove_flag(ui_img_, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    void SwitchState(PixelUiState s) {
-        state_ = s; tick_ = 0; frame_ = 0;
-        if (ring_) lv_obj_add_flag(ring_, LV_OBJ_FLAG_HIDDEN);
-        for (auto d : dots_) if (d) lv_obj_add_flag(d, LV_OBJ_FLAG_HIDDEN);
-        for (auto b : bars_) if (b) lv_obj_add_flag(b, LV_OBJ_FLAG_HIDDEN);
-        if (!load_tried_) LoadFrames();
-        switch (s) {
-            case PixelUiState::Idle:
-                ShowFrame(idle_frames_, 0);
-                break;
-            case PixelUiState::Listening:
-                ShowFrame(listen_, 0);
-                if (ring_) lv_obj_remove_flag(ring_, LV_OBJ_FLAG_HIDDEN);
-                break;
-            case PixelUiState::Thinking:
-                ShowFrame(think_, 0);
-                for (auto d : dots_) if (d) lv_obj_remove_flag(d, LV_OBJ_FLAG_HIDDEN);
-                break;
-            case PixelUiState::Speaking:
-                ShowFrame(speak_, 0);
-                for (auto b : bars_) if (b) lv_obj_remove_flag(b, LV_OBJ_FLAG_HIDDEN);
-                break;
-        }
-    }
-
-    void OnTick() {
-        if (!ui_img_) return;
-        tick_++;
-        if (!load_tried_) LoadFrames();
-        auto* set = (state_ == PixelUiState::Idle) ? &idle_frames_
-                  : (state_ == PixelUiState::Listening) ? &listen_
-                  : (state_ == PixelUiState::Thinking) ? &think_ : &speak_;
-        if (!set->empty()) {
-            frame_ = (frame_ + 1) % (int)set->size();
-            lv_image_set_src(ui_img_, (*set)[frame_]->image_dsc());
-        }
-    }
-};
 
 #define PI4IOE_ADDR          0x43
 #define PI4IOE_REG_CTRL      0x00
@@ -435,7 +266,7 @@ private:
         ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_handle, 2, 1));
         ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true)); 
 
-        display_ = new PixelUiDisplay(io_handle, panel_handle,
+        display_ = new RobotDisplay(io_handle, panel_handle,
                                     DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 

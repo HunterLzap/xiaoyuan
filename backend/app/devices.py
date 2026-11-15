@@ -80,10 +80,12 @@ class DevicePreferences(BaseModel):
 
 class DeviceHub:
     def __init__(self, path: Path = ROOT / "data" / "devices.json", port: int = 8003,
-                 public_origin: str = "", speech: SpeechRecognizer | None = None):
+                 public_origin: str = "", speech: SpeechRecognizer | None = None,
+                 public_base_path: str = ""):
         self.path = path
         self.port = port
         self.public_origin = public_origin
+        self.public_base_path = public_base_path
         self.setup: DeviceSetup | None = None
         self.preferences = DevicePreferences()
         self.token = secrets.token_urlsafe(32)
@@ -159,7 +161,7 @@ class DeviceHub:
         if origin is None:
             return None
         scheme = "wss" if self.public_origin else "ws"
-        return f"{scheme}://{urlsplit(origin).netloc}/xiaozhi/v1/"
+        return f"{scheme}://{urlsplit(origin).netloc}{self.public_base_path}/xiaozhi/v1/"
 
     async def save_preferences(self, preferences):
         async with self.lock:
@@ -179,7 +181,7 @@ class DeviceHub:
                     addr = ip_address(host)
                     if addr.is_private and not addr.is_loopback and host not in candidates:
                         candidates.append(host)
-        ota_url = f"{self.origin}/xiaozhi/ota/?key={self.token}" if self.setup and self.origin else None
+        ota_url = f"{self.origin}{self.public_base_path}/xiaozhi/ota/?key={self.token}" if self.setup and self.origin else None
         return {"gateway_running": self.gateway_running, "gateway_port": self.port,
                 "public_origin": self.public_origin, "ota_url": ota_url,
                 "lan_candidates": candidates,
@@ -494,7 +496,7 @@ class DeviceConnection:
 
 def create_gateway(hub: DeviceHub):
     """LAN-facing app: only bootstrap, health and one authenticated WebSocket."""
-    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, root_path=hub.public_base_path)
 
     @app.get("/health")
     async def health():

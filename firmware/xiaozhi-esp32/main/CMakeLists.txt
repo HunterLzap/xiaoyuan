@@ -1080,6 +1080,28 @@ function(build_default_assets_bin)
         "--sdkconfig" "${SDKCONFIG}"
         "--output" "${GENERATED_ASSETS_BIN}"
     )
+    set(ASSET_DEPENDENCIES ${SDKCONFIG} ${PROJECT_DIR}/scripts/build_default_assets.py)
+    if(CONFIG_BOARD_TYPE_M5STACK_ATOM_S3R_ECHO_BASE)
+        set(ANIMATION_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/boards/atoms3r-echo-base/animations")
+        set(ANIMATION_OUTPUT "${CMAKE_BINARY_DIR}/device_animations")
+        set(ANIMATION_HEADER "${ANIMATION_OUTPUT}/include/device_animation_manifest.h")
+        file(GLOB ANIMATION_IMAGES CONFIGURE_DEPENDS "${ANIMATION_SOURCE}/*.png")
+        add_custom_command(
+            OUTPUT "${ANIMATION_HEADER}"
+            COMMAND python "${PROJECT_DIR}/scripts/build_device_animations.py"
+                --source "${ANIMATION_SOURCE}"
+                --assets "${ANIMATION_OUTPUT}/assets"
+                --header "${ANIMATION_HEADER}"
+            DEPENDS ${ANIMATION_IMAGES} "${ANIMATION_SOURCE}/manifest.json"
+                "${PROJECT_DIR}/scripts/build_device_animations.py"
+            VERBATIM
+        )
+        add_custom_target(device_animation_assets DEPENDS "${ANIMATION_HEADER}")
+        add_dependencies(${COMPONENT_LIB} device_animation_assets)
+        target_include_directories(${COMPONENT_LIB} PRIVATE "${ANIMATION_OUTPUT}/include")
+        set(DEFAULT_ASSETS_EXTRA_FILES "${ANIMATION_OUTPUT}/assets")
+        list(APPEND ASSET_DEPENDENCIES "${ANIMATION_HEADER}")
+    endif()
 
     # Add builtin text font if defined
     if(BUILTIN_TEXT_FONT)
@@ -1104,8 +1126,7 @@ function(build_default_assets_bin)
         OUTPUT ${GENERATED_ASSETS_BIN}
         COMMAND python ${PROJECT_DIR}/scripts/build_default_assets.py ${BUILD_ARGS}
         DEPENDS
-            ${SDKCONFIG}
-            ${PROJECT_DIR}/scripts/build_default_assets.py
+            ${ASSET_DEPENDENCIES}
         COMMENT "Building default assets.bin based on configuration"
         VERBATIM
     )

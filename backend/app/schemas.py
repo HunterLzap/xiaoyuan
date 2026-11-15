@@ -59,6 +59,33 @@ class TokenUsage(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    input_tokens_details: dict | None = None
+    output_tokens_details: dict | None = None
+    response_count: int | None = None
+    reported_response_count: int | None = None
+    responses: list[dict] | None = None
+
+    @classmethod
+    def from_provider(cls, usage):
+        if usage is None:
+            return None
+        data = usage if isinstance(usage, dict) else usage.model_dump()
+
+        def counts(value):
+            if isinstance(value, dict):
+                return {key: counts(item) for key, item in value.items()
+                        if isinstance(item, dict) or type(item) is int and item >= 0}
+            return value if type(value) is int and value >= 0 else None
+
+        return cls(
+            prompt_tokens=counts(data.get("input_tokens", data.get("prompt_tokens"))),
+            completion_tokens=counts(data.get("output_tokens", data.get("completion_tokens"))),
+            total_tokens=counts(data.get("total_tokens")),
+            input_tokens_details=counts(data.get("input_tokens_details", data.get("prompt_tokens_details"))),
+            output_tokens_details=counts(data.get("output_tokens_details", data.get("completion_tokens_details"))),
+            response_count=1,
+            reported_response_count=1 if data else 0,
+        )
 
 
 class UsageTotals(BaseModel):

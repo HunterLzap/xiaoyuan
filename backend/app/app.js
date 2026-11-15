@@ -1,4 +1,6 @@
 "use strict";
+const appPath = window.assistantPaths.path;
+const appFetch = window.assistantPaths.fetch;
 const el = id => document.getElementById(id);
 const state = { loaded:false, configured:false, busy:false, view:"chat", sessions:[], active:null, detail:null, pending:null, failure:null, m5stackEnabled:true, useKnowledge:false, pendingKnowledge:false };
 const configIds = ["provider", "base_url", "model", "models_protocol"];
@@ -44,7 +46,7 @@ function notice(message = "", kind = "") {
 async function request(path, method = "GET", body, signal) {
   let response;
   try {
-    response = await fetch(path, { method, signal, headers:{ "Content-Type":"application/json", "X-Local-Settings":"1" }, body:body === undefined ? undefined : JSON.stringify(body) });
+    response = await appFetch(path, { method, signal, headers:{ "Content-Type":"application/json", "X-Local-Settings":"1" }, body:body === undefined ? undefined : JSON.stringify(body) });
   } catch (error) { if (error.name === "AbortError") throw error; throw new Error("无法连接本机服务，请确认服务正在运行后重试。"); }
   if (response.status === 204) return null;
   if (response.ok && response.headers.get("Content-Type")?.startsWith("audio/")) return response.blob();
@@ -105,7 +107,7 @@ function navigate(view, push = true) {
   const title = view === "chat" ? state.detail?.title || "新对话" : {settings:"助手配置", connections:"API接入", role:"助手配置", devices:"设备", capabilities:"能力", insights:"数据洞察"}[view];
   el("view-title").textContent = title;
   el("rename-form").hidden = true; el("view-title").hidden = false;
-  const path = {settings:"/settings", connections:"/settings#api", role:"/settings#role", devices:"/devices", capabilities:"/settings#capabilities", insights:"/settings#insights", chat:"/"}[view];
+  const path = appPath({settings:"/settings", connections:"/settings#api", role:"/settings#role", devices:"/devices", capabilities:"/settings#capabilities", insights:"/settings#insights", chat:"/"}[view]);
   if (push && location.pathname + location.hash !== path) history.pushState({view}, "", path);
   document.title = `${title} · AtomS3R`;
   closeSidebar(); notice(); refreshControls(); renderSessions();
@@ -244,7 +246,8 @@ function messageNode(message) {
     catch { notice("无法写入剪贴板，请选择回答文字后手动复制。", "error"); }
   });
   footer.append(copy);
-  footer.append(node("span", "", assistantInfo(message))); article.append(footer);
+  const metadata = node("span", "", assistantInfo(message));
+  footer.append(metadata); article.append(footer);
   if (message.knowledge) {
     const sources = node("details", "message-sources");
     sources.append(node("summary", "", message.knowledge.status === "empty" ? "未检索到匹配的官方资料" : `检索了 ${message.knowledge.documents.length} 个资料片段 · 查看来源`));
@@ -257,6 +260,9 @@ function renderMessageReferences(article,message) {
   if (!article) return;
   article.querySelector(".message-personal-sources")?.remove();
   article.querySelector(".message-tool-calls")?.remove();
+  article.querySelector(".message-token-usage")?.remove();
+  const usageDetails = tokenUsageDetails(message.usage);
+  article.append(usageDetails);
   if (Array.isArray(message.sources) && message.sources.length) {
     const details = node("details","message-sources message-personal-sources");
     details.append(node("summary","",`已向模型提供 ${message.sources.length} 个资料片段 · 查看出处；实际引用以正文 [资料N] 为准`));
@@ -269,7 +275,7 @@ function renderMessageReferences(article,message) {
       if (source.ordinal != null) parts.push(`片段 ${source.ordinal}`);
       const label = `${citation} ${parts.join(" · ")}`;
       let original = null;
-      if (source.original_url) {try {const url = new URL(source.original_url,location.origin); if (url.origin === location.origin && url.pathname.startsWith("/api/knowledge/personal/") && !url.username && !url.password) original = url;} catch {}}
+      if (source.original_url) {try {const url = window.assistantPaths.localLink(source.original_url); if (url?.pathname.startsWith(appPath("/api/knowledge/personal/"))) original = url;} catch {}}
       if (original) {const link = node("a","",label); link.href = original.href; link.download = source.filename || ""; entry.append(link);}
       else entry.append(node("span","",label));
       if (source.document_version != null) entry.append(node("span","metadata",`资料版本 ${source.document_version}`));
@@ -292,11 +298,55 @@ function renderMessageReferences(article,message) {
   }
 }
 const SOURCE_LABELS = { text: "文字", web_voice: "网页语音", device_voice: "设备语音" };
+function tokenUsageDetails(usage) {
+  const details = node("details", "message-sources message-token-usage");
+  details.append(node("summary", "", "Token 明细与统计口径"));
+  const list = node("ul", "message-reference-list");
+  const count = value => Number.isInteger(value) ? value.toLocaleString("zh-CN") : "未报告";
+  const row = (label, value) => {
+    const entry = node("li");
+    entry.append(node("span", "", label), node("span", "metadata", count(value)));
+    list.append(entry);
+  };
+  row("本轮模型响应次数（含工具续答）", usage?.response_count);
+  row("已报告用量的响应次数", usage?.reported_response_count);
+  const labels = {text_tokens:"文字", audio_tokens:"音频", image_tokens:"图片", video_tokens:"视频",
+    cached_tokens:"缓存命中（输入子集）", cached_tokens_details:"缓存命中细分",
+    reasoning_tokens:"思考（输出子集）"};
+  const breakdown = (prefix, values) => {
+    for (const [key, value] of Object.entries(values || {})) {
+      const label = `${prefix} · ${labels[key] || key}`;
+      if (value && typeof value === "object") breakdown(label, value);
+      else row(label, value);
+    }
+  };
+  for (const [label, field] of [["输入", "input_tokens_details"], ["输出", "output_tokens_details"]]) {
+    const values = usage?.[field];
+    const expected = field === "input_tokens_details" ? ["text_tokens", "audio_tokens", "cached_tokens"] : ["text_tokens", "audio_tokens"];
+    for (const key of expected) row(`${label} · ${labels[key]}`, values?.[key]);
+    breakdown(label, Object.fromEntries(Object.entries(values || {}).filter(([key]) => !expected.includes(key))));
+  }
+  for (const [index, response] of (usage?.responses || []).entries()) {
+    const entry = node("li", "", `第 ${index + 1} 次模型响应：输入 ${count(response.prompt_tokens)} / 输出 ${count(response.completion_tokens)} / 合计 ${count(response.total_tokens)}`);
+    list.append(entry);
+  }
+  details.append(list, node("p", "", "输入包含指令、工具定义、有效历史和当前消息，语音还可能含音频。供应商未逐项报告系统指令/工具/历史各占多少；这里不估造。缓存是输入的一部分，不重复相加。一次回答可能经过多次模型响应，各次输入会分别计量；Token 数不等于费用。缺项表示未报告，旧历史无法补算。"));
+  if (usage?.response_count > usage?.reported_response_count) {
+    details.append(node("p", "", "本轮部分响应未报告用量，合计不完整；明细只在所有响应均报告同一项时累计。"));
+  }
+  return details;
+}
 function assistantInfo(message) {
   const info = [];
   if (message.source && message.source !== "text" && SOURCE_LABELS[message.source]) info.push(SOURCE_LABELS[message.source]);
   if (message.model) info.push(message.model);
-  info.push(message.usage?.total_tokens !== null && message.usage?.total_tokens !== undefined ? `${message.usage.total_tokens} Token` : "用量未报告");
+  const usage = message.usage;
+  if (usage && ["prompt_tokens", "completion_tokens", "total_tokens"].some(key => usage[key] !== null && usage[key] !== undefined)) {
+    const count = value => value === null || value === undefined ? "未报告" : value.toLocaleString("zh-CN");
+    info.push(`本轮 Token：输入 ${count(usage.prompt_tokens)} / 输出 ${count(usage.completion_tokens)} / 合计 ${count(usage.total_tokens)}`);
+  } else {
+    info.push("本轮 Token：供应商未报告");
+  }
   if (message.estimated_cost !== null && message.estimated_cost !== undefined) info.push(`${message.estimated_cost} ${message.currency}`);
   if (message.knowledge) info.push(message.knowledge.status === "empty" ? "资料未命中" : `资料检索 ${message.knowledge.documents?.length ?? 0} 段`);
   if (message.finish_reason === "length") info.push("回复达到长度上限");
@@ -517,7 +567,7 @@ function renderVoiceOptions() {
 }
 async function loadVoices() {
   try {
-    const response = await fetch("/api/voices", {headers:{"X-Local-Settings":"1"}});
+    const response = await appFetch("/api/voices", {headers:{"X-Local-Settings":"1"}});
     if (!response.ok) return;
     const data = await response.json();
     clonedVoices = Array.isArray(data.cloned) ? data.cloned : [];
@@ -673,7 +723,7 @@ el("rt-sample-button").addEventListener("click", async () => {
       audio.src = option.dataset.sample;
     } else {
       realtimePreviewController = new AbortController();
-      const response = await fetch("/api/voices/qwen/preview", {
+      const response = await appFetch("/api/voices/qwen/preview", {
         method:"POST", signal:realtimePreviewController.signal,
         headers:{"Content-Type":"application/json","X-Local-Settings":"1"},
         body:JSON.stringify({voice:option.value}),
@@ -718,7 +768,7 @@ el("qwen-clone-form").addEventListener("submit", async event => {
   submit.disabled = true;
   el("qwen-clone-status").textContent = "正在上传并复刻，通常需要几秒…";
   try {
-    const response = await fetch("/api/voices/qwen", {
+    const response = await appFetch("/api/voices/qwen", {
       method:"POST",
       headers:{"Content-Type":"application/octet-stream","X-Local-Settings":"1",
         "X-Voice-Name":encodeURIComponent(name),"X-Voice-Filename":encodeURIComponent(file.name)},
@@ -876,7 +926,7 @@ el("clone-form").addEventListener("submit", async event => {
   const submit = el("clone-submit");
   submit.disabled = true; el("clone-status").textContent = "正在处理音频…"; el("clone-status").dataset.kind = "";
   try {
-    const response = await fetch("/api/voices", {
+    const response = await appFetch("/api/voices", {
       method: "POST",
       headers: {"X-Local-Settings":"1", "X-Voice-Name":encodeURIComponent(name), "X-Voice-Filename":encodeURIComponent(file.name), "Content-Type":"application/octet-stream"},
       body: await file.arrayBuffer(),
@@ -2019,7 +2069,7 @@ function openKbContent(doc) {
   const meta = el("kb-content-meta"); meta.replaceChildren();
   meta.append(node("span","",[doc.filename || "文件未提供", doc.group_name || "未分组", kbSizeText(doc.size), doc.chunks != null ? `${doc.chunks} 段` : "片段数未提供", doc.updated_at ? insightTime(doc.updated_at) : "时间未提供"].join(" · ")));
   const download = el("kb-content-download");
-  download.href = `/api/knowledge/personal/${encodeURIComponent(doc.id)}/original`; download.download = doc.filename || "";
+  download.href = appPath(`/api/knowledge/personal/${encodeURIComponent(doc.id)}/original`); download.download = doc.filename || "";
   el("kb-content-chunks").replaceChildren(node("p","kb-empty",doc.chunks != null ? `这份资料共 ${doc.chunks} 段，切到「分段片段」查看每段原文。` : "片段信息未提供。"));
   showKbContentTab("text");
   el("kb-content-dialog").showModal();
@@ -2033,7 +2083,7 @@ async function loadKbContentText(doc) {
     return;
   }
   try {
-    const res = await fetch(`/api/knowledge/personal/${encodeURIComponent(doc.id)}/original`);
+    const res = await appFetch(`/api/knowledge/personal/${encodeURIComponent(doc.id)}/original`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
     if (kbContentDoc !== doc) return;
@@ -2061,7 +2111,7 @@ async function uploadKnowledgeFile(file, documentId = "") {
   }
   const path = documentId ? `/api/knowledge/personal/${encodeURIComponent(documentId)}/replace` : "/api/knowledge/personal/upload";
   capabilityNotice(documentId ? "正在提取新文件并更新索引…" : "正在上传、提取文字并建立索引…");
-  const response = await fetch(path,{method:"POST",headers,body:file});
+  const response = await appFetch(path,{method:"POST",headers,body:file});
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(data?.detail?.message || (typeof data?.detail === "string" ? data.detail : `资料处理失败（HTTP ${response.status}）。`));
   el("kb-results").replaceChildren(); ++capabilityState.queryId; await reloadKnowledgeDocuments();
@@ -2135,7 +2185,7 @@ function renderKnowledgeResults(data) {
     entry.append(det);
     if (match.document_id) {
       const original = node("a","text-button","下载来源原文");
-      original.href = `/api/knowledge/personal/${encodeURIComponent(match.document_id)}/original`; original.download = match.filename || "";
+      original.href = appPath(`/api/knowledge/personal/${encodeURIComponent(match.document_id)}/original`); original.download = match.filename || "";
       entry.append(original);
     }
     area.append(entry);
@@ -2207,7 +2257,7 @@ function insightScoreText(source) {
 }
 function insightJson(value) {return value === null || value === undefined ? "未提供" : typeof value === "string" ? value : JSON.stringify(value,null,2);}
 function insightOriginalLink(source,label = "预览当时原文") {
-  if (source.original_available === true && source.original_url) {const link = node("a","text-button",label); link.href = source.original_url; if (source.filename) link.download = source.filename; return link;}
+  if (source.original_available === true && source.original_url) {const url = window.assistantPaths.localLink(source.original_url); if (url?.pathname.startsWith(appPath("/api/knowledge/personal/"))) {const link = node("a","text-button",label); link.href = url.href; if (source.filename) link.download = source.filename; return link;}}
   const state = source.original_state, text = state === "deleted" ? "原文已删除，仅保留当时片段快照。" : state === "replaced" ? "原文已替换，仅保留当时片段快照。" : "原文不可下载，仅保留当时片段快照。";
   return node("span","small-note",text);
 }
@@ -2548,8 +2598,9 @@ for (const [id,key] of [["device-copy-local","local"],["device-copy-original","o
 }
 setInterval(() => { if (state.view === "devices" && !deviceBusy) loadDevices().catch(() => { el("device-state").textContent = "无法连接电脑服务"; }); },3000);
 function routeView() {
-  if (location.pathname === "/settings") return {"#api":"connections", "#tts":"connections", "#role":"role", "#capabilities":"capabilities", "#insights":"insights"}[location.hash] || recalled("atoms3r.settingsSection") || "role";
-  return {"/devices":"devices"}[location.pathname] || "chat";
+  const path = window.assistantPaths.routePath();
+  if (path === "/settings") return {"#api":"connections", "#tts":"connections", "#role":"role", "#capabilities":"capabilities", "#insights":"insights"}[location.hash] || recalled("atoms3r.settingsSection") || "role";
+  return {"/devices":"devices"}[path] || "chat";
 }
 window.addEventListener("popstate", () => navigate(routeView(),false));
 (async () => {
@@ -2575,7 +2626,7 @@ window.addEventListener("popstate", () => navigate(routeView(),false));
     }
     renderSessions(); renderMessages();
     if (state.view === "connections" && savedConfig.voice_mode === "pipeline" && savedConfig.api_key_configured) await refreshModelChoices();
-    const health = await request("/health"); el("context-note").textContent = `仅最近 ${health.history_turns} 轮参与上下文`;
+    const health = await request("/health"); el("context-note").textContent = `历史重建最多 ${health.history_turns} 轮 / ${health.context_history_chars?.toLocaleString("zh-CN") || "—"} 字符，旧记录按需查`;
   } catch (error) { notice(error.message, "error"); }
   refreshControls();
 })();

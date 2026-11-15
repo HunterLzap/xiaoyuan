@@ -1,0 +1,23 @@
+{
+  "frame_width": 128,
+  "frame_height": 128,
+  "columns": 4,
+  "frame_ms": 80,
+  "animations": [
+    {"name": "startup", "label": "启动中", "frames": 16, "playback": "Once", "next": "idle"},
+    {"name": "connecting", "label": "连接中", "frames": 10, "playback": "Loop", "next": "idle"},
+    {"name": "idle", "label": "待机", "frames": 16, "playback": "Loop", "next": "idle"},
+    {"name": "idle_action", "label": "待机", "frames": 10, "playback": "Once", "next": "idle"},
+    {"name": "wake", "label": "已唤醒", "frames": 10, "playback": "Once", "next": "listening"},
+    {"name": "listening", "label": "倾听中", "frames": 12, "playback": "Loop", "next": "listening"},
+    {"name": "thinking", "label": "思考中", "frames": 10, "playback": "Loop", "next": "thinking"},
+    {"name": "searching", "label": "执行中", "frames": 10, "playback": "Loop", "next": "thinking"},
+    {"name": "speaking", "label": "回答中", "frames": 10, "playback": "Loop", "next": "listening"},
+    {"name": "success", "label": "已完成", "frames": 10, "playback": "Once", "next": "listening"},
+    {"name": "clarification", "label": "请补充", "frames": 10, "playback": "Once", "next": "listening"},
+    {"name": "disconnected", "label": "未连接", "frames": 10, "playback": "Loop", "next": "disconnected"},
+    {"name": "error", "label": "出错了", "frames": 10, "playback": "Hold", "next": "error"},
+    {"name": "sleep", "label": "待机", "frames": 16, "playback": "Loop", "next": "sleep"},
+    {"name": "cancel", "label": "已打断", "frames": 10, "playback": "Once", "next": "listening"}
+  ]
+}

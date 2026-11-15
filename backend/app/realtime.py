@@ -12,7 +12,7 @@ from websockets.exceptions import ConnectionClosed
 
 from .llm import Completion, ProviderError
 from .schemas import TokenUsage, TranscriptMessage
-from .tool_dialogue import (TOOL_INSTRUCTIONS, MAX_TOOL_ROUNDS, combine_usage,
+from .tool_dialogue import (TOOL_INSTRUCTIONS, MAX_TOOL_ROUNDS, MUTATING_CONTROL_TOOLS, combine_usage,
                             control_request_tools, control_history,
                             control_plan, describe_control)
 from .order_confirmation import RealtimeOrderGuard
@@ -64,6 +64,7 @@ class RealtimeTurn:
         self.committed = False
         self.user = ""
         self.transcription_done = False
+        self.transcription_ready = asyncio.Event()
         self.reply = ""            # 跨全部模型响应的完整转写（含工具续答），不覆盖已输出文本
         self._response_text = ""   # 当前这一次模型响应自身的转写
         self._transcript_seq = 0   # 响应分段序号：每个 response.created 自增，兼容无 response_id 的响应
@@ -386,6 +387,7 @@ class RealtimeTurn:
                         self.previous_item = self.item
                         self.reply = self.user = ""
                         self.transcription_done = False
+                        self.transcription_ready.clear()
                         self._response_text = ""
                         self._transcript_seq = 0
                         self.saved = self.response_done = False
@@ -413,6 +415,7 @@ class RealtimeTurn:
                     self.order_guard.begin(self.user, self.tool_context.allowed)
                     self.control_plan_cache = control_plan(self.user, self.session.messages)
                     self.required_controls = {action["tool"] for action in self.control_plan_cache}
+                    self.transcription_ready.set()
 
                     # Check for conversation end intent
                     if _is_end_intent(self.user):
@@ -469,8 +472,7 @@ class RealtimeTurn:
                         if item.get("type") == "function_call":
                             self.pending_tools[item["call_id"]] = item
                     usage = event["response"].get("usage") or {}
-                    counts = TokenUsage(prompt_tokens=usage.get("input_tokens"),completion_tokens=usage.get("output_tokens"),
-                                        total_tokens=usage.get("total_tokens")) if usage else None
+                    counts = TokenUsage.from_provider(usage) if usage else None
                     result = Completion(self.reply or None, counts, "tool_calls" if self.pending_tools else "stop")
                     self.model_results.append(result)
                     self.usage = combine_usage(self.model_results)
@@ -595,12 +597,28 @@ class RealtimeTurn:
                 await self.audio.finish()
             outputs = []
             for item in items:
+                if item.get("name") in MUTATING_CONTROL_TOOLS:
+                    await self.transcription_ready.wait()
                 if self.turn_id != turn_id:
                     return
+                if self.source == "device_voice":
+                    await self.emit("activity", {"state": "searching", "turn_id": str(turn_id)})
                 output = await context.execute(item.get("name", ""), item.get("arguments", "{}"), item["call_id"])
                 outputs.append(output)
                 if self.turn_id != turn_id:
                     return
+                if self.source == "device_voice":
+                    call = context.calls[-1]
+                    if call.get("error_code") in {"order_confirmation_required", "order_confirmation_denied"}:
+                        activity = "clarification"
+                    elif (call["status"] == "ok" and (call.get("http_status") or 200) < 400
+                          and not (isinstance(output, dict) and output.get("error"))
+                          and (item.get("name") not in {"set_device_volume", "get_device_status"}
+                               or isinstance(output, dict) and output.get("verified") is True)):
+                        activity = "success"
+                    else:
+                        activity = "error"
+                    await self.emit("activity", {"state": activity, "turn_id": str(turn_id)})
                 await self.send("conversation.item.create", item={
                     "type": "function_call_output", "call_id": item["call_id"],
                     "output": function_call_output_payload(output),

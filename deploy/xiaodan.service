@@ -7,10 +7,10 @@ Wants=network-online.target
 Type=simple
 User=voice-assistant
 Group=voice-assistant
-WorkingDirectory=/opt/xiaodan
+WorkingDirectory=/opt/xiaodan/current
 EnvironmentFile=/etc/xiaodan/access.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/xiaodan/.venv/bin/python -m backend.run_devices --public
+ExecStart=/opt/xiaodan/.venv/bin/python -m deploy.run_public
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=30

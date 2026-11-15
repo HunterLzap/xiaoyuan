@@ -6,13 +6,13 @@
 """
 from __future__ import annotations
 
-from .prompt_context import context_instruction
+from .prompt_context import context_instruction, now_context_line
 from .speech_text import SPEECH_OUTPUT_INSTRUCTION
-from .tool_dialogue import build_tool_instructions
+from .tool_dialogue import BUILTIN_TOOL_NAMES, build_tool_instructions
 
 
 def build_system_prompt(settings, channel="text", tool_names=None, turn_state=None,
-                        assistant_prompt=None) -> str:
+                        assistant_prompt=None, compact=False) -> str:
     """拼一条完整系统提示。
 
     channel: "voice" 追加语音朗读规范；"text" 不追加。
@@ -21,17 +21,23 @@ def build_system_prompt(settings, channel="text", tool_names=None, turn_state=No
     assistant_prompt: 覆盖助手提示词（默认取 settings.system_prompt）。
     """
     parts = []
+    compact = compact and channel == "text" and set(tool_names or ()) <= BUILTIN_TOOL_NAMES
     base = assistant_prompt if assistant_prompt is not None else (getattr(settings, "system_prompt", "") or "")
     if base:
         parts.append(base)
-    parts.append(context_instruction())
+    parts.append(
+        "\n" + now_context_line() +
+        "\n时效事实只依据本轮成功工具结果并说明数据时间；缺依据就说明无法获取，不猜数值。"
+        "日期时间直接用上述北京时间，非实时常识正常回答。"
+        if compact else context_instruction())
     if channel == "voice":
         parts.append(SPEECH_OUTPUT_INSTRUCTION)
-    parts.append(build_tool_instructions(tool_names, channel))
-    if tool_names is not None:
+    parts.append(build_tool_instructions(tool_names, channel, compact=compact))
+    if tool_names is not None and not compact:
         parts.append("\n再次强调：结合当前问题和有效对话上下文，判断用户是否有具体的查询或控制需求；"
-                     "遇到省略式追问（如“明天呢？”“发货了吗？”）要结合上一轮意图判断，不要当成闲聊。"
-                     "纯寒暄、闲聊、情绪表达不为找话题而自行调用工具。")
+                     "遇到省略式追问（如“明天呢？”“发货了吗？”）要结合上一轮意图判断，不要当成闲聊。")
+        if channel != "voice":
+            parts.append("纯寒暄、闲聊、情绪表达不为找话题而自行调用工具。")
     if turn_state:
         state = str(turn_state)
         parts.append(state if state.startswith("\n") else "\n" + state)

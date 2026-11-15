@@ -10,6 +10,8 @@ from .realtime import DirectConnect
 from .schemas import TokenUsage
 from .speech_text import function_call_output_payload
 from .prompt_builder import build_system_prompt
+from .text_tool_selection import TextToolSelection
+from .tool_dialogue import TOOL_LOADING_NAME
 
 
 class RealtimeTextProvider:
@@ -37,15 +39,19 @@ class RealtimeTextProvider:
                     if json.loads(await socket.recv()).get("type") != "session.created":
                         raise ValueError()
                     joined = "\n".join(message["content"] for message in messages if message["role"] == "system")
-                    tool_names = ([item["name"] for item in tool_context.registry.definitions()]
-                                  if tool_context is not None and tool_context.registry is not None else [])
+                    selection = TextToolSelection(tool_context) if tool_context is not None else None
                     turn_state = (tool_context.order_state_text()
                                   if tool_context is not None and hasattr(tool_context, "order_state_text") else "")
-                    instructions = build_system_prompt(settings, "text", tool_names,
-                                                       turn_state or None, assistant_prompt=joined)
-                    session_config = {"modalities": ["text"], "instructions": instructions, "turn_detection": None}
-                    if tool_context is not None:
-                        session_config["tools"] = tool_context.registry.definitions(nested=settings.rt_provider == "bailian")
+                    def selected_config():
+                        instructions = build_system_prompt(
+                            settings, "text", selection.active_names() if selection else [],
+                            turn_state or None, assistant_prompt=joined, compact=True)
+                        if selection:
+                            instructions += selection.instructions()
+                        return {"instructions": instructions,
+                                "tools": selection.definitions(nested=settings.rt_provider == "bailian") if selection else []}
+
+                    session_config = {"modalities": ["text"], "turn_detection": None, **selected_config()}
                     await send("session.update", session=session_config)
                     while True:
                         event = json.loads(await socket.recv())
@@ -88,11 +94,8 @@ class RealtimeTextProvider:
                             for item in response.get("output", []):
                                 if item.get("type") == "function_call":
                                     function_calls[item["call_id"]] = item
-                            result = Completion(None, TokenUsage(
-                                prompt_tokens=usage.get("input_tokens"),
-                                completion_tokens=usage.get("output_tokens"),
-                                total_tokens=usage.get("total_tokens"),
-                            ) if usage else None, "tool_calls" if function_calls else "stop")
+                            result = Completion(None, TokenUsage.from_provider(usage) if usage else None,
+                                                "tool_calls" if function_calls else "stop")
                             round_results.append(result)
                             request_pending = False
                             if not function_calls:
@@ -102,15 +105,27 @@ class RealtimeTextProvider:
                                 raise ProviderError(502, "tool_not_configured", "模型请求了未配置的工具。")
                             if round_index >= MAX_TOOL_ROUNDS:
                                 raise ProviderError(502, "tool_limit", "本轮工具调用已达上限，未继续执行。")
+                            loading_only = True
+                            active_before = selection.active_names()
                             for call_id, call in function_calls.items():
                                 output = await tool_context.execute(call.get("name", ""), call.get("arguments", "{}"), call_id)
+                                if call.get("name") != TOOL_LOADING_NAME or output.get("error"):
+                                    loading_only = False
                                 await send("conversation.item.create", item={"type": "function_call_output",
                                     "call_id": call_id, "output": function_call_output_payload(output)})
                                 tool_context.mark_sent([call_id])
                             function_calls = {}
-                            round_index += 1
-                            if round_index == MAX_TOOL_ROUNDS:
-                                await send("session.update", session={"tools": []})
+                            if not loading_only:
+                                round_index += 1
+                            if round_index == MAX_TOOL_ROUNDS or selection.active_names() != active_before:
+                                await send("session.update", session=(
+                                    {"tools": []} if round_index == MAX_TOOL_ROUNDS else selected_config()))
+                                while True:
+                                    update = json.loads(await socket.recv())
+                                    if update.get("type") == "error":
+                                        raise ValueError()
+                                    if update.get("type") == "session.updated":
+                                        break
                             request_pending = True
                             await send("response.create")
         except TimeoutError:

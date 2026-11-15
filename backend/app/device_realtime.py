@@ -561,7 +561,9 @@ class DeviceRealtime:
         if kind == "ready":
             conn.voice_session_id = self.turn.sid
         elif kind == "next":
+            interrupted_playback = self.speaking
             await self.prepare_playback(interrupt=True)
+            await conn.send({"type": "ui", "state": "cancel" if interrupted_playback else "listening"})
             await self._archive_metrics("interrupted" if not self.metrics_finalized else "complete")
             self.first_audio_at = None
             self.first_packet_at = None
@@ -602,6 +604,7 @@ class DeviceRealtime:
             is_end_intent = isinstance(data, dict) and data.get("reason") == "end_intent"
             await self.stop_audio(interrupt=is_end_intent)
             await self._archive_metrics("end_intent" if is_end_intent else "idle")
+            await conn.send({"type": "ui", "state": "sleep"})
             with suppress(Exception):
                 await conn.ws.close()
         elif kind=="user":
@@ -613,6 +616,11 @@ class DeviceRealtime:
             self._session_buffer()
             self.speech_stopped_at = monotonic()
             self.publish_metrics()
+            if not self.speaking:
+                await conn.send({"type": "ui", "state": "thinking"})
+        elif kind == "activity":
+            if data["turn_id"] == str(self.turn.turn_id) and not self.speaking:
+                await conn.send({"type": "ui", "state": data["state"]})
         elif kind=="notice":
             if self.answer_first_audio_at is not None:
                 await self.prepare_playback()
@@ -669,6 +677,7 @@ class DeviceRealtime:
                     await drain()
             else:
                 await self._archive_metrics("text_only" if text_only else "no_audio")
+                await conn.send({"type": "ui", "state": "listening"})
         elif kind=="error":
             self.hub.last_error = data
             if self._is_control_failure(data):
@@ -681,6 +690,7 @@ class DeviceRealtime:
                 await self.stop_audio(interrupt=True)
                 await self.show_text(data)
             await self._archive_metrics("error")
+            await conn.send({"type": "ui", "state": "error"})
 
     async def stop_audio(self, interrupt: bool = False):
         self.playback_metrics.mark("stop_audio")

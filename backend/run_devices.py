@@ -46,7 +46,8 @@ async def run(admin_port, device_port, require_public=False):
     config = Settings()
     if require_public and not config.public_origin:
         raise ValueError("Public deployment requires AI_PUBLIC_ORIGIN and AI_ADMIN_PROXY_TOKEN")
-    hub = DeviceHub(port=device_port, public_origin=config.public_origin, speech=SpeechRecognizer(
+    hub = DeviceHub(port=device_port, public_origin=config.public_origin,
+                    public_base_path=config.public_base_path, speech=SpeechRecognizer(
         python=config.speech_python or SPEECH_PYTHON,
         threads=config.speech_threads, model_dir=config.asr_model_dir,
     ))
@@ -54,7 +55,7 @@ async def run(admin_port, device_port, require_public=False):
                                  port=admin_port, log_level="info", proxy_headers=False))
     device_host = "127.0.0.1" if config.public_origin else "0.0.0.0"
     device = Server(uvicorn.Config(create_gateway(hub), host=device_host, port=device_port,
-                                   log_level="info", access_log=True, proxy_headers=False, ws_max_size=12000,
+                                   log_level="info", access_log=False, proxy_headers=False, ws_max_size=12000,
                                    ws_ping_interval=20, ws_ping_timeout=20))
     tasks = [asyncio.create_task(admin.serve()), asyncio.create_task(device.serve())]
     try:

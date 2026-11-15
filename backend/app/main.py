@@ -14,7 +14,7 @@ import urllib.parse
 from fastapi import FastAPI, Query, Request, Response, WebSocket, WebSocketDisconnect
 from .realtime import RealtimeTurn
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import qwen_voices, voices
@@ -95,6 +95,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         app.state.devices = device_hub if device_hub is not None else DeviceHub(
             store.path.parent / "data" / "devices.json",
             public_origin=config.public_origin,
+            public_base_path=config.public_base_path,
             speech=SpeechRecognizer(
                 python=config.speech_python or SPEECH_PYTHON,
                 threads=config.speech_threads, model_dir=config.asr_model_dir,
@@ -126,7 +127,12 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                 await app.state.embedder.close()
             await close_shared_client()
 
-    app = FastAPI(title="AtomS3R AI Assistant", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="AtomS3R AI Assistant", version="0.2.0", lifespan=lifespan,
+                  root_path=startup_config.public_base_path)
+
+    def app_page():
+        content = Path(__file__).with_name("app.html").read_text(encoding="utf-8")
+        return HTMLResponse(content.replace("__APP_BASE_PATH__", startup_config.public_base_path))
     allowed_hosts = ["localhost", "127.0.0.1", "[::1]"]
     if startup_config.public_origin:
         allowed_hosts.append(urllib.parse.urlsplit(startup_config.public_origin).hostname)
@@ -167,7 +173,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = "microphone=(self), camera=()"
-        if request.url.path in {"/", "/settings", "/devices", "/settings.js", "/app.js", "/voice.js", "/app.css"}:
+        if request.url.path in {"/", "/settings", "/devices", "/settings.js", "/paths.js", "/app.js", "/voice.js", "/app.css"}:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
                 "connect-src 'self'; media-src 'self' blob: https://g-adoc.alcasset.com https://help-static-aliyun-doc.aliyuncs.com; frame-ancestors 'none'; form-action 'self'"
@@ -203,6 +209,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             "provider": service.settings.active_provider, "model": service.settings.active_model,
             "upstream_verified": service.usage.successful_calls > 0,
             "history_turns": service.settings.history_turns,
+            "context_history_chars": service.settings.context_history_chars,
             "history_enabled": service.history_store is not None,
             "m5stack_enabled": service.settings.m5stack_enabled,
         }
@@ -226,11 +233,11 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
 
     @app.get("/", include_in_schema=False)
     async def home():
-        return FileResponse(Path(__file__).with_name("app.html"))
+        return app_page()
 
     @app.get("/devices", include_in_schema=False)
     async def devices_page():
-        return FileResponse(Path(__file__).with_name("app.html"))
+        return app_page()
 
     @app.get("/api/devices")
     async def devices_status():
@@ -400,12 +407,16 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
 
     @app.get("/settings", include_in_schema=False)
     async def settings_page():
-        return FileResponse(Path(__file__).with_name("app.html"))
+        return app_page()
 
     @app.get("/settings.js", include_in_schema=False)
     @app.get("/app.js", include_in_schema=False)
     async def settings_script():
         return FileResponse(Path(__file__).with_name("app.js"), media_type="text/javascript")
+
+    @app.get("/paths.js", include_in_schema=False)
+    async def paths_script():
+        return FileResponse(Path(__file__).with_name("paths.js"), media_type="text/javascript")
 
     @app.get("/voice.js", include_in_schema=False)
     async def voice_script():

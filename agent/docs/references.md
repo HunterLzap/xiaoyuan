@@ -1,6 +1,8 @@
 # 有效资料与核对边界
 
-> **当前口径（2026-11-08）**：实时主线为百炼 `qwen3.8-omni-flash-realtime`（音色为百炼塔菲复刻 `AI_RT_VOICE`）；MiMo/Kokoro 属分模型或历史候选。**设备端 AEC 已核实**：上游 `main/Kconfig.projbuild` 的 `config USE_DEVICE_AEC` 依赖的板级列表中**不含任何 M5Stack 板（含 AtomS3R + Echo Base）**，官方 AEC 指引支持列表亦不含此板；v2.2.6 release 有 `v2.2.6_atoms3r-echo-base.zip` 但为默认构建（AEC 关）。因此“语音插话打断”在本板不属可开关项，`abort` 按键打断可用。仍不下载/刷机/写设备。
+更新：2026-11-15。本文件只登记资料来源与核对边界，不决定当前运行状态。百炼实时协议、动态工具、上下文与LiveKit参考集中在 [architecture](architecture.md)；模型/声音现状看START。
+
+上游早期默认构建对此板未开放标准AEC选项，只说明当时上游代码；本项目后来已实现播放参考/AEC，不能据旧板型列表否定项目实现。当前能力与现场确认必须结合本项目Git/代码与progress，不把握手aec标志当成全部打断效果证明。
 
 以下整合对当前项目有用的资料，历史资料按原核对日期理解；2026-10-17仅为M1的API配置重新核实下列模型列表官方协议，未核价或验真实账户。未来涉及版本、价格、模型ID、协议差异时须重新查官方来源。其他板型采购、过时套餐和无关教程不继续保留为项目规范。
 
@@ -28,13 +30,13 @@
 
 历史控制台仅确认设备当时在线、板型与2.2.6版本，模型有预设菜单、记忆开启但0条、知识库未关联、MCP未连接。未验证真实声音、记忆召回、账号额度或任意API接入能力；不把旧菜单名称记成可调用模型ID。
 
-## MiMo TTS本轮协议核实（2026-10-17）
+## 历史：MiMo TTS协议核实（2026-10-17）
 
 - TokenDance[基础TTS模型](https://tokendance.space/models/mimo-v2.5-tts)与[VoiceDesign模型](https://tokendance.space/models/mimo-v2.5-tts-voicedesign)的公开模型详情：`architecture.output_modalities=[audio]`，协议为`openai:chat-completions`；供应商说明直接链接小米合成文档。公开目录只有协议字段，不能单独证明模型返回文字。
 - TokenDance[Chat Completions协议](https://tokendance.space/docs/protocol-openai-chat-completions.md)核实网关路径及Bearer认证；结合其模型详情引用的[小米MiMo TTS文档](https://mimo.mi.com/docs/en-US/quick-start/usage-guide/audio/speech-synthesis-v2.5)，使用assistant文本、user风格/音色描述、audio.format=wav及内置模型的audio.voice，读取message.audio.data。VoiceDesign不发送内置voice，不开启自动润色。
 - 官方预置音色ID：mimo_default、冰糖、茉莉、苏打、白桦、Mia、Chloe、Milo、Dean。接口与字段按文档实现并模拟验证，真实TokenDance账户的转发兼容、音色可用性和实际计费仍未验收；不继承官网临时免费承诺。
 
-## 语音与模型
+## 语音与模型来源（历史核对，非当前选型清单）
 
 - **当前实时主线**为百炼 `qwen3.8-omni-flash-realtime`（OpenAI 兼容 realtime，WebSocket）；实时模式的设备/网页语音与网页文字均以它为准。MiMo/Kokoro 属分模型或历史候选，下列条目为按其核对日期的历史记录。
 - 2026-10-30核对 [TokenDance Chat Completions 示例](https://tokendance.space/docs/protocol-openai-chat-completions.md)：文字及流式示例都可省略 `max_tokens`，正文仍为 `message.content` / `delta.content`。本项目取消默认512限制，未配置时省略该字段，由服务端决定上限；不猜测另一固定上限或网关思考参数。

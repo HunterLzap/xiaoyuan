@@ -164,7 +164,7 @@ def public_settings(settings: Settings) -> dict:
 
 class SettingsStore:
     def __init__(self, path: Path = ROOT / ".env"):
-        self.path = path
+        self.path = path.resolve()
 
     def initialize_selection(self, current: Settings, tool_ids: list[str], kb_ids: list[str]) -> Settings:
         # 仅填充缺失字段，显式 [] 永远保留；保存失败则不能启用内存中的默认范围。

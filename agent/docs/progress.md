@@ -1,5 +1,304 @@
 # 当前进度与证据
 
+更新：2026-11-15。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
+
+## Git开发快照与新电脑接手（2026-11-15）
+
+- 用户在文档治理后明确授权将项目保存到Git，以便其他电脑/Agent统一接手。使用既有 `HunterLzap/xiaoyuan` 的main，不另初始化仓库、不建新分支、不强推；实际提交号和远端结果以Git历史为准。
+- 本次保存此前已经存在的部署适配、工具/Token/上下文优化、测试源码、文档治理结果，以及保留的新动画/UI/TCP实验。**保存实验源码不等于上线或已通过听感**；线上稳定release继续独立运行，不能从main整包部署/刷入。
+- 运行副本与工作树的文档保持同版；原电脑E盘路径、PID、COM3、SSH私钥路径与本地证据只作原环境记录。新电脑以clone根目录为准，阅读AGENTS→START→任务相关专题，完整步骤在handoff。
+- 私有.env、模型/设备凭据、数据库、知识库原文、录音样本、SSH私钥、虚拟环境、logs/output原始记录及构建产物不进入本次Git快照。仓库保留结果摘要，缺原机附件时标为无法独立复核，不因此重新调用模型或修改设备。
+- 本轮没有新增功能逻辑、运行产品测试、发模型请求、部署、重启或设备操作；卡顿继续按用户要求暂缓。提交前核对实际暂存清单与凭据排除情况，不将提交/推送当作运行验收。
+
+## 证据索引与有效范围
+
+下表只汇总已有记录，不表示本轮重跑。所有原始log/JSON/output位于Windows运行副本 `E:\xiaodan`，没有为了文档镜像复制私人数据进Git。下面绝对路径在本机和repo-export文档中都指向同一份原始证据。
+
+| 日期/环境 | 证据 | 可确认的结果 | 不覆盖/注意事项 |
+| --- | --- | --- | --- |
+| 11月15日 / Git与代码只读 | Git HEAD bd639a9，前一提交ead6381；工作树在repo-export | 稳定基线确有语音修复；现工作树含未提交实验，不等于在线代码 | 本轮不提交、不还原工作树、不部署；本机磁盘不等于旧进程已加载 |
+| 11月15日 / 历史本机测试 | [发送/播放日志](E:/xiaodan/logs/pytest-send-playback-finish-b8e4a2a-20261115.txt)、[动画批次日志](E:/xiaodan/logs/pytest-robot-ui-pack1-20261115.txt) | 两份末尾均15 passed、1 warning，分别7.37s/25.68s | 是各自当时代码的自动化结果，不是当前全仓重跑或设备听感；动画批次通过不证明动画无回归 |
+| 11月8日 / 本机真实资料 | [双库记录](E:/xiaodan/output/regression-kb-two-lib-20261108.json)、[历史矩阵H/S节](E:/xiaodan/output/regression-matrix-20261108.md) | 关键词/hybrid双库各仅命中本库，向量参与有审计佐证 | 管理试查与助手选库不同；不覆盖当前云端真机语音RAG |
+| 11月8日 / 取消契约复核 | [cancel-recheck](E:/xiaodan/output/cancel-recheck-20261108.json) | recheck=21/21；首字前可只有user.interrupted，无complete，空历史不能算通过 | 原始初测预期不同、旧失败保留；部分JSON中文标签乱码，数值/结构仍可核，不改写原始文件 |
+| 11月8日 / 订单C8复核 | [C8复核](E:/xiaodan/output/order-confirm-c8-recheck-20261108.json) | recheck=5/5，确认后实际按BH1001发送、无PH1001猜测 | HTTP400/INVALID_ORDER_ID是业务拒绝，不能写查单成功；该文件不能独立证明整体35/35 |
+| 11月8日 / 客户端实时WS | [guard结果](E:/xiaodan/output/voice-order-guard-results-20261108-183734.json) | 历史矩阵S节核为歧义8/8、天气6/6，共14/14 | 显式PH1001的实时音频输入缺PCM未验证；客户端收到音频不等于设备播完 |
+| 11月15日 / 云端网页实时文字 | [tasktools-final](E:/xiaodan/logs/tasktools-final-20261115.json)、[复合指令](E:/xiaodan/logs/tasktools-compound-final-20261115.json) | 天气/追问真实get_weather；未知需求经_load_task_tools再查询；逐响应Token保留 | 不覆盖语音任务工具路由，也不承诺所有请求都省Token |
+| 11月15日 / 文字驱动百炼音频 | [语音首批](E:/xiaodan/logs/voicelean-first-batch-20261115.json) | 报数零工具、3796输入/33输出（文字7/音频26），收到99840字节PCM | 不是麦克风输入/扬声器听感；不能当设备卡顿已修 |
+| 11月15日 / 原控制执行方法 | [意图执行记录](E:/xiaodan/logs/voice-control-execution-20261115.json) | 报数不调音量，明确音量进入真实执行层 | 当时device_offline是实际失败，不是设备音量已调整 |
+| 11月15日 / 供应商直连调查 | [语音路由调查](E:/xiaodan/logs/voice-routing-investigation-20261115.json) | “那明天呢”未调用工具、误复用旧日天气；响应开关被回显 | 配置探查未输入音频，不是完整真实语音时序验证，未接生产 |
+| 11月15日21:26–21:28 / 云端真设备 | 本文件“真实设备云端语音接通”记录；云端shared/logs/device-audio-turns.jsonl，session/turn见该节 | 真实收到报数并答复；34包全发、最大间隔61ms，无网关断供 | 用户仍反馈整段随机两处卡顿后继续，根因未定，已要求暂停；缺该轮设备收包/解码/播放记录 |
+
+### 本次治理检查（2026-11-15）
+
+- 扫描根目录、agent、output、logs、tests、固件本板自有文档及Git镜像；区分上游固件/工具链/模型许可/生成缓存，保留上游原貌，不将其测试当本项目结果。
+- 核查代码中的TextToolSelection使用范围、控制意图校验、Token字段、6轮/6000字符默认、4轮/8次业务边界和项目AEC实现；结合Git提交与既有JSON/log，修正“未部署/未切云/无Git/多库未实现/本板永不能AEC”等过期结论。
+- 总入口为AGENTS；当前快照START、结果progress、要求PRD、决定decisions、设计architecture、依赖roadmap、操作operations、判定acceptance各司其职。README/STATUS/agent导航不再维护多份运行快照。
+- 保留27份治理前规范快照、两份原始咨询；旧output报告/计划/动画草案、故障报告和固件开发日志原位归档，不改原始JSON/log。位置见 [归档索引](../archive/2026-11-15/README.md)。
+- 用户最新卡顿描述已记录为“整段随机两处停顿后继续”，明确暂不解决；本轮没有业务修改、模型调用、服务/设备操作或产品测试。
+- 整理后检查：32份入口/规范文档的177个本地引用，在运行副本及Git镜像均无缺失；25份原位归档/产物入口/本板文档的45个本地引用无缺失。修复了15个只在工作树中失效的历史证据相对链接，统一指向实际运行副本，未复制私人数据。
+- 63份明确文档镜像（含30份归档文件）逐字节一致；27份治理前快照在同步前已与原工作树核对一致。活动规范中未再检出未部署/未切OTA/无Git/多库未实现/旧默认AEC断言；历史原文仍保留在归档或按日期过程记录。
+- 本轮治理前后非文档Git差异SHA256均为 `f8ca80a1b654216c92efa4399ac83e259eace4c5bba339c7f6cef058e191bb6b`，原有非文档改动未变；没有提交或部署。外部站点链接未重新联网验证，归档快照内部旧相对链接按历史目录理解，不作为当前导航。
+
+## 历史过程记录（只作证据追溯）
+
+以下每节都是标题所指日期/版本的快照；其中的过程性下一步/权限/在线状态不可直接执行。后续修复或更正以相应新日期记录为准，不从单一旧报告推导现状。
+
+## 真实设备云端语音接通，用户仍反馈卡顿（2026-11-15 21:32）
+
+- 真实连接时间21:26:45.471166+08:00；会话6ee66d7b-c3ac-42b9-8d75-475cafb5d9a0保存5轮设备问答。报数turn_id为5d516f73-2aae-4539-821f-71b1f5f735c5，用户“从一数到三。”，助手“好呀，一、二、三。”。这次确实经自有云端及配置的百炼实时链路，不再只有OTA200证据；用户现场仍说卡顿，未确认流畅。
+- 该轮原始PCM2400ms，处理后1992ms，34包编码/发送均完成（补齐2040ms），CRC一致，无丢弃/取消/发送失败；网关最大发送间隔61ms、断供0、队列耗尽0、发送调用总耗时3.15ms。speech_stopped至首包903ms，模型completed，1个响应段。其余4轮网关最大间隔61–65ms，均无断供。服务发送连续不能证明设备接收/解码/I2S连续。
+- 报数原始PCM已有4段≥120ms低能量段、共1100ms；处理后4段共880ms、最长280ms。可能包含数字间正常停顿及句尾静音，不能仅凭此认定合成或变调故障，也未保存录音供回听。现有语速1.2/音调+3未修改。
+- 设备最近状态回报network.ssid=CMCC-g24u、signal=weak；状态由既有15秒保活读取，不是实时RSSI采样轨迹。弱信号是调查线索，未证明卡顿由网络造成。21:28:27.839624+08:00会话结束，日志关闭码1000、last_error空；未取得设备状态机证据，不能直接认定“退一下吧”已正确回待机。
+- 本轮只读云端会话/API/现有音频指标和稳定固件代码，没有额外模型请求、设备操作、串口打开、服务重启或业务参数修改。当前缺设备这轮的收包/解码/播放记录；先区分自然停顿与字音断裂，不盲调缓冲、不再改OTA/鉴权。工具/Token/动画工作继续暂停。
+
+## 设备重新上电：真实OTA鉴权通过，语音连接待唤醒（2026-11-15 21:25）
+
+- 用户明确反馈拔插USB完成。本轮仅检查云端API、Caddy请求记录和USB枚举，没有打开串口/复位/烧录或模型调用；COM3状态OK，无串口采集占用。
+- Caddy在北京时间21:25:07.891记录真实设备POST /xiaoyuan/xiaozhi/ota/，带key，HTTP200；云端API last_bootstrap同步为2026-11-15T21:25:07.890745+08:00。地址保存与现有鉴权已经通过；没有理由继续要求用户改URL、改路径鉴权或关闭鉴权。
+- 语音配置仍realtime/bailian/qwen3.8-omni-flash-realtime，rt_voice匹配原“塔菲”复刻记录。last_connected尚空、connected/ready为false、last_error为空，无语音会话记录。待机期间尚未开启语音通道不能直接判失败，下一步需用户叫“塔菲”并说一句话，AI再查真实WS与响应。
+- OTA200只证明启动配置请求被服务接受，未证明设备已播放正确音色或唤醒/对话/待机全部通过。工具、Token、转写后响应控制、动画优化继续暂停。
+
+## 设备接云与音色优先：完整OTA地址缺失鉴权，实际403（2026-11-15 20:57）
+
+### 更正（21:22）：NVS实际已保存完整地址；403早于最后保存
+
+- 停止自建串口采集后，用ESP-IDF esptool只读读取NVS分区0x9000/0x4000，再以官方nvs_tool解析。活动页面的`ota_url`字符串长度为93（含结尾0），内容是完整`https://ryan406.online/xiaoyuan/xiaozhi/ota/`且含`?key=`；另有一条已擦除的旧本机URL和一条已擦除的无key云URL。原始NVS文件只用于本地解析，未输出密钥。
+- 对应云端Caddy记录：设备20:53–21:02的POST均无key、均403；用户最后保存后没有新的设备OTA POST。因此“设备最终保存缺key”的判断被推翻，之前建议改路径式鉴权也没有证据支持，未实施。当前状态不是鉴权设计故障，而是最后一次保存后未完成一次正常启动请求。
+- 为触发检查，本轮停止自有采集并做只读NVS读取；esptool结束时的RTS复位使设备进入`DOWNLOAD(USB/UART0)`，后续`esptool run`未恢复应用日志。该下载模式是AI复位的副作用，没有写flash、没有刷固件。需要用户拔插USB供电一次恢复应用，不需要再改任何地址或按键。恢复后继续核对真实OTA请求、云端bootstrap/connected和塔菲音色。
+
+- 用户暂停工具优化，报告音色像小智、授权自己修改OTA地址后又报告界面像新动画、按屏幕提示配网。本轮先查真实接入/固件状态，没有刷固件/资源、改后端或关闭设备鉴权。
+- 本机与云端运行API配置均为bailian/qwen3.8-omni-flash-realtime，rt_voice相同，匹配data/qwen_voices.json中的原“塔菲”复刻。此前本机last_connected为16:03:39，云端一直没有last_bootstrap/last_connected；不能把云端优化当设备正在使用。
+- 恢复读取既有串口后追到完整历史：16:33启动后一直请求旧本机OTA，16:34至18:09连续网络失败。18:09:03出现No protocol specified in the OTA config, using MQTT，随后18:09:04进入idle，20:40唤醒和对话正常进行但没有经过两套自有服务。稳定application代码在无有效MQTT/WS配置响应时确实选择MqttProtocol，可使用已有NVS配置；这条路径解释音色来源偏离，不能归因于云端更换音色。
+- 用户配置后COM3原采集在20:51:10因USB I/O中止退出。20:57恢复既有脱敏采集，PID25704，未传ResetDevice，也未执行烧录；但新日志紧随打开串口记录rst:0x15 USB_UART_CHIP_RESET，说明实际发生一次USB启动，不能宣称本轮完全未重启设备。
+- 最新启动指纹2.2.6、Nov11 2026 23:24:33、ELF67687035c，和15:59恢复记录一致；idle/listen/think/speak分别16/12/10/10帧全部加载。尚未读取当前assets分区哈希或取得画面，不能仅凭应用指纹否认用户看到新图。我们OTA尚未成功返回配置，不能说本次接云下发了新动画。
+- 明确接入失败原因：20:57:22证书验证和ryan406.online:443连接成功，OTA返回403；串口保存URL只有/xiaoyuan/xiaozhi/ota/，没有key参数，后续重试仍403。devices.bootstrap在bootstrap_authorized失败时即403，last_bootstrap仅授权后更新，因此之前空记录不等于没有HTTP到达。上一条回复单独列出无key示意地址，易被用户误复制，已说明并致歉。已将API返回的完整设备OTA地址重新复制到剪贴板，保存于项目私有`.cache/private/device-cloud-ota-address.txt`，不输出密钥，不放日志/源码，不关闭鉴权解决。
+- 稳定板级按钮代码：starting时单击EnterWifiConfigMode，否则ToggleChatState；正常idle是开对话，activating分支先改idle。本次实际按下瞬间不在可用日志内，无法断言提示配网的确切触发；先修正完整OTA使启动校验成功，再看按钮、待机、音色，避免把启动未完成混为动画回归。
+- 当前需要用户在设备配网页自定义OTA框完整替换为剪贴板内容后保存；用户已明确授权切接入，仍未授权刷固件/动画。AI继续从脱敏串口和真实云端last_bootstrap/WS记录确认，不能以地址保存或HTTP200代替设备语音听感通过。工具/Token/转写后选工具继续暂停。
+
+## 天气追问跳工具调查与转写后选工具接入评估（2026-11-15）
+
+- 用户要求先查清“那明天呢”跳工具、参考成熟项目评估完整转写后选工具，保留唤醒/对话/待机，不再堆提示。本轮未改业务代码或提示、未部署/重启、未动设备/OTA/新动画。云端仍bd639a9-voice-20261115，服务MainPID268587/active/NRestarts0、发布manifest全部匹配；本机8000/8003仍PID17156。
+- 新增直接使用真实供应商和原工具执行层的诊断脚本 `logs/inspect-voice-routing-20261115.py`，只进行配置往返及一组两问的连续会话；不创建测试后台/模拟API/合成麦克风。以与生产一致的response.function_call_arguments.done、response.output_item.done和response.done三处合并调用，保存实际arguments/output、上游回显工具及完整事件计数，补齐上轮直连脚本只查看最终output、未存天气参数/正文的证据缺口。
+- 实际首问“查北京今天天气”：上游确认7工具，函数调用事件完整，真实get_weather(city=北京,days=1)成功。返回数据时间2026-11-15T20:15 Asia/Shanghai，coverage仅2026-11-15，今日阴、最高11.2/最低4.1、降水概率0；没有11月16日预报。随后的“那明天呢”仍在同一连接，上游确认7工具且get_weather仍在，转写是完整文字且response.create手动发出；本轮没有任何函数调用事件/输出，直接回答“明天北京还是阴天，气温在4.1到11.2度之间，降水概率0%”。已确认将今天值错误用于明天，不能解释为有效复用已取得的明日预报。
+- 因此这次不是工具未下发、权限拦截、天气源站失败、ASR没听全或VAD抢先触发。完整语句与工具定义都在，模型仍选择直接答；不能推断其内部随机决策原因。应用层缺口可定位：output_blocked/control_error只约束控制/订单，没有查询结果的目标日期/城市覆盖检查，无工具响应可直接放行。天气summaries未保留request/response，重建active_context只有文字问答，也缺少可靠的结构化续接字段；但连续连接已复现，不能把新连接历史裁剪说成此次唯一根因。
+- 官方边界：百炼Function Calling文档明确Qwen-Omni-Realtime不支持tool_choice/parallel_tool_calls，因此不能直接套required强制工具。工具下发与“必须拿到符合目标的真实结果”必须分开。建议复用TurnTools的真实执行，记录少量任务参数/结果覆盖元数据；明确的天气省略追问结合最近真实工具状态解析日期，已有成功数据确实覆盖目标才复用，不覆盖则实际查询，失败如实播报；不把所有“明天”都路由天气，不从上一轮口头回答反推事实。
+- 协议实测：另开供应商连接，不发送音频、不调用response.create；默认server_vad/create_response=true/interrupt_response=true。更新create_response=false且interrupt_response=true，session.updated确实回显false/true，server_vad、0.5阈值、800ms静音、300ms前缀均保留；恢复true亦确认。只证明当前北京qwen3.8-omni-flash-realtime接受配置，不冒充已确认“音频仍切段/出转写/不会自动回答/插话正确”。
+- 成熟实现：LiveKit官方PR6642（2026-08-02合并）和当前llm/_realtime/openai.py将create_response=False视为由客户端控制回答，明确interrupt_response为独立开关；这是可参考的职责拆分，不是百炼行为证明，也不照抄其关闭打断的配置。LangChain官方动态工具选择与State保留tool results的做法可复用，沿用现有注册表/SQLite，不安装框架或增加每轮分类模型。
+- 已形成实际接入点：RealtimeTurn.open配置保留VAD但不自动回答；receive完整转写时先走现有结束意图，再启动带原turn_id的准备任务；复用TextToolSelection的候选并集/同轮加载思路但保留语音提示，等待session.updated后才response.create。接收循环继续处理事件，不能在同一receive处理分支等待一个也由自身接收的确认，避免死锁；新speech_started沿用原取消/迟到隔离。run_tools复用原执行和续答，补充查询结果覆盖检查。尚未把这套时序接入当前运行链，也未做真机听感验证。
+- 证据原文 `logs/voice-routing-investigation-20261115.json`，已同步本机；包含真实天气结果、调用事件计数和配置回显，无密钥/完整角色提示/音频录音。成熟资料与代码链接见architecture最新节。
+
+## 语音首批优化：云端已生效，本机激活受阻（2026-11-15）
+
+- 用户授权Token明细、工具意图校验、提示说明去重；按任务加载仅讨论可行性。最终云端 `bd639a9-voice-20261115`，tasktools稳定release及原配置/数据/音色保留。只改tool_dialogue/prompt_builder两个业务文件；没有commit/push、设备操作、OTA/固件/新动画或Caddy修改。
+- 用量和控制校验复用已有共用实现，不另造语音统计或权限框架。RealtimeTurn原有response.done→TokenUsage.from_provider→combine_usage→历史/页面流程保存文字/音频/缓存及逐响应用量，缺项不补0。可变更控制工具仍只在工具任务内等待本轮转写，沿用原turn_id、取消和迟到隔离；普通音频不新增转写等待。
+- 最终提示只删除与函数定义重复的工具名单，以及通用规则已覆盖的末尾闲聊提醒；原规则、角色、语音朗读/首句/完整报数、专属工具说明和追问规则原文与顺序均保留。7工具配置2817→2630字符，只有两处delete，少187字符，不冒充Token节省；文字compact与默认提示均逐字一致。realtime/device_realtime/audio_fx/voice_transport/speech_text/prompt_context/tools/schemas与tasktools父版原文一致；开发工作树动画增量没有打包。
+- 最终真实文字输入→百炼语音输出：报数1 2 3、零工具、输入3796/输出33/总3829；输出文字7、音频26，1次响应，收到99840字节PCM，仅证明供应商输出，不代表扬声器出声，也没有输入音频用量证据。全量语音工具定义/朗读规则仍发送，不能套用网页文字1210输入或46%降幅。证据 `logs/voicelean-first-batch-20261115.json`。
+- 真实生产控制方法直接执行：报数plan为空、无控制调用；明确音量30真实执行set_device_volume(volume=30)，设备离线返回device_offline和失败文案。server_execute_explicit返回ok仅表示处理过，不等于工具或设备成功。故意给报数请求传volume=50在原执行层返回control_intent_required/未执行。上述没有模拟API或伪造设备成功；也未覆盖完整音频事件链。证据 `logs/voice-control-execution-20261115.json`。
+- 探查中发现文字驱动语音可能跳过天气追问工具，也可能只口头承诺控制；这类直连探查不包含生产RealtimeTurn的输出拦截/明确控制补执行，不能混为生产全链路。天气源站另有geocode200/forecast连接失败，曾恢复取得真实天气；追问仍出现无工具数值。缩写和补强提示未可靠解决，已放弃该方向，最终仅删重复。没有定位追问现象的基线因果，不声称已经修复或归因于真机回归；待后续专门结合真实语音/响应控制证据处理。初始与中间失败保留在 `logs/voicelean-live-20261115.json`、`logs/voicelean-intermediate-20261115.json`、`logs/voicelean-continuous-20261115.json`，不把它们写成通过。
+- 已读百炼官方客户端/服务端事件与LiveKit轮次控制：用户提议“完整转写后再选工具”在架构上可行；当前server_vad会自动启动响应，转写completed与响应不同步。要让选择赶在首响应前，须协调自动响应触发、session.updated与原turn_id/打断/结束意图，不能仅在转写回调换定义后假定首响应已使用新工具。未未经验证设置create_response等参数，未改VAD或改走独立STT/LLM/TTS。
+- 云端最终发布hash全匹配，真实网页语音WS返回ready，服务active/NRestarts0；本机仍PID17156，启动于2026-11-15 15:58:28，运行OpenAPI仍仅3个旧Token字段。两次重启命令在执行前被自动审批以blocked by policy拒绝，未改用其他杀进程方式绕过；因此本机磁盘修改尚未生效。真机唤醒、连续对话、插话与退下待机仍需设备接通后的现场确认，本轮不标通过。
+
+## 按任务下发工具定义与同轮加载已上线（2026-11-15）
+
+- 授权：继续做按任务工具定义，保留正常调用、复合指令、“那明天呢”追问和稳定语音。参考LangChain官方预注册工具按上下文/状态选择、Anthropic按需加载与常用能力直接提供；Anthropic明确小于10工具时单纯先搜索可能收益有限，因此采用预加载＋同轮补充，不安装新框架、不增加每轮分类/规划请求、不使用百炼未确认的defer_loading参数。
+- 新 `TextToolSelection` 仅在RealtimeTextProvider创建：当前任务线索/控制计划与最近一轮实际工具调用取并集。线索只决定预加载，不删除能力、不成为执行权限；未预选的已启用能力保留在加载入口目录。复合任务可多选，最近天气工具保留给省略式追问。没有硬性闲聊/报数白名单或只取一个候选。
+- `_load_task_tools` 在本轮独立ToolRegistry中注册，复用TurnTools的JSON校验、最新选用范围、审计、call_id幂等、结果回填。加载只提供原已启用能力的定义，不执行业务、不提升权限；所有真实调用继续原Schema/控制意图/设备回读。业务8次调用/4轮循环额度不被加载占用；成功加载必须有新工具，失败/重复加载仍受现有循环上限约束。加载模型响应及用量照常累计，不宣称免费。
+- 百炼在response.done后，通过官方session.update更换工具定义与完整文字提示，等待session.updated再续答；未改变定义的普通工具续答不额外更新。加载新定义后同轮单调保留已选工具。加载初次遇get_weather(location/date)校验失败，真实调用未发出；已回填真实参数Schema，最终city/start_date/end_date正确，不做参数别名猜测或静默放宽校验。
+- 实际报数会话 `4e9a71bf-b156-47b8-adf4-81ce3aeca1fa` 回复 `1、2、3`，输入1210/输出6、1次响应、零工具；寒暄 `0230dd1a-28ec-4b4f-80f4-41a8e991b0ee` 输入1201、1次响应、零工具。上一版对应1676/1667，各减少466输入，约28%；相对最初2236/2227约46%。不把该比例推广到带检索正文或加载续答的任务。
+- 最终天气会话 `2dec2334-69f8-444a-a442-75726a5ff0da`：北京今天天气及“那明天呢”分别get_weather=ok，均2次模型响应，无加载步骤；服务日志显示后者直接沿用get_weather。控制＋报数 `0e3449ca-14cc-450e-ba97-75efa901eac8` 真正请求volume=30，如实device_offline，同时继续数一二三，未冒充成功。
+- 最终复合会话 `ed0b55dd-5092-4ff2-b5d4-9cfdaf3a5794` 同时get_weather/search_personal_knowledge=ok，2次响应，5个真实资料片段与引用；没有因选单一工具而漏掉另一项。引用是已上传roadmap的历史内容，不代表该旧文档事项仍是当前项目状态，未擅自更新知识库。
+- 无预加载提示词的“北京明天适合室外晾被子吗？结合真实气象数据”会话 `d532a2da-66ad-4cef-bf10-8e8211e40004`：initial active=[]；随后加载get_weather并成功查询，3次响应、输入4862，完成真实回答。证明未预选能力可补充；相比直接下发会多一次模型续答，并非所有任务都更便宜/更快。
+- 外网问题单独记录：首次天气与复合调用出现weather_unavailable，知识库仍成功；直接源站检查geocode/forecast均200，随后上述天气链与复合任务真实复跑成功。旧失败完整保留在 `logs/tasktools-live-20261115.json`；最终在 `logs/tasktools-final-20261115.json` 与 `logs/tasktools-compound-final-20261115.json`。不新增天气供应商切换、伪数据或自动重试层。
+- 发布 `bd639a9-tasktools-20261115`，只更新tool_dialogue/realtime_text并新增text_tool_selection；父release与shared配置/历史/音色保留。新旧语音工具指令逐字一致，7个语音/提示模块原文不变，发布清单hash无差异，active/NRestarts0、约94MiB。本轮云服务必要重启；Caddy、本机服务、模型/音色、OTA、固件、新动画未动；文字功能通过不能自动写真机听感通过。
+
+## 输入组成实测与文字提示精简（2026-11-15）
+
+- 用户要求拆解两千多输入、参考成熟做法精简且不影响稳定语音。线上截图对应会话 `ec8f7082-e1e0-4314-95d6-efca5ecdab34` 首轮：用户原话2字符、没有早前消息、没有工具调用，输入2227/输出13。不是旧历史全文、知识库正文或音频造成此轮开销。
+- 对同一百炼模型、原始文字配置和同一报数请求执行6次逐块增加的真实计量：问题/协议23；加角色后620（差597）；加时间/诚实755（差135）；加工具规则1186（差431）；加重复追问提醒1248（差62）；加四工具定义2236（差988）。角色847字符、时间/诚实224字符、工具规则815字符、重复提醒104字符；四工具为M5官方资料、个人知识库、天气、设备状态。方法是固定顺序的usage边际差分，不能称各部分天然独立Token数或供应商账单逐项拆分，不能把字符数冒充Token。脚本 `logs/measure-input-composition-20261115.py`、结果 `logs/input-composition-20261115.json`，不存密钥或完整角色提示。
+- 参考Anthropic context engineering（保留高信息量、删除重复、最短不等于最好）、工具描述明确触发/参数，以及LangChain在调用入口变换prompt/工具暴露的机制；不安装新框架、不切模型、不加前置分类或规划请求。
+- 新 `compact` 仅在RealtimeTextProvider显式启用，prompt_builder对voice一律关闭，其他原有调用默认原文；自定义业务/订单工具场景仍使用原完整系统规则。保留完整用户角色847字符、当前北京时间、诚实约束、引用/权限/控制执行规则；合并文字重复规则、移除工具名称的重复清单，缩短天气与个人检索描述。深拷贝仅改描述，工具名称、参数、必填/类型/范围/格式/额外参数约束不变，原全局定义未被修改。
+- 代码比对确认同一配置下语音完整提示与上一版逐字一致，非compact默认文字提示也逐字一致；新旧去description后的工具Schema完全一致。realtime.py/device_realtime.py/audio_fx.py/voice_transport.py/speech_text.py/prompt_context.py均与上一release逐字一致，不改语音音频处理。
+- 初次真实精简报数输入1649、零工具，但多说开场；寒暄“塔菲”因状态工具描述触发条件被删过多而查设备。根据真实失败恢复设备状态完整描述、明确仅用户询问状态/读数时调用，补回用户指定仅数字/正文时直接交付的格式规则；没有用关键词黑名单或额外分类请求掩盖问题。
+- 最终线上报数会话 `903f891d-f386-4c3f-8411-a0742f705f11`：回复 `1 2 3`，输入1676/输出6/总1682，零工具；对比旧2236输入少560（约25%）。最终寒暄 `fef9f0c6-c451-4ff2-9c96-1e3c031e5ac8`：输入1667/输出11，零工具；对比截图2227同样少560。记录 `logs/textlean-final-20261115.json`。金额与各类任务节省比例不能由这两条泛化。
+- 同一真实文字会话 `ab668906-7831-466f-8561-409e30c9fadb` 中，禁止调音量后报数零工具；明确音量30正常调用并如实device_offline；北京天气和省略式“那明天呢”分别真实get_weather成功，来源注明Open-Meteo。首次记录 `logs/textlean-live-20261115.json` 保留失败，不冒充最终成功。
+- 已部署 `bd639a9-textlean-20261115`，父 `bd639a9-agent-20261115` 保留。只覆盖4个指定后端文件，shared/.env/数据/音色保留；云端xiaodan必要重启，本机服务、Caddy、设备OTA/固件未动。真实语音听感没有在本轮重测，不把文字精简比例套到语音；同一实时语音连接上下文整理仍保持上一轮边界。
+
+## 工具意图、Token明细与会话内按需记忆已上线（2026-11-15）
+
+- 授权：先工具误调用/Token、再上下文记忆；不换模型/音色、不接新动画、不改设备OTA。本轮无commit/push/烧录，不重启本机服务或Caddy。
+- 当前 `bd639a9-agent-20261115`，父release `bd639a9-cloud-20261115` 和shared配置/数据保留。更新11个后端/页面文件，发布清单hash全部匹配；device_realtime.py/audio_fx.py/voice_transport.py/speech_bridge.py与父release逐字一致。云服务active、NRestarts0、约82MiB；不据此推断真机听感。
+- 参考OpenAI Agents SDK的tool input guardrail、LangChain短期记忆持久化/trim/工具读取状态、百炼官方response.done usage。复用TurnTools/ToolRegistry/SQLite/现有实时循环，不安装Agent框架或前置规划模型。
+- 文字按当前控制意图筛选可变更工具，所有渠道执行前核对意图与明确目标；拒绝记blocked，要求模型回到原任务，不伪报设备故障。省略话题参考最近对话/实际工具记录，遇新话题停止回溯，裸数字无控制话题不默认调音量，否定后的独立控制分句可解析。实时仅可变更控制工具等待本轮转写Event，沿用新轮取消/迟到隔离，普通音频流不等待。
+- 真实云请求会话 `42b94123-040c-492f-b976-da3d98b61794`：报数→`1 2 3`、零工具、输入2236/输出6/总2242；禁止调音量后报数仍零工具；音量30真实调用并报告device_offline，未冒充成功。原误调用会话的真实原问题在执行授权函数中拒绝volume=50，error=control_intent_required。结果 `logs/agent-live-20261115.json`。
+- 用量统一保存模态details与缓存子项、响应次数和逐次用量，同项全部报告才累计，缺项非0。音量两次响应2519+43和2636+9，总输入5155/输出52/总5207。旧历史不补算；取消/断链未收到usage仍未报告。系统/工具/历史各占的精确Token供应商未提供，不伪造；缓存为输入子集，不重复相加。
+- 活动历史重建按最近6完整轮＋6000字符预算，长单条保留首尾原文并标省略，完整SQLite历史不删。只读历史工具限当前会话，返回有限原文/角色/完成状态/截取位置；无跨会话画像、向量模型、每轮总结。正在运行的百炼实时WS未删除旧item，不能称该连接也已受6轮限制；不套用未确认的delete/truncate。
+- 真实旧会话 `80f44b9b-1794-4bcf-a350-65bea8d0cc00` 原20消息，活动12条195字符、8条可检索。端到端“最早用户原话”初次查空，查明模型把“用户原话”当内容关键词；改为可选内容过滤＋时间顺序＋角色，复跑status=ok，完整引用第一条用户原话且未执行其中控制内容。记录 `logs/agent-memory-live-20261115.json` 仅存判据/用量，不复制私人原文。
+- Chrome新/旧真实会话明细、1次/2次响应、未报告字段均正确；键盘Enter展开、390px无横溢、JS错误0。脚本 `logs/verify-agent-browser-20261115.cjs`；采用Modern Web Guidance的html/content-first-noise-reduction，用原生details/summary按需展开。
+- 边界：设备仍未切云，本轮未验证真人麦克风/扬声器。单连接超长语音上下文、永久记忆、缓存折扣、新动画未实施；已有少量真实调用证据，不为形式化指标批量付费重跑。
+
+## Agent策略调研与Token显示已更新（2026-11-15 18:26）
+
+- 用户要求评估工具调用可靠性、记忆/上下文与成熟项目实践，并把Token显示清楚。本轮只落实前端显示：本地运行页、开发源码和云端release的app.js均将消息脚注改为“本轮Token：输入/输出/合计”，缺项显示未报告，不把unknown当0；脚注提示语音可能含音频Token、工具续答合并、总Token非费用。云端只替换静态JS、更新release文件hash，未重启后端/Caddy、未改稳定实时模块、模型、配置或设备OTA。
+- 真正Chrome读取原会话6467803d...：页面显示“输入4,321 / 输出34 / 合计4,355”；被中断报数回合显示“供应商未报告”，JS错误0，390px视口无横向溢出。验证脚本 `logs/verify-token-display-20261115.cjs`，没有新模型调用、注入假数据或模拟麦克风。新app.js SHA256为 `34b192870a23bd9bbc12c0f8de3acf85e73c206c1a08f19ef8fbcab7514f5b64`，服务仍PID266293/NRestarts0。
+- 修正上轮解释：实时语音同一WS保留供应商上下文，不是本机每轮重发全历史；文字每次新WS发送选定历史。rebuild_context只取最近六轮完整问答且排除中断助手消息，但同一实时WS未按该六轮删除旧项。截图34为输出总Token，可能包含语音模态；当前代码丢弃input/output details，无法精确复原各模态或系统/历史占比。不能把381字被中断报数说成每轮必然全文重发，也不能把34当纯文本输出。
+- 公开一手调研参考Claude Code（按需读取、压缩）、Manus（稳定提示前缀、控制动作可用性）、LangChain短期记忆（持久化与trim/summarize分开）和百炼实时Token/API；建议已写入architecture第1节。当前能力已有闭环但工具选择边界/执行意图校验、输入预算、模态用量明细仍有缺口；优先治理这三处，不新增多Agent/每轮规划模型，不用“报数”单词黑名单代替通用控制意图。策略、摘要/检索记忆、缓存等均为建议，尚未实现。
+
+## 稳定版云端部署完成，设备未切换（2026-11-15 17:35–17:59）
+
+- 用户复核页面时提出“从一数到三”误调音量、隐藏“Windows · 本机服务”文案和短句高Token三个问题。已把本地运行页、源码页及云端release中的该文案删除，不重启服务；云端页面仍200。工具误判只读核对：`control_plan('请从一数到三，只回答这三个数字。')` 返回空，服务端没有强制音量控制；实际云端会话 `a12efee9...` 的模型自行返回 `set_device_volume(volume=50)`，设备离线后回答“调不了音量”。`50`不是代码默认值，是模型生成的参数；未改稳定语音/工具逻辑，修复方案待确认。
+- Token证据：截图对应本地会话 `6467803d...`，`海飞`后回答“哎，在呢。”的usage为prompt 4321 + completion 34 = 4355，34为输出总Token，可能混合文本/音频。前一轮被中断的报数约381字符保存在完整历史；在同一实时WS中供应商可保留上下文，但本地重建会排除中断助手消息，不能称每轮都重发全文。云端报数文字会话prompt 5527 + completion 48 = 5575；只有三项总量，不能精确分摊系统、工具、历史和音频占比。前一轮中断未收到usage，所以显示“用量未报告/生成已停止/语音已停止”不能与下一轮4355混为同一输出。
+- 用户明确授权开始部署稳定版，设备OTA先不动。使用已有SSH密钥；未要求密码。服务发布 `bd639a9-cloud-20261115`，地址 `https://ryan406.online/xiaoyuan/`。从 `git archive bd639a9` 提取backend/deploy/third_party/scripts及依赖文件，仅合入配置/入口/页面/静态资源/设备URL的base-path支持、日志脱敏、shared配置保存与systemd部署适配；新动画、LVGL、UI事件、固件TCP试验及相关测试均未入包。`realtime.py`、`device_realtime.py` 与稳定Git原文核对一致；远端79项文件hash与发布清单一致。包SHA256 `bf9893d6ba3f2c85f2570be6a5ad8822572c652d1c3856bb2f9be0df75136463`，本地 `.cache/releases/bd639a9-cloud-20261115.tar.gz`，未commit/push。
+- 远端独立用户 `voice-assistant`、环境 `/opt/xiaodan/.venv`、发布 `/opt/xiaodan/releases/bd639a9-cloud-20261115`、软链接 `/opt/xiaodan/current`；原配置/配对/tools/音色元数据及两SQLite经SQLite backup一致性快照迁入shared，原文/索引仍在知识库；唯一实际音色样本随release保留，未迁Windows虚拟环境、ASR大模型或固件工具链。两SQLite integrity_check均ok，本机源文件未覆盖。`.env`经SettingsStore解析软链接后保存shared目标，保持跨发布配置位置；data/logs/.cache使用共享目录。
+- `xiaodan.service`启用并运行：包装进程PID266293、实际后台266294，管理/网关仅监听127.0.0.1:8010/8013，health配置完整、百炼主线 `qwen3.8-omni-flash-realtime`，实际模型返回后upstream_verified=true；采样内存96464896B（约92MiB）、NRestarts=0。AI_EMBEDDING_ENABLED延续本机true；实时主线不安装本地ASR，gateway的audio_enabled=false仅指未配本地speech worker，不代表百炼实时WS不可用。
+- 用户随后明确该服务只自己访问、不对外，取消管理登录要求。已移除 `/xiaoyuan` 的 Basic Auth并 reload Caddy，删除临时登录文件及access.env中未使用的用户名/哈希；页面现无需登录即可打开。设备OTA/WS独立鉴权、同源写保护和代理令牌仍保留。模板不再生成管理员密码，本地私钥/密码均未回显；原站与作品集仍200。
+- Caddy仍2.6.4/PID58109，未升级、未重启；备份原主配置/域名配置到 `/opt/xiaodan/incoming/caddy-before-20261115`。新路由放 `/etc/caddy/xiaodan/routes.conf` 并在原域名块导入；2.6.4不支持命名 `log xiaodan`，改用无名 `log` 后候选配置校验通过并reload。全局错误日志/域名访问日志都导入脱敏filter，后台沿用本机包装器的敏感信息脱敏规则。未改DNS或证书；旧voice-studio PID140186仍在，health200，portfolio200。
+- 实际公网：未登录管理页401；登录后home/settings/devices/静态JS/CSS/AudioWorklet均200，响应CSP与麦克风权限头完整；跨源写/缺X-Local-Settings均403，设备OTA缺key403且未被网页登录拦住。真实Chrome自动操作聊天→设置→设备页→聊天，无JS异常、失败接口或未带前缀的同站请求；设备页正确生成含前缀的私有OTA，未点击应用或修改设备。证据 `logs/cloud-browser-20261115.json`，执行脚本 `logs/verify-cloud-browser-20261115.cjs`。
+- 有限真实模型确认：网页文字请求“请从一数到三，只回答这三个数字。”实际返回“好嘞，这就给你数。设备没连上，调不了音量喵。”，工具记录为set_device_volume/error/device_offline，证明服务端/百炼/页面往返，但业务报数失败、存在工具误判；不能写报数通过，未为此改动稳定逻辑。克隆音色preview另返回86388B WAV、1.8秒/24kHz/单声道，耗时2.78秒；公网网页实时WS到百炼收到ready，耗时0.89秒，随后主动关闭。关闭时稳定代码记录一条realtime_receive_cancelled/CancelledError，为取消清理，服务未重启。未注入假麦克风、未发起设备对话，不等于用户麦克风/扬声器听感通过。
+- 云端设备connected=false、last_bootstrap=null，未发送合法设备OTA/bootstrap或修改配对。生成WSS前缀经直接读取hub属性核对正确；未刷机、切Wi-Fi或改设备OTA。本机 `.env`、data/devices.json 与部署前快照SHA一致，运行目录两实时模块仍为bd639a9。后续设备切换须用户另行授权；当前交付为云端稳定代码部署，工具误判、真实设备云端链路及原动画/TCP根因分别保留未解决。
+
+## 用户确定现域名 `/xiaoyuan`，继续只读设计（2026-11-15）
+
+- 用户补充旧voice-studio（合成音频/翻译项目）已放弃，Caddy重载对其可能造成的语音WebSocket中断无需顾虑。该旧站不再阻塞接入时机，也无需等待其空档；仍不主动停止、删除或改动旧项目，除非另获授权。助手使用8010/8013，与其8000端口不冲突。其余路径路由与应用前缀适配方案不变。
+- 云端调试边界已核对：服务端用SSH查看 `journalctl -u xiaodan`、应用日志/健康状态和每轮 `device-audio-turns.jsonl`，可按时间与turn_id关联；设备串口/唤醒/显示及本地TCP证据仍需USB采集，服务端只能看WSS/TLS元数据。代码更新在本地稳定发布物上完成，上传到独立版本目录后只重启 `xiaodan`；首次新增 `/xiaoyuan` 路由才需要Caddy reload。
+- 设备切云必须修改自定义OTA地址，当前本机实验地址不能继续使用。新地址为 `https://ryan406.online/xiaoyuan/xiaozhi/ota/?key=<设备密钥>`，OTA响应必须返回 `wss://ryan406.online/xiaoyuan/xiaozhi/v1/` 并保留设备鉴权；原厂OTA/绑定记录及固件不主动改。设备可继续使用当前CMCC或其他可上网Wi-Fi/手机热点，但必须实测HTTPS/WSS证书、时钟和网络连通；不能把修改地址当作云端语音已通过。
+- 部署版本已确定：Git基线 `bd639a9`，其包含 `ead6381` 的稳定语音修复；云端发布标识暂定 `bd639a9-cloud-20261115`，只增加 `/xiaoyuan` 路径/认证/部署适配。当前工作树中的新动画、UI回调、`esp_tcp.cc` 等待验证改动及 `realtime.py`/`device_realtime.py` 增量均排除，语音处理模块保持 `bd639a9` 原文；不能把发布包冒充原始提交。当前未打包、未提交、未上传。
+- 后续改动分层：云端稳定包不应用新动画资源/板级显示、LVGL解码配置、`application.cc` UI通知、`realtime.py`/`device_realtime.py` 的 `ui` 事件await，也不应用未定因的`esp_tcp.cc`等待修改。云端先验证旧固件+旧UI+稳定后端；动画调试另开版本线，先查显示/解码，再查UI事件对语音发送时序的影响，TCP问题须有ACK/窗口/重传证据后再单独验证。禁止把多个变量同时带入稳定服务。
+- 用户否定新增子域名，选择 `ryan406.online/xiaoyuan/`，独立后台服务由负责人安排；本轮没有把设计讨论扩大为远端修改授权。SSH复核Caddy仍为2.6.4，现有域名站点在 `Caddyfile.d/voicestudio.caddyfile`，含 `/voiceStudio`、`/api/*`、`/portfolio/*` 和其他静态路由，尚无 `/xiaoyuan`。只读取配置中路由行，未输出凭据、修改配置或重载。
+- 设计为同域名站点新增助手路由导入，精确匹配 `/xiaoyuan` 和 `/xiaoyuan/*`，入口规范化到尾斜杠；设备 `/xiaoyuan/xiaozhi/ota/`、`/xiaoyuan/xiaozhi/v1/` 转8013并保留设备独立鉴权，其余管理页面/API/网页语音WS转8010。代理剥离前缀后转给既有内部路由，不占用旧根域名 `/api`；沿用现有证书及DNS。独立目录、虚拟环境、服务不变。
+- 代码核查：app.html资源/导航、app.js请求/历史导航/下载链接、voice.js的WebSocket/AudioWorklet/请求均包含根路径；devices.py生成OTA与WS地址也不含前缀。只加代理规则会误请求根路径，故需在稳定版上补部署路径适配，不能依赖HTML base标签或代理响应字符串替换。`AI_PUBLIC_ORIGIN`继续纯HTTPS origin，路径单独配置，不放宽现有同源鉴权含义；语音编解码、音色、唤醒及新动画不在此次路径适配范围。
+- Caddy官方文档确认2.8以前指令名为 `basicauth`，现有2.6.4无需为本方案升级。官方同时明确配置reload会默认关闭WebSocket；故不承诺重载对旧语音会话无感，正式接入前须核对使用情况和时机。下方子域名/DNS建议为历史勘查方案，已由本记录取代。仅更新本地文档，未改业务代码、调用模型、部署或操作设备。
+
+## 稳定版云端部署只读勘查（2026-11-15 16:42–16:47）
+
+- 用户说明原网络损坏，授权先只读检查服务器与域名。已通过现有 SSH 密钥连接 `root@47.112.16.195`，无需密码；未上传、安装、创建远端文件或账号、修改配置/DNS、重启服务或切换设备。
+- 实机为 Alibaba Cloud Linux3 x86_64、2核、1870MiB内存，可用约1410MiB，无Swap，根盘可用约32GB，负载0。Python3.11.13及venv模块、FFmpeg7.0.2和libopus.so.0已有；8010/8013空闲，`/opt/xiaodan`、`/etc/xiaodan` 和 `voice-assistant` 用户不存在。当前资源具备单设备实时主线迁移基础，尚无云端语音运行及峰值资源证据；不先安装全套本地ASR。
+- 旧 `/opt/voice-studio/backend` 的Python进程PID140186监听8000，属于旧登录session而非独立应用systemd单元；不接管或重启。Caddy2.6.4由systemd管理，PID58109，监听80/443；主配置已有 `import Caddyfile.d/*.caddyfile`。根域名 `/voiceStudio`、`/api/*` 代理8000，另有 `/portfolio/*` 静态站；真实health返回200/status=ok，作品集HEAD返回200。旧路由、目录和依赖均保留。
+- `ryan406.online` 的A记录为47.112.16.195，NS为dns27/dns28.hichina.com；本机与服务器均成功校验证书/TLS1.3，现有证书只覆盖根域名、有效至2026-12-15。建议独立 `assistant.ryan406.online`，A/AAAA均NXDOMAIN；后续需新增主机assistant的A记录指向服务器，不能占用旧根域名 `/api`。本轮未改DNS或申请证书；未核实阿里云安全组规则。
+- 建议 `/opt/xiaodan`＋独立虚拟环境/用户/服务，管理与设备网关分别只绑定127.0.0.1:8010/8013，独立子域名由既有Caddy提供HTTPS/WSS、个人登录和设备鉴权。正式上线需适配Caddy2.6.4的 `basicauth`（现模板为 `basic_auth`）；当前Caddy没有读取拟用环境文件，不能为注入环境变量直接重启旧代理，须调整独立站点凭据配置方式。共享代理reload和同机资源竞争仍需考虑，不能承诺绝对零影响。
+- 本轮按忽略CRLF核对运行目录43个受版本管理的后端文件，全部与 `bd639a9` 一致；开发工作树仍保留新动画及TCP改动，不能直接上传。后续获部署授权后从稳定提交准备程序，另迁当前 `.env`、devices/tools/voices/qwen_voices配置及一致性保护的conversations/personal_kb数据库，保留音色、设备配对、历史与知识库原文/索引；不上传Windows虚拟环境、工具链和缓存。未输出私有配置值或发起付费模型调用。
+- 原网络既已损坏，不继续要求切回；云端接入后设备仍需可上网的Wi-Fi/热点。迁云可解除对电脑局域网地址的依赖，但不能据此宣称原动画/TCP背压原因已解决。
+
+## 本次无法对话/重启后无法唤醒：电脑已切到手机热点（2026-11-15 16:34）
+
+- 用户报告运行抓包后，设备唤醒但一直聆听，重启后又无法唤醒。本轮实际核对电脑 WLAN 连接为 `OPPO Findx 8 Pro`，IPv4 `10.92.136.114/24`、网关 `10.92.136.22`；设备串口仍连接 `CMCC-g24u`，IP `192.168.1.5/24`、网关 `192.168.1.1`。电脑已不持有设备配置的网关服务地址 `192.168.1.6`，两端当前网络不通；这是本次现象的明确环境原因，不能并入新动画解码或 13:41/14:36 TCP 背压的未定根因。
+- 16:30:54.729 本地唤醒实际命中、概率 0.881594，随即 `idle → connecting` 并尝试 `ws://192.168.1.6:8003/xiaozhi/v1/`；后续没有 Session ID、进入 listening、后端新连接或模型调用。用户看到卡住时，设备日志实际停在建连阶段，不能当成模型听到语音而未回答。
+- 用户重启/USB 重枚举后，原 COM3 采集在 16:31:28 报 I/O 中止退出；本轮恢复串口采集 PID 6168，未传 `-ResetDevice`。重连获得的 16:33 启动段显示旧形象加载完整、设备连上原 CMCC 网络，16:33:51 进入 activating 并停在 OTA 版本检查，尚无 `Activation done`、idle 或唤醒检测启动；源码中正常待机及唤醒检测位于启动校验完成之后。不能将此时无法唤醒判成唤醒模型损坏。
+- 用户本次抓包已实际运行：16:30:51 开始、16:33:52 自动停止并清理筛选器，转换结果 0 包，pcapng 200 字节；路径 `logs/device-tcp-headers-20261115-163051.*`。在当前电脑热点与设备原网分离的状态下，没有采到双方旧地址间的目标流量；这份空包不能用于推断 TCP ACK/窗口/重传原因。
+- 后端仍为 PID 17156，8000/8003 监听且 health `ok/configured=true`；没有修改固件、音色、运行后端、设备地址或电脑 Wi-Fi。用户随后说明原网络已损坏，不能继续安排切回原网络；后续按稳定版云端部署只读评估推进，设备网络与地址切换另按授权执行。
+
+## 动画回归只读调查：稳定版也出现同类发送超时（2026-11-15）
+
+- 用户要求保留现稳定版本，查清新动画与语音的冲突原因后再改。本轮只读检查历史/新增日志、原版与新动画源码、当前固定版本的 LVGL/lwIP 和资源包；没有修改业务代码、构建、刷机、重启、改网络设置或发起模型请求。后端仍为 PID 17156，COM3 采集仍为 PID 33684；运行目录两个实时模块再次与 `bd639a9` 原文核对一致。
+- 关键反证：串口恢复段第 18852 行，16:02:45.968，旧应用/旧形象/稳定后端同样出现 `TCP send failed errno=116 sent=0 total=154 duration_ms=251`，随后本地关闭、`listening → idle`，与新动画批次的直接断链机制相同。此前 16:02:38.841–43.774 已正常下发/接收 82 包。不能因用户确认恢复就推断所有发送超时仅由新动画引起，也不能因此否认用户报告的新动画版本明显退化；新动画是否放大原有问题仍未证实。
+- 16:03:39 再次唤醒后同一连接产生后续多轮回答、打断及结束意图，16:04:27 回 idle，16:04:37 peer close 为结束后的清理。恢复后六个有下行音频的回合，网关发送/设备接收分别 82/82、47/47、46/46、120/120、98/98、5/5，answer CRC 均一致，设备入队丢包均 0；最后两个音频回合归档 interrupted，不能把完整生成和包数一致当作完整播完。用户“恢复了”的现场反馈继续有效，网络偶发断链单独保留。
+- 已证实的原有断链机制：稳定版 `EspTcp::Send` 对实时连接使用 MSG_DONTWAIT，EAGAIN 后等待可写，整次发送到 250000us 即 `DoDisconnect(false)`；新旧版本都保留此期限。当前生成配置 `CONFIG_LWIP_TCP_RTO_TIME=1500`，是初始重传配置，不能当作每条已建连接故障当时的实际 RTO。日志没有 sndbuf、pbuf 队列、ACK 进展、对端窗口或重传状态，尚不能区分队列/内存不足、无线 ACK 延迟与对端窗口等最初不可写来源。此前 20ms 重试修改未恢复新动画批次，不能再把 select 通知缺陷当作充分解释。
+- 新动画已有两处可直接核实的接入问题/耦合，均不能冒充语音断链定因：①初版 I4/RLE 资源配合 `LV_BIN_DECODER_RAM_LOAD=false`，本地 `lv_bin_decoder.c:1041` 明确拒绝解码，解释早期表情空白；13:41 语音失败当时尚未开启这条 RAM 解压路径，因此不能以随后启用的解压内存开销解释所有失败。②新后端在 next/thinking/activity/idle 等实时回调里 await UI 发送，与 TTS 共用连接发送锁，增加显示对对话时序的依赖；但四次失败的归档均无 speech_stopped/首音，gateway trace 仅含关闭时 stop_audio，无 next/notice/done/error，不能把工具状态或播放显示反馈判为这些早期失败已观察到的起因。
+- 新资源 55 个 128×128 独立帧，旧资源 48 个 84×84 帧，帧周期均为 80ms；新编码总量 44087 字节小于旧 PNG 的 102583 字节，但像素面积为旧版约 2.322 倍。本地软件 indexed 解码路径会转 ARGB8888，单帧像素区 65536 字节，另有 RLE 中间缓冲；实际分支/缓存命中与现场耗时未测，不能写成内存已耗尽或动画已抢占语音。新旧唤醒模型和字体一致；音频发送在独立任务，UI 更新调度至主线程，状态栏先释放 Wi-Fi 查询锁再申请显示锁，未找到可证实的新显示锁→音频发送锁死链。
+- 当前结论是“表情空白根因已知，语音直接断链位置已知，动画与最初 TCP 背压的具体因果尚未查清”，不是“动画冲突已修复”。下一步最直接的证据是一次真实故障前后的 TCP 包头，核对 ACK、重传、窗口及两端关闭顺序；已有 `logs/capture-device-tcp-headers.ps1` 仅采设备与电脑间 8003 的 54 字节包头，不需要刷机或重启。当前执行身份不是 Windows 管理员，无法在本会话启动 PktMon；尚未启动抓包、提权或增设后台，不能伪造缺失的报文证据。
+- 用户首次在管理员 PowerShell 运行该脚本时，脚本用当前 GBK 控制台解码 PktMon 的 UTF-8 中文输出，把“未指定数据包筛选器”误判成已有筛选器而安全退出；当时尚未添加筛选器或开始抓包。已改为 `ProcessStartInfo` 显式 UTF-8 读取 stdout/stderr，并把中文字符判断写成 ASCII 的 `\u` 转义以兼容 PowerShell 5.1。第二次运行显示本机空列表实际输出为“无”，因此再补充 `\u65E0` 匹配；两次均在添加筛选器前退出，没有遗留筛选器或活动抓包。脚本语法解析 0 错误，尚未实际开始抓包，也仍未取得 ACK/窗口/重传证据。
+
+## 用户现场确认恢复（2026-11-15）
+
+- 恢复旧应用、匹配的旧像素资源及稳定后端后，用户反馈“恢复了”，确认现场语音已恢复；本次恢复不再处于等待用户确认状态。用户未逐项描述本次使用过程，不另补写报数、打断、退下再唤醒的独立验证细节。
+- 当前保持该稳定运行版本，新动画代码继续保留，暂不重新接入。组合恢复后的现场结果进一步支持按动画接入后的改动范围调查回归，但尚未定位其中哪项改动触发了最初的 TCP 背压。
+
+## 已按授权恢复稳定语音运行版本（2026-11-15 15:59）
+
+- 用户明确同意先恢复截图稳定版本、接受旧形象，同时保留新动画代码。新动画及 TCP 修改完整保留在 `.cache/repo-export` 工作树；本轮没有 checkout/reset/stash、提交或重新编译。恢复前运行中的两个新后端模块及新应用/资源另存 `.cache/device-backups/pre-stable-restore-20261115-1556/`，两个模块的保全副本与新动画工作树逐字节一致。
+- 运行目录 `backend/app/device_realtime.py`、`backend/app/realtime.py` 已恢复为 `bd639a9`，按忽略 CRLF 的内容比较与 Git 原文一致；全部 43 个受版本管理的后端文件原先仅这两处不同。工作树中两个模块仍保留新动画逻辑，当前有意与运行目录不同；后续不得将新工作树直接同步覆盖稳定服务，也不得直接重编译当前新动画固件冒充稳定版。
+- 停止旧后端 PID 29012 和已核对的 COM3 采集 PID 2928 后，只读核对当前分区/otadata，与 15:27 批次读回逐字节一致；当前启动 ota_0，应用范围 `0x20000–0x2cffff`、assets `0x580000–0x7fffff`。首次向新建备份目录保存分区读回遇到 PermissionError，未发生写闪存；改用既有 `firmware/.tmp/` 后成功，文件为 `stable-restore-partition-20261115.bin`、`stable-restore-otadata-20261115.bin`。
+- esptool 4.13.0 单次只写旧应用 `0x20000` 和匹配旧像素资源 `0x580000`，两项均报告 `Hash of data verified`、退出码 0。应用 2745744 字节，SHA256 `ebcc395f613efb9a113e2358e20d9fe8c297103cd4958dfb619e62beddd6a52e`，与上午 10:28 刷入相同；旧像素资源原文件 2613893 字节，SHA256 `fc4244afe4a646d3160e48fe57d17a9d941fea65fd08aee2c7337f19c1740b80`，esptool 按 4 字节补齐写入 2613896 字节。实际擦写仅 `0x00020000–0x002befff`、`0x00580000–0x007fefff`；未写 NVS、otadata、分区表、bootloader 或 ota_1。日志 `logs/flash-stable-bd639a9-app-assets-20261115.log`。
+- 稳定后端已启动，实际 PID 17156、8000/8003 分别监听回环/局域网，health `ok/configured=true`、模型 `qwen3.8-omni-flash-realtime`，沿用既有脱敏包装器显式开启 `AI_EMBEDDING_ENABLED=true`。沿用后端日志 `backend-robot-ui-bd639a9-20261115.err.log/.out.log`，新运行段以 `STABLE RESTORE bd639a9` 和新 PID 区分；新启动包装器日志为 `backend-stable-restore-bd639a9-20261115.launcher.log/.err.log`。
+- COM3 脱敏采集 PID 33684 已启动，既有串口日志第 18207 行起为 `STABLE RESTORE` 新段；15:59:21 复位，22 秒加载 idle 16/16、listen 12/12、think 10/10、speak 10/10，26 秒进入 idle，27 秒启动 `mn5q8_cn` 唤醒检测，麦克风及 16k 输入持续非零。新启动段未见资源缺失、panic 或启动失败；网关空闲 `connected=false/ready=false/last_error=null`。这些只确认稳定应用/资源/后端已恢复运行，当前尚无恢复后的真人对话，不能写成听感和语音闭环已经重新通过。
+- 用户配置、对话、知识库、音色、设备配对均未执行修改或回滚；未发起模型请求。下一步由用户直接叫“塔菲”并交流，主 Bot 结合本次日志继续确认真实语音；新动画接入暂缓，等稳定基线恢复的现场结果后再处理。
+
+## 稳定节点追溯与旧像素资源保全（2026-11-15）
+
+- 用户本轮明确确认：今天替换动画前，叫名字可从待机进入聆听，交流/报数的流畅度与完整度、说话打断、结束后回待机均达到预期；截图标记提交为 `ead6381`、`bd639a9`。这是用户现场确认，先前日志未覆盖的项目不能继续当作用户未确认。当前故障按该稳定节点之后的回归处理。
+- 实际 Git 工作树为 `.cache/repo-export`，HEAD `bd639a9`；`E:\xiaodan` 是运行/构建副本。动画接入仍未提交，修改涉及板级显示、动画资源构建、application 显示消息、两个后端实时语音模块及 LVGL 配置，之后另叠加 TCP 等待修改和诊断。核对两个后端模块、application、EspTcp 的运行副本与工作树一致；仅看 HEAD 不能代表已经恢复稳定节点。
+- 再次核对 13:41、14:36 失败：唤醒/建连和麦克风输入仍有实际记录，随后设备上行 TCP 在原有 250ms 期限内持续不可写并主动关闭；两次 14:36 回合上行 30/17 帧，回答正文和下行音频均为零，后端 CancelledError 发生在设备断开后的清理阶段。已定位直接中断位置，尚不能证明动画绘制、资源压力或无线传输中的哪一项造成最初背压。15:27 诊断固件启动后，截至本轮读取尚无新对话或 `TCP backpressure` 样本。
+- 稳定应用备份 `.cache/device-backups/pre-robot-ui-20261115-115637/xiaozhi.bin` 仍在，SHA256 `ebcc395f613efb9a113e2358e20d9fe8c297103cd4958dfb619e62beddd6a52e`，与 10:28 刷入记录一致。但同目录原 `generated_assets.bin` 只有 24 项基础资源，不含旧显示代码需要的 48 张像素帧；它是当时构建产物，不能冒充上午设备实际资源区的完整备份。
+- 从本项目已回收的 `build-tafei-mn5-fix/generated_assets.bin` 找到 72 项旧资源包，复制保全为 `.cache/device-backups/pre-robot-ui-20261115-115637/pixel-assets-recovered-20261115.bin`；未移动或删除回收站原件。文件 2613893 字节，SHA256 `fc4244afe4a646d3160e48fe57d17a9d941fea65fd08aee2c7337f19c1740b80`。包长度/校验和、各项资源 magic 有效，包含旧代码所需 idle 16/listen 12/think 10/speak 10 全部帧；唤醒模型和字体与当前资源逐字节相同。尚无上午资源区读回哈希，故仅确认这是结构匹配的旧像素资源包，不宣称与上午设备全区逐字节一致。
+- 若恢复稳定节点，应协调原应用、匹配的旧像素资源和 `bd639a9` 两个后端模块，保留当前新动画工作、私有配置、历史及设备配对；仅 checkout 源码或只刷应用并不能恢复整套运行状态。本轮仅只读调查、复制保全资源及同步本记录，没有修改业务源码、构建、刷机、重启服务或发起模型请求。实际语音尚未恢复，设备恢复操作仍需用户相应授权。
+
+## TCP 背压诊断固件已刷应用区（2026-11-15 15:27）
+
+- 用户授权只刷应用区并进行一次真机测试。停止原 COM3 采集 PID 8008 后重新读取分区表和 OTA 数据，与上次确认的备份逐字节哈希一致：当前 `ota_0` 为 `0x20000–0x2cffff`，assets 自 `0x580000` 起。待刷文件 SHA256 为 `a60a8dc53c91e61cea7a7a33b2fae7206267c19598b53b615972588e3eb33e8c`。
+- esptool 仅向 `0x20000` 写入应用 2776416 字节，实际擦写 `0x00020000–0x002c5fff`，报告 `Hash of data verified`，退出码 0；日志 `logs/flash-app-tcp-state-diagnostics-20261115.log`。未写 NVS、OTA 数据、配对信息、assets 或其他分区。
+- COM3 采集使用既有脱敏脚本重新启动，PID 2928；`logs/serial-robot-ui-bd639a9-20261115.log` 从第 14385 行进入本次启动段。15:27:15 复位后设备加载 55 个表情资源，15:27:20 进入 idle 并启动“塔菲”唤醒检测；本次连接 Wi-Fi 时 RSSI=-70dBm。后端 PID 29012 未重启，8000/8003 监听、health `ok/configured=true`；该进程此前已核对 embedding 开启。以上不代表语音对话已通过，等待用户实际讲话和听感；如仍失败，须结合本次 `TCP backpressure` 两条记录、既有串口/后端日志及逐回合音频指标分析。
+
+## 重新审查发送背压，诊断固件已编译，根因仍未证实（2026-11-15 15:22）
+
+- 按用户“不要防御性测试，大胆猜测，细心排查”的要求重新核对实际源码、运行环境和旧日志，没有安排模拟 API、额外后台、付费对话或用户重复讲话。仍未找到能证明“新动画阻塞语音发送”的执行链：独立上行任务的失败耗时主要在 TCP 等待，实际 send 调用不足 1ms；这也不能排除 UI 对资源、调度或无线传输的间接影响。此前可写等待修改未恢复真实语音，不能继续将其当作已定因。
+- 新查实的环境差异：13:33 启动时设备 RSSI=-70dBm，14:33 最新启动为 -80dBm（扫描 -81dBm），两次连接同一 BSSID、2.4GHz 信道 2；电脑走直接 WLAN 路由、5GHz 信道 149，设备 ARP MAC 与硬件 MAC 相同。只读网络诊断对设备连续 5 次 ICMP 出现一次 1500ms 超时、一次 534ms，另三次 9/5/4ms；同时路由器为 1/16/2/2/1ms。但设备当时处于 MAX_MODEM 待机，源码 listen_interval=10，不能把待机 ICMP 延迟直接等同于通话中的丢包或认定无线已定因。没有修改无线配置或路由器。
+- 旧 errno=EAGAIN 不能区分发送字节耗尽、pbuf 队列满、对端窗口关闭或分配失败。业务源码本轮仅在 `main/network/esp_tcp.cc` 补齐真实背压证据：首次 EAGAIN 和最终失败各读取一次当前连接的 sndbuf、pbuf 数量、unsent/unacked 段数、ACK 进展、对端窗口、拥塞窗口、重传计数与定时状态；失败时另记内部 RAM、DMA 和 PSRAM 的空闲量/最大连续块。通过 `tcpip_callback_wait` 在 lwIP 核心上下文拷贝状态，不跨线程遍历或保留 PCB 指针；使用当前固定 ESP-IDF 5.5.2 的 TCP 内部结构，未修改第三方协议栈。正常无背压发送不查询协议栈；首个快照在原 250ms 期限内采集，最终快照在判定失败后采集，只在失败时打印两条 `TCP backpressure`，不记录报文、凭据或录音。
+- 本轮没有修改动画、AEC、采样率、声道、use_mclk、语音打断、唤醒、待机或后端业务；没有加大缓冲、延长发送期限、丢帧冒充成功或加入重连兜底。这是诊断固件，尚未修复或验证语音根因；待真实记录说明具体背压来源后才能实施对应修复，不能将编译成功写成语音恢复。
+- 工作树与运行副本源码同步；必要构建退出 0，日志 `logs/firmware-build-tcp-state-diagnostics-20261115.log`。最终应用 2776416 字节、分区余 41632 字节，SHA256 `a60a8dc53c91e61cea7a7a33b2fae7206267c19598b53b615972588e3eb33e8c`；assets SHA256 仍为 `3b5897f8fff8e6e49904494f2a7422c149291af547423cc835e2031e9a9f7a2e`，sdkconfig 与构建前一致。当前已刷应用及 elf/assets/config 已保存至 `.cache/device-backups/pre-tcp-state-diagnostics-20261115/`。没有刷机、重启服务/串口、commit 或 push；8000/8003 仍为 PID 29012，COM3 采集仍为 PID 8008。设备上仍运行 14:33 批次应用，不是新生成的诊断固件。
+
+## 表情已由用户确认显示，TCP 修正后语音仍失败（2026-11-15 14:36 批次）
+
+- 用户现场确认“现在表情是有了，语音没有正常”。复核同一串口文件 14:33:00 标记之后、后端新增两个会话和对应逐回合记录；本次没有改业务源码、编译、刷机、重启或调用模型。此结果确认表情显示已恢复，但不补写全部动画状态、顶部时间读数和走时验收。
+- 第一次 14:36:10.147 从 idle 建连（未见唤醒词命中，不能推定触发方式），10.212 进入 listening；12.492 上行发送失败：`errno=116 sent=0 total=125 duration_ms=269 first_send_errno=11 send_calls=9 would_block=9 select_timeouts=9 send_call_max_us=379 select_ms=267`，12.516 自动进入 idle。第二次 14:36:16.444 明确命中“塔菲”、概率 0.808230，16.451 开始建连，18.934 进入 listening；20.352 再次失败：`errno=116 sent=0 total=151 duration_ms=268 first_send_errno=11 send_calls=9 would_block=9 select_timeouts=9 send_call_max_us=682 select_ms=265`，20.376 回 idle。第二次至收到 hello 约 2.44s，第一约 52ms，握手耗时也有明显波动，尚无报文证据解释原因。
+- 本轮 `TCP write resumed after select timeout` 为 0 条。两次确实执行了 9 次实际 send，9 次均 EAGAIN，没有观察到恢复；最长 send 系统调用仅 379/682us，耗时主要在 select 等待，不是 send 调用本身长时间不返回。上轮“可写通知可能滞后”的等待逻辑修正没有解决本轮真实故障，不能再以该假设作为充分根因或宣称已恢复；最初 TCP 背压的来源仍未定位。
+- 回合 `d84b3630-d8cf-4e48-9e86-29cc45ef6ef2` / `10821629-7bc1-40d2-82c2-a2b4ff6f8d00`：上行分别 30/17 帧、队列丢弃均 0、最长排队 250/203ms、云端 append 最长记录均为 0ms、上行慢发送均 0；`reply_chars=0`、TTS/首包时点均空、音频编码和下发均 0 包，结束原因均 `closed`。后端归档使用 UTC（06:36 对应北京时间 14:36），不能将归档时区差异当作屏幕时间偏移。
+- 串口两次先记录设备 TCP 超时与本地断开，后端随后收到关闭码 1005。后端仅出现相应 `realtime_receive_cancelled event=awaiting_event`，完整堆栈保留于 `logs/backend-robot-ui-bd639a9-20261115.err.log` 第 87/120 行起：`realtime.py:352 → asyncio.wait_for → websockets.recv/messages.get → CancelledError`；没有 `realtime_receive_failed`、`device_realtime_upstream_closed` 或供应商错误载荷。该取消属于设备关闭后的清理，不能判为后端先断开或崩溃。
+- 本轮转写、助手正文、`audio_downlink_start`、进入 speaking、主动 `Abort speaking` 均为 0，两会话 `abort_count=0`。因此没有可评价的长回答卡顿/重复、故事完整播放或播放中打断样本；启动提示音及唤醒提示音不能算助手回答。首次异常回 idle 后再次叫“塔菲”成功，证明该次异常待机后的唤醒检测有效；未见正常结束意图“退下吧”的闭环，不能写成正常退下再唤醒已验收。
+- 新启动段未见 LVGL 解码错误、资源缺失或 panic；顶部时间和底部文字没有屏幕遥测，实际显示仍待用户确认。检查时后端 PID 29012、health `ok/configured=true`、COM3 PID 8008 仍运行；网关 `connected=false/ready=false/last_error=null`，麦克风继续输入。HEAD 仍为 `bd639a9` 加未提交修改，已刷应用 SHA256 `fee56694b1a68837098a914193b8a1f7ecee5982aafa2ecc1965d472062b623e`。下一步应追踪 TCP ACK、重传、接收窗口及设备发送队列/内存的实际状态，不能继续靠改等待参数或重复长回答测试推断根因。
+
+## TCP 可写等待与表情解码修正版已刷应用区（2026-11-15 14:33）
+
+- 按用户授权停止原 COM3 采集 PID 21072（命令行核对为本轮采集脚本），未停止后端。刷写前只读确认分区：NVS `0x9000–0xcfff`、otadata `0xd000–0xefff`、`ota_0` `0x20000–0x2cffff`、`ota_1` `0x2d0000–0x57ffff`、assets `0x580000–0x7fffff`；otadata 槽 0 为 `seq=1`、`state=2(VALID)`，按 `bootloader_common_ota_select_crc` 规则核对 CRC 一致，当前启动 `ota_0`。只读文件保存于 `firmware/.tmp/robot-ui2-partition-20261115.bin` 与 `robot-ui2-otadata-20261115.bin`。
+- 使用项目 esptool 4.13.0 单次写入 `0x20000 xiaozhi.bin`，日志明确擦写范围仅 `0x00020000–0x002c5fff`，写入 2774880 字节并显示 `Hash of data verified`，退出码 0；日志 `logs/flash-app-tcp-writability-20261115.log`。应用 SHA256 `fee56694b1a68837098a914193b8a1f7ecee5982aafa2ecc1965d472062b623e`。没有写 otadata、NVS、配对数据、`ota_1`、分区表、bootloader 或 assets。
+- 新 COM3 采集 PID 8008、115200 UTF-8，14:33:00 写入采集开始和主动复位标记，继续使用既有脱敏日志 `logs/serial-robot-ui-bd639a9-20261115.log`（本轮从第 7500 行起），启动日志另存 `logs/serial-tcp-writability-bd639a9-20261115.launcher.log/.err.log`。设备从 `ota_0` 启动，14:33:01 报告 `RobotDisplay: loaded 55 unique frames`，14:33:05 完成激活、进入 idle 并启动 `mn5q8_cn` 的“塔菲”唤醒检测；启动扫描未见 LVGL 解码错误、资源缺失、panic 或 Guru，麦克风输入持续非零。画面和时间仍待用户现场确认。
+- 后端沿用 PID 29012，8000/8003 均监听，health `status=ok/configured=true`、模型 `qwen3.8-omni-flash-realtime`。通过只读进程环境核对实际服务进程 `AI_EMBEDDING_ENABLED=true`，没有输出其他环境变量或凭据。设备空闲时不保持语音 WebSocket，检查时网关 `gateway_running=true/connected=false/ready=false/last_error=null` 属待唤醒状态。
+- HEAD 仍为 `bd639a9` 加未提交修改；本轮未改业务源码、assets 或环境，未重启后端、调用模型、commit/push。用户下一轮测试将覆盖表情、短问答、长报数/故事、主动打断及退下后再次唤醒；新增 `TCP write resumed after select timeout` 和 send/select 明细用于验证发送等待修正。
+
+## 新增 UI 路径审查与 TCP 可写等待修正（2026-11-15，编译通过，未刷机）
+
+- 按用户要求继续对照上午顺畅版本，检查 `RobotDisplay`、application UI 消息、WifiManager、WebSocket 发送锁、独立上行任务及后端接收/上传协程。新增 UI 消息通过 `Application::Schedule` 交给主线程，绘图锁没有进入独立 `audio_send` 任务；状态栏先读 Wi-Fi 再取得显示锁，没有发现新增的显示锁与网络锁互相等待链。13:41 两次失败的 TCP 内部耗时 261/256ms、上层发送总耗时 272/266ms，主要耗时已在 TCP 内，不支持将其直接说成主线程等待绘图锁。UI 间接改变资源或调度是否触发最初背压，仍无运行证据。
+- 找到并修复可由本地 lwIP 源码证实的等待缺陷：`EspTcp::Send` 在 EAGAIN 后将全部剩余期限交给单次 select，select 超时即断开，期间不再尝试实际发送。lwIP 的 `api_msg.c` 通过发送字节/队列低水位恢复可写通知；当前 MSS=1440、发送缓冲=5760，默认字节低水位为 2881，因而恢复到足够发送约 150 字节的小帧不一定触发通知。失败写入设置 `NETCONN_FLAG_CHECK_WRITESPACE` 后还依赖 ACK 或轮询恢复通知；本地轮询间隔为 2 个 500ms 慢定时周期。不能把“没有可写通知”当成“这个小帧始终无法发送”。
+- 本轮业务源码仅修改 `main/network/esp_tcp.cc` 并同步构建副本：保留原 250000us 整次发送期限和 MSG_DONTWAIT；每次 select 最多等待 20000us，未收到通知也回到原循环，在原期限内重新尝试发送。仍按已发送偏移续写，真正失败或到期仍关闭连接，避免半帧与后续帧拼接；未增加缓冲、延长期限、丢弃当前帧继续冒充发送成功或关闭语音打断。HTTP 的非实时发送路径保持原语义。
+- 必要诊断与本次等待逻辑放在同一函数内：失败保留最初 send errno、实际 send 调用次数、EAGAIN 次数、select 超时次数、最长 send 调用耗时及累计 select 等待；短暂无通知后发送成功时记录 `TCP write resumed after select timeout`。正常无背压发送不增加日志；不记录载荷、凭据或 Authorization。旧日志未保存这些字段，不能追溯证明两次真机超时都由上述通知缺陷触发，也未定位最初背压来源，不将本轮修正写成真实语音问题已全部解决。
+- 构建日志 `logs/firmware-build-tcp-writability-fix-20261115.log`，明确编译本地替换的 `main/network/esp_tcp.cc` 并退出 0。应用 2774880 字节（`0x2a5760`），余 `0xa8a0`，SHA256 `fee56694b1a68837098a914193b8a1f7ecee5982aafa2ecc1965d472062b623e`；二进制已包含新诊断字符串。生成配置与上轮逐字节一致，assets SHA256 仍为 `3b5897f8fff8e6e49904494f2a7422c149291af547423cc835e2031e9a9f7a2e`。`git diff --check` 通过；无既有 C++ 单元测试，本次未添加模拟网络测试或运行无关完整套件。
+- 构建前将上轮表情修正版 bin/elf、assets 和配置保存于 `.cache/device-backups/pre-tcp-writability-fix-20261115-142310/`。未改 UI 状态规则、AEC、声道、采样率、use_mclk、唤醒或待机源码；没有刷机、重启、调用模型、commit/push。后端 PID 29012 与 COM3 采集 PID 21072 仍为原实例。后续获准刷入后，由用户验证短问答、长报数/故事、主动语音打断及退下再唤醒，再用新增发送记录判断恢复是否发生在无 select 通知的分支，若仍失败继续定位背压而非继续增大缓冲或期限。
+
+## 表情解码配置修正与上午语音版本对比（2026-11-15，编译通过，未刷机）
+
+- 按用户要求修复表情空白，在 `sdkconfig.tafei-mn5` 与 `sdkconfig.defaults.atoms3r-tafei-mn5` 同时开启 `CONFIG_LV_BIN_DECODER_RAM_LOAD=y`，保留原有 I4/RLE 资源和 `CONFIG_LV_USE_RLE=y`；启用 LVGL ERROR 级 printf 日志，不增加逐帧正常日志。板级 README 同步注明必需配置，工作树与本机构建副本一致；没有更改音频、协议、唤醒或待机源码。
+- 首次开启 WARN 日志的构建在本地 LVGL `lv_bin_decoder.c:1130` 遇到其自带格式错误：4 位压缩方法字段提升为 int，却按 `LV_PRIu32` 输出，触发 `-Werror=format`。最终只启用实际需要的 ERROR 级日志，不改第三方依赖或放宽编译器检查。最终生成配置确认 `LV_USE_RLE=true`、`LV_BIN_DECODER_RAM_LOAD=true`、`LV_USE_LOG=true`、`LV_LOG_LEVEL=3`、`LV_LOG_PRINTF=true`。
+- 最终构建退出码 0，日志 `logs/firmware-build-robot-ui-decodefix-final-20261115.log`；应用 2774320 字节（`0x2a5530`），处于现有 `0x2b0000` 应用分区内，余 `0xaad0`。应用 SHA256 `3cc95d531705ddc65508bbb868720867151cd2ff6dd7a65c791f244d46b7cf95`；assets 仍为 2555952 字节、SHA256 `3b5897f8fff8e6e49904494f2a7422c149291af547423cc835e2031e9a9f7a2e`，与当前已刷资源完全一致。仅此修正无需再次写资源区。实际屏幕绘制与听感仍待用户上机确认，编译通过不记为真机通过。
+- 以用户上午确认顺畅的备份为基线：`.cache/device-backups/pre-robot-ui-20261115-115637/xiaozhi.bin` SHA256 `ebcc395f613efb9a113e2358e20d9fe8c297103cd4958dfb619e62beddd6a52e`，其配置与 HEAD `bd639a9` 完全一致。核对 584 个受版本管理的固件/后端代码及相关构建文件，运行副本与工作树无偏差；相对上午基线，仅既有本轮的显示替换、动画构建、application UI 通知及两个后端 UI 事件文件发生变化。AEC、Codec、AudioService、AFE、原生 TCP、WebSocket 协议、后端设备接收等源码一致；250ms 发送期限上午就存在，上午备份固件内也包含同一发送失败日志和独立上行任务日志。
+- 上午实际顺畅的结果继续有效；13:41 两次失败应按接入 UI 后出现的回归调查，不能把原有 250ms 期限当作本轮新增改动，也不能仅因音频源码未改就排除 UI 的资源/调度影响。当前只查实设备发送超时触发关闭，最初不可写的原因仍未确定。本次未调整发送期限、缓冲、AEC、声道、采样率、use_mclk、打断或唤醒参数，不宣称语音异常已修复。
+- HEAD 仍为 `bd639a9` 加未提交修改。构建前已将当前已刷应用、assets 和生成配置备份到 `.cache/device-backups/pre-robot-ui-decodefix-20261115-135942/`；本次没有刷机、重启设备/后端/串口、调用模型、提交或推送。`git diff --check` 通过，未运行无关完整测试套件。
+
+## 机器人屏幕本轮异常复核（2026-11-15 13:41 批次）
+
+- 用户反馈表情没有显示，语音回答、打断及待机后再次唤醒存在异常。复核 `logs/serial-robot-ui-bd639a9-20261115.log`、对应后端 err/out 和 `logs/device-audio-turns.jsonl`；本次只读排查并记录，没有改业务源码、编译、刷机、重启或调用模型。
+- 表情空白存在确定的代码/构建原因：新资源采用带 COMPRESSED 标记的 I4/RLE，而已刷构建 `config/sdkconfig.json` 为 `LV_USE_RLE=true`、`LV_BIN_DECODER_RAM_LOAD=false`。本地 LVGL 的 `lv_bin_decoder.c:927` 中 `decode_compressed()` 在该开关关闭时直接返回 `LV_RESULT_INVALID`（1041 行错误提示）；`LV_USE_LOG=false` 又使此绘制错误没有出现在串口。`RobotDisplay: loaded 55 unique frames` 只检查资源存在并装载描述符，不能证明解码绘制成功。此前资源像素往返检查没有覆盖实际 LVGL 解码配置；此问题尚未修复。
+- 北京时间 13:41:14.059 确实检测到“塔菲”，14.443 进入 listening；15.996 设备上行 `TCP send failed errno=116 sent=0 total=151 duration_ms=261`，16.015 自动进入 idle。第二次 13:41:29.464 从 idle 建连、29.552 进入 listening，31.650 再次发送超时（total=146、256ms），31.670 自动进入 idle；第二次没有唤醒词命中日志，不能断言是语音唤醒。
+- 两次失败均由设备现有 250ms 发送期限到期触发本地 `DoDisconnect(false)`，后端随后收到关闭码 1005 并清理云端 receive 协程。后端两个 `realtime_receive_cancelled` 的完整 traceback 为 `realtime.py:352 → asyncio.wait_for → websockets.recv/messages.get → CancelledError`，属于断开后的取消，未见 `realtime_receive_failed` 或 `device_realtime_upstream_closed`。未出现后端进程崩溃或用户手动停服务。现有日志能定位直接断开路径，不能确定最初 TCP 不可写是 Wi-Fi、协议处理或调度中的哪一项，也不能将它归因于表情解码故障。
+- 回合 `a4580055-cbf2-4398-ab29-c182d42bb255` / `d41f6cf7-97bc-43ca-b75f-a1001578dfdd` 的上行分别为 18/28 帧，上行队列丢弃均 0、最大排队 16/0ms、云端 append 最长 0/15ms；两回合 `reply_chars=0`，TTS 时点均空，编码和下发音频均 0 包，`end_reason=closed`。未见转写或 model_call success，未进入 speaking；本轮没有形成有效的回答、播放打断或退下后再次唤醒验收。重新建立第二次连接确实成功，但仍在约两秒后超时，不能记为重试已恢复。
+- 顶部时间代码沿用 OTA 的 UTC 时间戳加 480 分钟，主循环每秒刷新 HH:MM，未发现其他 TZ/settimeofday 路径；本轮 OTA 请求 200 且没有缺失 server_time 提示，但没有设备时钟读数或屏幕证据，不能确认实际时间、走时和文字显示正确。底部状态存在明确表达缺口：`RobotDisplay::UpdateStatusBar()` 仅以 Wi-Fi 判断连接，TCP 故障进入 idle 时会显示“待机”，未区分本轮语音连接失败；观察到的回待机不是结束意图的正常退下。
+- 复核时 HEAD `bd639a9` 加未提交 UI 修改，8000/8003 仍由 PID 29012 监听，health `ok/configured=true`，启动包装器显式保持 embedding=true；COM3 采集 PID 21072 继续写入，麦克风输入持续非零。设备网关当时 `connected=false/ready=false`。后续应先修复实际解码配置并继续定位发送超时，再由用户现场确认画面和语音；不以健康检查代替真机结果。
+
+## 第一版机器人屏幕已刷入、后端和采集已重启（2026-11-15 13:33）
+
+- 按用户授权先停止原 COM3 采集进程 PID 26144，只读设备分区表及 OTA 数据，确认当前有效 OTA 序列为 1、状态 VALID、CRC 正确，对应 `ota_0`。实际分区：NVS `0x9000–0xcfff`、`ota_0` `0x20000–0x2cffff`、`ota_1` `0x2d0000–0x57ffff`、assets `0x580000–0x7fffff`。esptool 的 Python 环境无法向 logs 写入二进制，改写到项目内 `firmware/.tmp/robot-ui-partition-20261115.bin` 和 `robot-ui-otadata-20261115.bin` 后读取；首次只读未执行写入。首次临时 CRC 计算多做了异或，后按项目 ESP-IDF 实现核对并确认正确，不能将首次计算输出误判为 OTA 损坏。
+- 使用现有 esptool 4.13.0 单次写入应用 `0x20000 xiaozhi.bin` 和 assets `0x580000 generated_assets.bin`，应用实际擦写 `0x00020000–0x002befff`、资源实际擦写 `0x00580000–0x007f0fff`；两项均报告 `Hash of data verified`，退出码 0。应用 SHA256 `2281de1c75add0247361962d562b59f022ac54e4247f456d53f8d45fe846058a`，assets SHA256 `3b5897f8fff8e6e49904494f2a7422c149291af547423cc835e2031e9a9f7a2e`。没有写入 NVS、OTA 数据、`ota_1`、分区表、bootloader 或其他区域。证据 `logs/flash-app-assets-robot-ui-bd639a9-20261115.log`。
+- 后端仅同步 `backend/app/device_realtime.py` 与 `backend/app/realtime.py`，两份运行副本分别与工作树 SHA256 一致；明确停止旧服务属于用户授权重启。新服务实际 PID 29012，8000/8003 均由该进程监听，`/health` 为 `status=ok/configured=true`；项目 `.venv` 脱敏采集包装器显式设置并传递 `AI_EMBEDDING_ENABLED=true`。日志 `logs/backend-robot-ui-bd639a9-20261115.err.log` / `.out.log`。
+- 新 COM3 采集 PID 21072、115200 UTF-8，日志 `logs/serial-robot-ui-bd639a9-20261115.log` 持续写入并脱敏。为采集启动证据，在串口已打开时按 esptool 同样的 RTS 脉冲重启设备一次；13:33:07 串口确认 `RobotDisplay: loaded 55 unique frames`，13:33:12 进入 idle 并启动 `mn5q8_cn` 的“塔菲”唤醒检测，后续原始麦克风和 16k 输入非零；启动阶段未见 panic 或资源加载失败。设备没有由 AI 发起语音对话，时间、文字布局、表情、实际听感及真人打断/待机再唤醒仍由用户现场测试。
+- HEAD 为 `bd639a9` 加本轮未提交修改；保留 `.env`、data、配对和既有日志，未重新编译、提交或推送。此前针对性检查为 15 passed，本次不把刷写校验、health 或音频采集当作语音体验通过。
+
+## 第一版机器人资源、时间与状态屏已接入（2026-11-15，编译通过，未刷机）
+
+- 按用户选择接入 `E:\浏览器下载\device-animation-pack.zip`，ZIP SHA256 `b3956b12a8707b5ce2d8ddf4c08ab961237589fe3e37ac812f881f4f16a96e88`。15 张原始 PNG 和帧序配置纳入板级 `animations/`，170 帧按 128×128 原坐标和 80ms 节奏转换为 55 张独立 LVGL I4/RLE 帧，图像数据 44087 字节；重复画面共享帧描述符且不重复设图，运行时不做 PNG 解码。独立 FFmpeg 解码与原生 I4/RLE 解压回算逐像素核对 170/170 一致，顶部/底部透明区和未使用网格均合规。
+- `robot_display.h` 替换旧四态像素显示：顶部 y=0–17 常驻 HH:MM、中部 y=18–105 保留原表情、底部 y=106–127 显示实际状态。沿用后端 OTA 的 UTC+8 校时，不另加网络校时请求，未校时显示 `--:--`。移除旧向上偏移和底部环形/柱状占位图标；连接与思考分开，支持循环、单次、保持末帧，允许设备事件立即切换；待机约 20s 可播放一次 idle_action，底部仍为待机。
+- `application.cc` 只增加显示通知：收到 `ui` 消息调度到主任务更新表情，唤醒与主动打断补充本地显示事件。`device_realtime.py` 在原有 next/thinking/error/idle/无音频收尾事件发送状态，结束意图后以 sleep 表情进入原有 idle，不改电源或唤醒流程。`realtime.py` 只为 device_voice 在工具执行前后补充显示事件；成功基于工具状态、HTTP 状态和控制回读，订单待确认/否认显示澄清，播放期间不让工具显示覆盖说话。activity 保留当前 turn_id 检查。语音采集、AEC、Opus、独立收发/播放任务、取消清队列、采样率、声道和 use_mclk=false 均未修改；打断先执行原有音频停止再通知显示。
+- `main/CMakeLists.txt` 将切帧及资源表生成加入正式构建依赖，动画合入 assets 的 extra_files，保留原 srmodels、字体和资源索引。sdkconfig 相比本次构建前只有 `CONFIG_LV_USE_RLE=y` 一项变化。最终 assets 79 项、2555952 字节，位于原 0x280000 分区内、余 65488 字节；srmodels.bin（2203819 字节）和 font_puhui_common_14_1.bin（272172 字节）与构建前逐字节相同。
+- 固件最终编译退出码 0：应用 2747712 字节（0x29ed40），适配原 0x2b0000 分区，余 70336 字节；应用 SHA256 `2281de1c75add0247361962d562b59f022ac54e4247f456d53f8d45fe846058a`，assets SHA256 `3b5897f8fff8e6e49904494f2a7422c149291af547423cc835e2031e9a9f7a2e`。日志 `logs/firmware-build-robot-ui-pack1-final-20261115.log`。首次编译发现 Wi-Fi 查询接口引用错误，修正为本项目 WifiManager 后增量编译通过；没有因编译失败改动音频链。
+- 现有 `tests/test_realtime_failures.py tests/test_devices.py` 15 passed、退出码 0，只补齐既有测试夹具的状态发送接口，未增加模拟后台或完整套件；日志 `logs/pytest-robot-ui-pack1-20261115.txt`。构建仍有原应用分区余量提示；首次全量构建中的 esp_video/lwIP 宏重定义和 pytest 依赖弃用提示未另行扩改。
+- 新固件源和构建配置已同步本机构建目录，后端修改仍留在主工作树，未覆盖运行副本或重启。原构建应用、assets 和配置保存在 `.cache/device-backups/pre-robot-ui-20261115-115637/`。本轮未刷机、未改 NVS/配对/.env/data、未 commit/push、未发模型请求或代替用户真机测试。部署需要应用区和 assets 区同时更新，不能沿用此前“只刷应用、保留旧 assets”的方式；顶部时间、中文状态、动画听感并行、真人打断、退下后再唤醒均待用户现场确认。
+
 ## 修复提交与项目冗余清理（2026-11-15）
 
 - 按用户“做到这个程度，先 git，再清理”的要求，将本轮已上机的 AEC/唤醒、发送/播放调度、空转写收尾、上游错误详情、逐回合指标和实际验证记录提交为 `ead6381`（`fix: stabilize device audio streaming and wake lifecycle`）。仅本地提交，未 push；完整故事、不中断报数至一百、退下后再次唤醒的本轮覆盖边界沿用下一节，没有补写验收。
@@ -91,7 +390,7 @@
 - 源码核对发现板级没有 MCLK 输出（GPIO_NUM_NC），却省略构造参数并沿用 `use_mclk=true`。M5Stack [官方 M5Unified](https://github.com/m5stack/M5Unified/blob/master/src/M5Unified.inl) 的 `_microphone_enabled_cb_atomic_echo` 明确将 ES8311 时钟配置为 MCLK=BCLK；Espressif [ES8311 驱动](https://github.com/espressif/esp-adf/blob/master/components/esp_codec_dev/device/es8311/es8311.c) 在 `use_mclk=false` 时选择 BCLK 并设置内部时钟倍频。此次仅为 AtomS3R Echo Base 显式传入 `false`，新增启动日志 `clock_source=BCLK`；AEC、采样率和音色保留。此修正尚待 Windows 编译及真机非零收音验证，不能写成根因已修复。
 - 撤回此前“固定 20 秒 EspTcp 接收超时”的判断：Windows 核对实际依赖 `78__esp-ml307/src/esp/esp_tcp.cc` 未设置 SO_RCVTIMEO，PING 有独立 PONG 处理；本轮约 32 秒断开。15 秒查询保留为主动保活，不当作断线已修复。TCP 断线原因仍未确定，需实际 errno/关闭码证据。
 
-## 最新进展（2026-11-10～11-11：设备屏幕与像素动画）
+## 历史进展（2026-11-10～11-11：设备屏幕与像素动画）
 
 - 设备屏幕根因与修复：确认新批次 AtomS3R 使用 ST7735 面板（非旧 GC9107），改用 st7789 驱动 + 面板 gap(2,1) + invert(true)、offset 归零后，方向/花屏/颜色恢复正常；此前 offset 写成 32 导致画面顶出可视区。经串口日志确认帧资源加载成功，问题在绘制层而非数据。
 - 像素 UI 与状态动画：待机呼吸、聆听侧转耳前、说话口型、适当眨眼；多态共用同一基准帧（第 0 帧逐像素一致），切状态不跳脸；12.5fps、透明底、像素风。帧因 assets 空间压缩到 84px、15 色；assets 余量约 7.5KB，很紧。
@@ -105,21 +404,21 @@
 - `tool_dialogue.TurnTools` 在真正调用 `retail_query_recent_order` 前校验：用户本条原话中连续写出的完整订单号与候选一致才可直查；分写字母/中文数字须先复述确认。用户原话能归一出单一 token 时优先绑定该编号，例如 `B H 一千零一 → BH1001`，不采用模型猜的 PH1001、不自动改字母；无用户 token 才用模型候选并标 `candidate_source=model_candidate` 与风险。未确认时不发 HTTP；确认后只按确认编号查询。状态按 session 隔离；重启后仅从上一轮最后一条助手消息的完整确认问句恢复，不从普通历史授权。
 - 本地验证（不联网、不发模型）：`output/order_confirmation_check.py` 58/58 通过，覆盖复述、确认、犹豫答复判 other（如“嗯……应该是吧/是吧/可能是/大概对/应该不是/不是吗/你说是吗/嗯我再想想/好等我核对一下/是另一个订单”）、否认、更正、同轮重试、跨会话不继承、确认后只按确认编号、模型自己先问再确认、错误前缀不查询、长文引用/普通历史不授权等；证据 `output/order-confirmation-check-20261108.json`。
 - 订单开场约束前移（2026-11-08）：`TurnTools.order_state_text` 只在订单工具已选用且本轮问题涉及订单、但没有显式完整编号时，动态追加“第一句只能中性核对订单号、工具 ok 前不得说这就去查/正在查询/查到；自行分写或中文数字归一化候选不等于确认”；`build_tool_instructions` 同步订单专属规则。天气/闲聊无订单语义时不生成该规则。`output/order_prompt_constraint_check.py` 8/8 通过，证据 `output/order-prompt-constraint-check-20261108.json`；未改流式 yield/音频链。
-- 文字订单真实回归：整体执行判据 35/35（[原始结果](../../output/order-confirm-results-20261108-180106.json)）；C8 补跑及审计分页重评 5/5（[补跑](../../output/order-confirm-results-20261108-181014.json)、[重评](../../output/order-confirm-c8-recheck-20261108.json)）。首轮复述 BH1001、不出现 PH1001、工具 blocked；确认后审计 id221 实际 `request.order_id=BH1001`，上游 HTTP 400 / INVALID_ORDER_ID，属真实执行后的业务拒绝，不能写成查到订单。测试后已还原 M5+天气+默认库，订单 `enabled=false`。
-- 实时 WS 订单首响应 guard 已真实复验：只在“订单工具已选用 + 本轮转写订单语义 + 无单一显式完整编号”时暂存首响应；blocked/denied 丢弃，ok/无工具调用原序释放。普通天气/闲聊/显式完整编号不挂 guard；转写前已有输出记录 `order_guard_early_output`，done 另含丢弃标记及字符/音频字节数。未改 TTS/audio_fx/播放链、未增加模型请求；[本地事件重放](../../output/realtime-order-guard-check-20261108.json) 11/11。
-- [真实 WS 结果](../../output/voice-order-guard-results-20261108-183734.json)：歧义订单与天气两组合计 14/14，另 1 项未验证。转写“帮我查一下订单号B H一千零一。”，最终问句“你说的订单号是不是 BH1001？”；客户端文字全程无 PH1001/“去查”，工具 `blocked/order_confirmation_required`；done 记录 `order_guard_discarded=true`、丢弃文字 18 字、音频 161280 字节。天气 `guard_discarded=0`、`get_weather ok`，首音 0.85s（基线 0.911s），未见该用例首音回归。
-- `/api/voice/turn` 显式“查订单 PH1001”已真实复验：实际请求 PH1001、工具 ok，回答 BayMax（BM-100），`audio_status=streamed`；[结果与配置还原记录](../../output/voice-explicit-order-20261108-183804.json)。该入口由文字驱动，不能替代显式 PH1001 的 WS 音频输入验证。
+- 文字订单真实回归：整体执行判据 35/35（[原始结果](E:/xiaodan/output/order-confirm-results-20261108-180106.json)）；C8 补跑及审计分页重评 5/5（[补跑](E:/xiaodan/output/order-confirm-results-20261108-181014.json)、[重评](E:/xiaodan/output/order-confirm-c8-recheck-20261108.json)）。首轮复述 BH1001、不出现 PH1001、工具 blocked；确认后审计 id221 实际 `request.order_id=BH1001`，上游 HTTP 400 / INVALID_ORDER_ID，属真实执行后的业务拒绝，不能写成查到订单。测试后已还原 M5+天气+默认库，订单 `enabled=false`。
+- 实时 WS 订单首响应 guard 已真实复验：只在“订单工具已选用 + 本轮转写订单语义 + 无单一显式完整编号”时暂存首响应；blocked/denied 丢弃，ok/无工具调用原序释放。普通天气/闲聊/显式完整编号不挂 guard；转写前已有输出记录 `order_guard_early_output`，done 另含丢弃标记及字符/音频字节数。未改 TTS/audio_fx/播放链、未增加模型请求；[本地事件重放](E:/xiaodan/output/realtime-order-guard-check-20261108.json) 11/11。
+- [真实 WS 结果](E:/xiaodan/output/voice-order-guard-results-20261108-183734.json)：歧义订单与天气两组合计 14/14，另 1 项未验证。转写“帮我查一下订单号B H一千零一。”，最终问句“你说的订单号是不是 BH1001？”；客户端文字全程无 PH1001/“去查”，工具 `blocked/order_confirmation_required`；done 记录 `order_guard_discarded=true`、丢弃文字 18 字、音频 161280 字节。天气 `guard_discarded=0`、`get_weather ok`，首音 0.85s（基线 0.911s），未见该用例首音回归。
+- `/api/voice/turn` 显式“查订单 PH1001”已真实复验：实际请求 PH1001、工具 ok，回答 BayMax（BM-100），`audio_status=streamed`；[结果与配置还原记录](E:/xiaodan/output/voice-explicit-order-20261108-183804.json)。该入口由文字驱动，不能替代显式 PH1001 的 WS 音频输入验证。
 - 未验证/未实现：真机麦克风/喇叭、塔菲唤醒、显式 PH1001 的 WS 音频（缺 PCM）；AEC 未实现。以上接口级结果不代表硬件语音全链路通过。
 
 ## 首响规则（2026-11-08，已应用并真实复验；听感仍待验证）
 
 - Lead 已仅更新系统提示词：首响为贴合本轮内容的正式回答第一句，工具续答不重复开场；疑义订单先核对，不提前声称查询。沿用塔菲音色、语速/音调及同一生成链路；旧固定七句分析保留为历史依据，不再作为待用户决定事项。
-- [新提示词真实语音复核](../../output/voice-newprompt-recheck-20261108.json)：basic_who/weather 的流式末值、最终回复与历史一致，首句贴合内容、各出现一次、无固定七句；闲聊零工具，天气 `get_weather ok`。首音分别为转写后 0.819s / 0.911s。天气最大接收包间隔 0.759s（工具续答切换附近），是否造成可听空档仍需真机听感；客户端收包不能证明喇叭不卡顿。
+- [新提示词真实语音复核](E:/xiaodan/output/voice-newprompt-recheck-20261108.json)：basic_who/weather 的流式末值、最终回复与历史一致，首句贴合内容、各出现一次、无固定七句；闲聊零工具，天气 `get_weather ok`。首音分别为转写后 0.819s / 0.911s。天气最大接收包间隔 0.759s（工具续答切换附近），是否造成可听空档仍需真机听感；客户端收包不能证明喇叭不卡顿。
 
 ## 文字/混合通道预期取消500修复（2026-11-08，已真实复验）
 
 - `main.py` 新增 `stop_active_turn`：`/api/voice/turn` 停止同会话上一回合时不再直接 `service.stop` 裸取消；若当前活跃 task 是文字 `/chat`（存在 cancel marker），先写入本轮专属 token/turn_id 再取消，`/chat` 映射为 `409 turn_cancelled`，不再让 CancelledError 穿出成 500。语音 task、无 marker 的普通取消、turn_id 不匹配的 stop 仍走原 `service.stop`，不会把其他真实异常改成成功；鉴权/迟到隔离未改。
-- 本地验证 7/7（[证据](../../output/cancel-propagation-check-20261108.json)）；[真实取消回归重评](../../output/cancel-recheck-20261108.json) 21/21、无跳过，覆盖 stop/reset、会话隔离、语音抢停文字与旧回合无迟到 complete。预期取消返回 `409 turn_cancelled`，新语音回合正常完成。首字前取消的历史契约为仅有 `user.interrupted`、无 assistant；有文本后为 `assistant.interrupted`；空历史或取消后出现 complete assistant 均不算通过。重评修正旧判据，不把首字前缺少 assistant 误判为失败。
+- 本地验证 7/7（[证据](E:/xiaodan/output/cancel-propagation-check-20261108.json)）；[真实取消回归重评](E:/xiaodan/output/cancel-recheck-20261108.json) 21/21、无跳过，覆盖 stop/reset、会话隔离、语音抢停文字与旧回合无迟到 complete。预期取消返回 `409 turn_cancelled`，新语音回合正常完成。首字前取消的历史契约为仅有 `user.interrupted`、无 assistant；有文本后为 `assistant.interrupted`；空历史或取消后出现 complete assistant 均不算通过。重评修正旧判据，不把首字前缺少 assistant 误判为失败。
 
 ## 阶段四收口：语音文本保留与检索章节补齐已修复并真实复验（2026-11-08 14:53 起）
 
@@ -224,7 +523,7 @@
 - 实时音频处理器改为每段首个分片读取 service.settings 并固定参数；默认直发也按段固定，finish/close 清除参数，工具续答开始前结束上一段。同一连接下一段可取新值；真实连续语音、打断和听感仍待实际运行，不能用源码核对替代。
 - Lead 重载本机开发服务后，仅发起一轮 POST /chat：用户指令“把语速调到1.4、音调调到1。”，会话 8c20fa64-53df-4e3f-a61f-5eed7bf72db7。模型真实调用两个控制工具，均 status=ok、sent_to_model=true；GET /api/settings/tts 回读 1.4/1.0。整轮 3953ms、2 次模型响应、3377 Token，未核实费用。
 - 随后通过正式工具调用接口还原基线 1.2/3.0，回读一致，.env 所有配置键值与验证前一致。真实音量接口在设备离线时返回 409 device_offline，偏好未变；rate=5 / pitch=9 均返回 422 tool_arguments，配置仍为原值。
-- 证据：[真实控制与还原记录](../../output/speech-control-real-20261107.json)。设备在线音量下发/回读、语音对话自动调用以及同一连接后续实际音频效果尚未验证。本机仍属 Windows 开发环境，未部署云端。
+- 证据：[真实控制与还原记录](E:/xiaodan/output/speech-control-real-20261107.json)。设备在线音量下发/回读、语音对话自动调用以及同一连接后续实际音频效果尚未验证。本机仍属 Windows 开发环境，未部署云端。
 
 ## 设置与数据洞察更新、用户指定记录清理（2026-11-07）
 
@@ -237,16 +536,16 @@
 - 使用与首轮完全相同的问题、新会话，经正式 POST /chat 调用现有百炼实时模式文字路径。模型实际调用 search_personal_knowledge，参数仅 query/top_k，未再填错 group；关键词+向量混合召回 5 段，5 段实际送入模型，回答引用 [资料2][资料3]。该次整个文字接口流程约 6391ms（含检索及完整回答），不是设备首声时间。
 - 新会话 46f193a0-4fd8-426b-a7b6-65285f3bdd44，洞察 ID 15：answer_type=rag/status=ok；问题和最终回答与实际接口返回一致，session/turn/call 关联完整，含 5 个送入快照、2 个引用标记及 embedding 子调用。聊天历史读取也返回 5 个 sources；该轮 2 次模型响应、供应商合计报告 7312 Token，未估算未核实的费用。
 - 真实回答：AI先完成功能开发，用户负责多轮对话、打断等现场测试，引用资料2/3。技术闭环已确认，回答质量并不等于自动评测通过。5 个送入片段不等同于 5 个最终引用。
-- 证据：[同问题复验实际记录](../../output/rag-dialogue-recheck-20261107.json)。界面开发已获调度只读查看新会话与洞察 ID 15，核对聊天来源及 5 送入/2 引用；未安排其新增模型调用。真实 roadmap.md 仍保留供联调。
+- 证据：[同问题复验实际记录](E:/xiaodan/output/rag-dialogue-recheck-20261107.json)。界面开发已获调度只读查看新会话与洞察 ID 15，核对聊天来源及 5 送入/2 引用；未安排其新增模型调用。真实 roadmap.md 仍保留供联调。
 - 范围限制：目前实际通过的是实时模式的文字 RAG；设备/网页语音工具续答、分模型路径、停止/打断实际回归、视觉/OCR、真实 PDF 提取及云服务器资源仍未确认，不能将本轮记成这些项目通过。embedding 开关仍由当前进程环境启用，尚未持久写入配置。
 
 ## 对话接入已加载；首轮真实对话发现分组参数错误（2026-11-07 16:07）
 
 - 已统一重载对话接入版本，8000/8003 正常监听，health=ok、conversation_integration=true。该标志只表示代码接线已加载，不代表真实 RAG 已通过。运行依赖现已声明 pypdf==7.0.0 / jsonschema==4.26.0。
 - 两处缺口已走正式接口确认：上传真实 START.md，保留带版本原文链接，再替换为 roadmap.md；旧链接返回 409 kb_version_changed，新版本原文与源文件字节一致。通过真实本机调试接口验证嵌套对象及数组元素中的停用字段均返回 422 tool_arguments；不含停用字段的同一工具正常执行并取得 HTTP 200。临时工具已删除。
-- 本轮替换后的 roadmap.md（project-reference 分组）保留供对话联调，10 片段 / 10 向量；不与此前已清理的批次混淆。记录见 [两处缺口实际验证](../../output/rag-dialogue-gap-verification-20261107.json)。
+- 本轮替换后的 roadmap.md（project-reference 分组）保留供对话联调，10 片段 / 10 向量；不与此前已清理的批次混淆。记录见 [两处缺口实际验证](E:/xiaodan/output/rag-dialogue-gap-verification-20261107.json)。
 - 正式 POST /chat 发起真实项目问题，模型实际调用 search_personal_knowledge，但误把文件名 roadmap.md 当作 group。实际分组是 project-reference，错误筛选导致空结果；模型随后称资料库为空。问题、回答、session/turn/call 已关联，洞察 ID 12 为 tool_answer / empty，sources=[]，不能记作 RAG 回答成功。
-- 已确认根因是工具分组语义与未知分组处理缺口，而非向量丢失；已派核心开发修复参数说明与不存在分组的明确错误，修后沿用同一问题再验，不靠调整问题隐藏缺口。失败会话与洞察保留。见 [首轮真实对话记录（未通过）](../../output/rag-dialogue-real-20261107.json)。
+- 已确认根因是工具分组语义与未知分组处理缺口，而非向量丢失；已派核心开发修复参数说明与不存在分组的明确错误，修后沿用同一问题再验，不靠调整问题隐藏缺口。失败会话与洞察保留。见 [首轮真实对话记录（未通过）](E:/xiaodan/output/rag-dialogue-real-20261107.json)。
 - 设备/网页语音的工具续答、分模型路径和实际停止/打断未运行；不以监听正常或文字请求完成替代语音回归。视觉/OCR、真实 PDF 提取和目标服务器运行仍未确认。
 
 ## RAG 向量入库、真实评分与洞察回溯（2026-11-07 15:14）
@@ -256,7 +555,7 @@
 - 正式上传现有 roadmap.md，10 个片段对应 10 个百炼 qwen3.7-text-embedding 向量，每个 1024 维 / 4096 字节，整个上传约 2603ms；不是仅验证查询向量。用真实项目问题混合召回 3 段，同时参与关键词及向量通道，余弦约 0.574 / 0.706 / 0.512，RRF 约 0.0320 / 0.0320 / 0.0315；BM25 原始分单列，分数不表示准确率。
 - 洞察 ID 3 保存 3 个当时片段正文、版本、真实分数和 embedding 调用结果。资料替换成 START.md 后为 2 片段 / 2 向量，旧快照保持不变且原文状态为 replaced；随后只删除本轮资料，旧快照仍可读，原文状态 deleted，不链接新版本。人工参考答案用真实片段保存回读后恢复为空。
 - 正式 API 保存一份临时 GET /health 工具：output_schema 和 x-enabled:false 保存回读一致；停用字段即使位于原 required 中也不要求提交，实际提交停用字段返回 422 tool_arguments；真实健康响应未经输出定义改写。工具成功调用洞察 ID 4 包含请求/响应/HTTP 200，明确为 manual_tool、无伪造触发问题。真实不存在路径洞察 ID 6 保留 HTTP 404 正文并记 error/manual_debug。新工具随后删除，目录恢复原状。
-- 运行摘要见 [RAG 实际记录](../../output/rag-integration-20261107-1510.json)、[API 洞察实际记录](../../output/api-insights-integration-20261107-1510.json)。本轮只产生真实文档向量与查询向量调用，没有调用回答生成模型或操作设备；资料与工具均已清理，审计保留。界面开发已获调度按真实 ID 3/4/6 做页面复验。
+- 运行摘要见 [RAG 实际记录](E:/xiaodan/output/rag-integration-20261107-1510.json)、[API 洞察实际记录](E:/xiaodan/output/api-insights-integration-20261107-1510.json)。本轮只产生真实文档向量与查询向量调用，没有调用回答生成模型或操作设备；资料与工具均已清理，审计保留。界面开发已获调度按真实 ID 3/4/6 做页面复验。
 - 仍待完成：检索接入实时/分模型对话、最终回答与会话/轮次调用链关联、视觉/OCR、真实 PDF 文件提取运行、云服务器资源实测；对话接入已派核心开发，不再重复询问用户授权。pypdf 7.0.0 已装项目 .venv；新增环境依赖声明及 embedding 持久配置仍需随交付核对。
 
 ## 网页语音改为独立沉浸式界面（2026-10-31）
@@ -328,7 +627,7 @@
 - 只读 SSH 核对：远端 Python 3.11.13、FFmpeg 7.0.2 和系统 libopus 已有；Python 3.11 中未安装 numpy、onnxruntime、opuslib-next、av、sherpa-onnx、websockets。旧站进程处于登录 session cgroup，父进程为 1，本次 RSS 约 60 MB；不能据此认定已有可靠的服务恢复配置。未修改或重启远端，未写远端文档。
 - 社区源码与默认 VAD 尚需下载确认，清单见 [resources](resources.md)。不把现有不同尺寸的 int8 VAD 模型当作上游 ONNX 状态接口已兼容；不自动装完整 requirements。真实付费 API 未授权，完整流式回合、听感、停止耗时、刷新恢复及设备行为本轮尚未实跑；旧实现全部保留至新核心实际接管。
 
-## 当前工作方式（2026-10-30，覆盖下方历史计划）
+## 历史工作方式（2026-10-30，当时覆盖更早计划）
 
 已按用户指令撤销隔离、模拟、最小验证和先验收再替换的开发流程；默认直接实现已授权的真实功能，不预建防御框架或测试后台。本次仅更新全局及项目指令，未改应用、远端、设备或安装依赖。以下隔离结果保留为历史事实，不再作为后续执行要求。远端不写文档，既有服务不改；部署、设备、真实API及安装下载边界不因工作方式调整而扩大。
 
@@ -339,7 +638,7 @@
 - 该目录是独立既有voice-studio，不是本项目部署；系统默认 `python3` 为3.6.8，但旧站进程使用python3.11。当前项目目录、新服务、新端口和数据库均不存在。2核2GB资源尚未用本项目建设验证：以上只是一次只读空闲快照，不代表社区核心峰值、与旧站并存余量或稳定性通过。
 - 已确认可直接SSH操作，但后续仍维持“不动设备、不部署、不调用真实API、安装下载先确认”；先在远端只读核对依赖和最少物料。
 
-## 当前项目快照与暂停点（2026-10-30）
+## 历史项目快照与暂停点（2026-10-30）
 
 - 用户最新要求先不模拟，询问能否直接访问远端服务器并要求整理现状/待办。现已只读连通服务器，但仍未下载安装、运行新测试、修改应用或操作设备。
 - 已有网页、配置、MiMo适配与SQLite；文字/网页语音/设备三套回合和上下文尚未收敛。语音消息同样式显示不等于已写入SQLite。真实API和完整语音体验仍未验收。
@@ -401,14 +700,14 @@
 
 “历史测试”来自此前项目记录；本轮仅运行下列相关测试及隔离浏览器流程，模拟PCM/WAV只在测试内存生成，没有真实账户合成、修改设备或部署。未读取私人聊天正文或密钥；本机服务已重启提供新页面。当前环境没有Git仓库，未初始化或提交Git。
 
-## 最新界面增量：参考小智设置窗口（2026-10-17）
+## 历史界面增量：参考小智设置窗口（2026-10-17）
 
 - 原全宽长页面改为居中、有界的原生dialog；角色/模型/声音/API接入/设备/资料/用量在同一窗口切换，标题与底部保存/取消固定，正文独立滚动。模型与声音各自只显示相关字段，保持既有灰阶主题与共用API设计；角色复用系统提示词；不加入未实现的记忆、声纹或插件。
 - 页签切换保留草稿；保存仍走原有原子分组接口并关闭窗口；取消、Escape、关闭恢复已存选择并清空新填密钥，停止试听，返回聊天并恢复可见入口焦点。声音描述在隐藏页签校验失败时会自动切到声音，防止看不到错误字段。
 - 本轮只改HTML/CSS/JS，后端协议与数据路径未变，因此未重跑后端46项。Chrome隔离流程`output/playwright/settings-dialog-smoke.js`通过共用API接入、两页签选择、可播放模拟WAV、保存关闭、取消丢稿、隐藏字段校验与键盘/焦点恢复；桌面1365与390窄屏、明暗主题及固定底部操作位置均验证通过。修复验证中发现的手机关闭焦点和内容容器未撑满问题；JS语法、HTML结构及机械检查通过。
 - 真实API调用仍未验收；未改用户私有配置/历史，未动设备、部署或新增依赖。本机服务直接提供更新静态文件，刷新可见。
 
-## 最新增量：同服务共用API（2026-10-17）
+## 历史增量：同服务共用API（2026-10-17）
 
 - API接入默认仅一套地址/密钥，文字和TTS在服务端共用；“语音使用不同服务”勾选后才展开第二套。`AI_TTS_USE_TEXT_CONNECTION`持久化选择，TTS按快照读取有效地址/密钥，不复制存第二份密钥，也不经浏览器取回已有密钥。
 - 兼容旧配置：未设置模式时，未存独立语音密钥或两套凭据/地址相同则共用；不同旧凭据保留独立模式，不静默覆盖。显式共用后更换公共密钥立即用于后续文字/TTS请求；独立模式不会退回使用公共密钥；独立配置切回共用时保留私有字段以便切回，仍不回传。
@@ -452,7 +751,7 @@
 - 按用户要求整合旧文档的有效内容后删除原文件；保留根README与AGENTS作为入口。
 - 用户进一步确认Windows开发测试、2核2GB云端独立运行、接受在线语音与费用自行管理；已同步PRD、架构、阶段与验收文档，MiMo-V2.5-TTS列优先验证候选，未实际调用。
 - 用户选择1B/2A/3A：唤醒加按键、仅文字历史、不长期保存录音、按唤醒分段且跨段不继承上下文；已同步需求与验收。尚未验证实机唤醒，未修改业务行为。
-- 用户下一组选择1A/2B/3A：回答播完后30秒无人继续讲话结束、播放中语音打断必须支持、外网手机/电脑个人登录管理；已同步会话规则与A9/A13/A14验收，均未实施或实机验证。
+- 用户下一组选择1A/2B/3A：回答播完后30秒无人继续讲话结束、播放中语音打断必须支持、外网手机/电脑个人登录管理；已同步会话规则与A9/A13/A14验收，均未实施或实机验证。【历史要求；管理登录已由2026-11-15用户明确取消】
 - 用户再选择1C/2A/3A：桌面和客厅背景声两种环境都要、首声目标约3秒、文字历史一直保留并手动删除；源码只读核对发现全量历史加载与旧max_sessions冲突。当时列入M1，现由本次依赖审查调整到M4集中改造，未修改代码。
 - 用户再选择1A/2A：客厅约1–2米；短暂断网自动重连，保留尚未结束的当前段且不重播旧回答。已同步会话恢复、架构和验收，未执行网络或实机测试。
 - 用户再确认1A/2A并补充屏幕按键：语音主动结束、按一下正面屏幕键暂停待机、自动独立备份，记录到需求与A16/A17；当时未定的上下文和目的地方向已由下一条确认，未修改设备或执行备份。
@@ -469,7 +768,7 @@
 - 同步START、统一入口、交接、资源、操作与工程规范；没有新选型、运行测试、调用API、生成录音、部署或实机操作。
 - 文档检查通过：本地链接和代码围栏有效，无旧文档引用；D01–D29与R00–R13均有覆盖，A1–A17定义唯一且引用有效，M1–M5顺序一致。该检查只证明文档结构与追溯完整，不证明技术可行或功能可用。
 
-## 紧接着的阻塞与下一步
+## 历史阻塞与当时下一步（2026-10）
 
 - D30对应的API配置功能已按本轮明确授权实现并隔离验证；API仍由用户后续自行填写，不索取密钥，真实调用未验收。
 - 本轮承接D31的开发顺序，只完成API配置功能及必要验证；不自动扩大到M1其他工作或后续阶段。

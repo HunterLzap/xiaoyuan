@@ -1,34 +1,13 @@
-(xiaodan_log_filter) {
-    format filter {
-        wrap json
-        fields {
-            request>uri query {
-                replace key REDACTED
-            }
-            request>headers>Authorization replace REDACTED
-            request>headers>Proxy-Authorization replace REDACTED
-            request>headers>Cookie replace REDACTED
-            request>headers>X-Assistant-Admin replace REDACTED
-        }
-    }
+redir {$AI_PUBLIC_BASE_PATH} {$AI_PUBLIC_BASE_PATH}/ 308
+
+@xiaodan_device path {$AI_PUBLIC_BASE_PATH}/xiaozhi/ota/ {$AI_PUBLIC_BASE_PATH}/xiaozhi/v1 {$AI_PUBLIC_BASE_PATH}/xiaozhi/v1/
+handle @xiaodan_device {
+    uri strip_prefix {$AI_PUBLIC_BASE_PATH}
+    reverse_proxy 127.0.0.1:{$AI_DEVICE_PORT}
 }
 
-{$AI_PUBLIC_ORIGIN} {
-    log xiaodan {
-        import xiaodan_log_filter
-    }
-
-    @device path /xiaozhi/ota/ /xiaozhi/v1 /xiaozhi/v1/
-    handle @device {
-        reverse_proxy 127.0.0.1:{$AI_DEVICE_PORT}
-    }
-
-    handle {
-        basic_auth {
-            {$ASSISTANT_ADMIN_USER} {$ASSISTANT_ADMIN_PASSWORD_HASH}
-        }
-        reverse_proxy 127.0.0.1:{$AI_ADMIN_PORT} {
-            header_up X-Assistant-Admin {env.AI_ADMIN_PROXY_TOKEN}
-        }
+handle_path {$AI_PUBLIC_BASE_PATH}/* {
+    reverse_proxy 127.0.0.1:{$AI_ADMIN_PORT} {
+        header_up X-Assistant-Admin {$AI_ADMIN_PROXY_TOKEN}
     }
 }

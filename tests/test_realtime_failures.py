@@ -148,7 +148,7 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
 
     def make_bridge(self):
         bridge = DeviceRealtime.__new__(DeviceRealtime)
-        bridge.conn = SimpleNamespace(frames_dropped=0, ws=SimpleNamespace(close=AsyncMock()))
+        bridge.conn = SimpleNamespace(frames_dropped=0, send=AsyncMock(), ws=SimpleNamespace(close=AsyncMock()))
         bridge.turn = SimpleNamespace(
             ws=object(), reader=SimpleNamespace(done=lambda: False),
             turn_id=uuid4(), input_closed=False,

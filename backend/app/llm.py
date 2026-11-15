@@ -47,14 +47,10 @@ class Completion:
 
 
 def completion_metadata(usage, finish_reason) -> Completion:
-    counts = {}
-    for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
-        value = getattr(usage, name, None)
-        counts[name] = value if type(value) is int and value >= 0 else None
     details = getattr(usage, "completion_tokens_details", None)
     reasoning_tokens = getattr(details, "reasoning_tokens", None)
     return Completion(
-        reply=None, usage=TokenUsage(**counts) if usage is not None else None,
+        reply=None, usage=TokenUsage.from_provider(usage),
         finish_reason=finish_reason if finish_reason in FINISH_REASONS else None,
         reasoning_tokens=reasoning_tokens if type(reasoning_tokens) is int and reasoning_tokens >= 0 else None,
     )

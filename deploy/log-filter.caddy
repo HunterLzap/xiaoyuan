@@ -1,0 +1,12 @@
+format filter {
+    wrap json
+    fields {
+        request>uri query {
+            replace key REDACTED
+        }
+        request>headers>Authorization replace REDACTED
+        request>headers>Proxy-Authorization replace REDACTED
+        request>headers>Cookie replace REDACTED
+        request>headers>X-Assistant-Admin replace REDACTED
+    }
+}

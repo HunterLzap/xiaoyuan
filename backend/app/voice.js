@@ -1,5 +1,7 @@
 (function () {
   "use strict";
+  const appPath = window.assistantPaths.path;
+  const appFetch = window.assistantPaths.fetch;
 
   const el = (id) => document.getElementById(id);
   const panel = el("voice-panel");
@@ -28,7 +30,7 @@
   let playbackReported = false;
 
   function notifyServer(path, body, id = generation) {
-    return fetch(path, {
+    return appFetch(path, {
       method:"POST", keepalive:true,
       headers:{"Content-Type":"application/json", "X-Local-Settings":"1"},
       body:JSON.stringify(body),
@@ -313,7 +315,7 @@
 
   async function startRealtime(stream,id) {
     const capture = new AudioContext({sampleRate:16000});
-    const url = new URL("/api/voice/realtime",location.href);
+    const url = new URL(appPath("/api/voice/realtime"),location.href);
     url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const sid = window.atoms3rVoiceMessages.sessionId();
     if (sid) url.searchParams.set("session",sid);
@@ -326,7 +328,7 @@
     realtime = {cleanup() {closeCapture(); if (ws && ws.readyState < 2) ws.close();},
       finish() {if (ready) mic.port.postMessage("finish");}};
     try {
-      await capture.audioWorklet.addModule("/voice-capture.js");
+      await capture.audioWorklet.addModule(appPath("/voice-capture.js"));
       await capture.resume();
       if (id !== generation) return;
       source = capture.createMediaStreamSource(stream);
@@ -453,7 +455,7 @@
     if (id !== generation) return;
     setOrbState("thinking");
     setStage("正在识别…");
-    const response = await fetch("/api/voice/asr", {
+    const response = await appFetch("/api/voice/asr", {
       method: "POST", signal,
       headers: { "Content-Type": "application/octet-stream", "X-Local-Settings": "1" }, body: wav,
     });
@@ -505,7 +507,7 @@
     const packets = [];
     serverTurn = {session_id:window.atoms3rVoiceMessages.sessionId(), turn_id:crypto.randomUUID()};
     playbackReported = false;
-    const response = await fetch("/api/voice/turn", {
+    const response = await appFetch("/api/voice/turn", {
       method: "POST", signal,
       headers: { "Content-Type": "application/json", "X-Local-Settings": "1" },
       body: JSON.stringify({ text, ...serverTurn }),

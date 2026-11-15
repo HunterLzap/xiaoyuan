@@ -1,5 +1,6 @@
 from decimal import Decimal
 from pathlib import Path
+import re
 from typing import Literal
 from urllib.parse import urlsplit
 
@@ -34,6 +35,7 @@ class Settings(BaseSettings):
     # chain, "minimal" is rejected), which is what keeps voice turns from taking 20s+.
     reasoning_effort: str = Field(default="", max_length=20)
     history_turns: int = Field(default=6, ge=1, le=50)
+    context_history_chars: int = Field(default=6000, ge=2000, le=40000)
     max_sessions: int = Field(default=100, ge=1, le=1000)
     system_prompt: str = Field(
         default="你是一个简洁、可靠的个人 AI 助理。使用中文回答，除非用户要求其他语言。",
@@ -72,6 +74,7 @@ class Settings(BaseSettings):
     tts_pitch: float = Field(default=0.0, ge=-8.0, le=8.0)
     tts_timeout_seconds: float = Field(default=60, gt=0, le=120)
     public_origin: str = ""
+    public_base_path: str = ""
     admin_proxy_token: SecretStr = SecretStr("")
     speech_python: Path | None = None
     speech_threads: int = Field(default=2, ge=1, le=4)
@@ -113,8 +116,18 @@ class Settings(BaseSettings):
             raise ValueError("Proxy credential must contain only printable ASCII without spaces")
         return SecretStr(token)
 
+    @field_validator("public_base_path")
+    @classmethod
+    def validate_public_base_path(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        if value and not re.fullmatch(r"(?:/[A-Za-z0-9_-]+)+", value):
+            raise ValueError("Public base path must contain only slash-separated path segments")
+        return value
+
     @model_validator(mode="after")
     def require_public_auth(self):
+        if self.public_base_path and not self.public_origin:
+            raise ValueError("Public base path requires a public origin")
         if self.public_origin and len(self.admin_proxy_token.get_secret_value()) < 32:
             raise ValueError("Public mode requires AI_ADMIN_PROXY_TOKEN with at least 32 characters")
         return self

@@ -1,5 +1,5 @@
 # 项目规范目录
 
-统一入口：[agent.md](agent.md)。本项目只有一个硬件语音助手，正常聊天，理解需求、按需调用 API 和所选知识库，简单、高效、快速；不缩减或扩大目标。
+统一入口：[agent.md](agent.md)。先读 [START](START.md) 获取当前事实与操作边界，再按任务阅读专题；不要默认载入全部历史。
 
-从 [START](START.md) 继续，整体设计看 [architecture](docs/architecture.md)，实际证据看 [progress](docs/progress.md)。新意向已明确，本轮为文档同步，不把尚未实现的目标写成完成；旧记录不覆盖当前目标。
+产品、设计、操作与历史分别维护在 PRD、architecture、operations、progress/decisions 中。文档同步不自动授权业务修改或设备操作。
