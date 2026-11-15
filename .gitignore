@@ -17,3 +17,10 @@ build*/
 *.db
 *.bin
 *.elf
+.codex-tmp/
+*.bak
+*.orig
+*.rej
+/tmp_*.py
+/$null
+/firmware/xiaozhi-esp32/tmp*idf_*

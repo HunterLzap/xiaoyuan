@@ -68,7 +68,7 @@ Python和语音环境、原始模型、生成样例与私有运行数据继续�
 | `logs/` | 服务运行日志 |
 | `models/` | 本地模型与素材：`asr/`（识别）、`tts/`、`voice/`（克隆音色样本）、`codecs/`、`downloads/` |
 | `output/` | 证据与产物：回归 JSON、报告 Markdown、UI 草稿/截图、测试脚本 |
-| `scripts/` | 辅助脚本：本地识别、应答音生成、资料迁移、语音合成、天气实测等 |
+| `scripts/` | 辅助脚本：本地识别、应答音生成、资料迁移、语音合成等 |
 | `tests/` | 自动化测试：`test_*.py` + `voice_browser.cjs` |
 | `third_party/` | 第三方参考：`xiaozhi-server/`（`community.py` 挂载） |
 | `.env` / `.env.example` | 私有配置（密钥/供应商/连接）与示例；密钥不进群 |
