@@ -44,8 +44,20 @@ def test_setup_validation_recovery_and_persistence(tmp_path):
 
 def test_admin_stays_local_and_gateway_exposes_no_management(tmp_path):
     hub = DeviceHub(tmp_path / "device.json")
-    app = create_app(Settings(_env_file=None, api_key="", model="", history_db_path=None,
-                              usage_log_path=None, m5stack_enabled=False), device_hub=hub)
+    app = create_app(
+        Settings(
+            _env_file=None,
+            api_key="",
+            model="",
+            history_db_path=None,
+            personal_kb_db_path=None,
+            assistant_db_path=None,
+            usage_log_path=None,
+            m5stack_enabled=False,
+        ),
+        settings_store=SettingsStore(tmp_path / ".env"),
+        device_hub=hub,
+    )
     with TestClient(app, base_url="http://127.0.0.1", client=("192.168.1.50", 5000)) as client:
         assert client.get("/devices").status_code == 403
         assert client.get("/api/devices").status_code == 403
@@ -165,8 +177,20 @@ def test_real_socket_settings_and_readback(tmp_path, readback_wrong, missing_the
                         await hub.configure(DeviceSetup(**SETUP))
                     await hub.save_preferences(DevicePreferences(volume=37, brightness=72, theme="light", text="本机连接验证"))
                     assert calls == []  # Saving must not silently apply changes.
-                    app = create_app(Settings(_env_file=None, api_key="", model="", history_db_path=None,
-                                              usage_log_path=None, m5stack_enabled=False), device_hub=hub)
+                    app = create_app(
+                        Settings(
+                            _env_file=None,
+                            api_key="",
+                            model="",
+                            history_db_path=None,
+                            personal_kb_db_path=None,
+                            assistant_db_path=None,
+                            usage_log_path=None,
+                            m5stack_enabled=False,
+                        ),
+                        settings_store=SettingsStore(tmp_path / ".env"),
+                        device_hub=hub,
+                    )
                     async with app.router.lifespan_context(app):
                         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as admin:
                             response = await admin.post("/api/devices/apply", headers=HEADERS)

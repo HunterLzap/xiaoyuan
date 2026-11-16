@@ -34,12 +34,15 @@ class CapabilitySettingsUpdate(BaseModel):
     m5stack_enabled: bool = True
     personal_kb_enabled: bool = True
     weather_enabled: bool = True
+    embedding_enabled: bool | None = None
 
 
 class TTSSettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-    tts_base_url: str = Field(min_length=1, max_length=500)
+    tts_provider: Literal["mimo", "openai", "bailian"] = "mimo"
+    tts_base_url: str = Field(default="https://tokendance.space/gateway/v1", min_length=1, max_length=500)
     tts_api_key: SecretStr | None = None
+    tts_use_text_connection: bool | None = None
     tts_model: str = Field(default="mimo-v2.5-tts", min_length=1, max_length=200)
     tts_voice: str = Field(default="mimo_default", max_length=80)
     tts_instruction: str = Field(default="", max_length=2000)
@@ -56,12 +59,21 @@ class ConnectionsUpdate(BaseModel):
     rt_workspace: str = Field(default="", pattern=r"^(?:[a-z0-9][a-z0-9-]{0,62})?$")
     rt_model: str = Field(default="qwen3.8-omni-flash-realtime", min_length=1, max_length=200)
     rt_voice: str = Field(default="Tina", min_length=1, max_length=80)
+    rt_asr_model: str = Field(default="whisper-1", max_length=200)
     rt_api_key: SecretStr | None = None
+
+    asr_provider: Literal["openai", "bailian", "local"] = "openai"
+    asr_base_url: str = Field(default="", max_length=500)
+    asr_api_key: SecretStr | None = None
+    asr_use_text_connection: bool | None = None
+    asr_model: str = Field(default="whisper-1", max_length=200)
+    asr_language: str = Field(default="zh", max_length=20)
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     base_url: str = Field(min_length=1, max_length=500)
     api_key: SecretStr | None = None
     models_protocol: Literal["auto", "openai", "disabled"] = "auto"
+    tts_provider: Literal["mimo", "openai", "bailian"] = "mimo"
     tts_base_url: str | None = Field(default=None, min_length=1, max_length=500)
     tts_api_key: SecretStr | None = None
     tts_use_text_connection: bool | None = None
@@ -80,6 +92,7 @@ class AssistantUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     system_prompt: str | None = Field(default=None, min_length=1, max_length=4000)
     model: str = Field(default="", max_length=200)
+    tts_provider: Literal["mimo", "openai", "bailian"] | None = None
     tts_model: str = Field(default="mimo-v2.5-tts", min_length=1, max_length=200)
     tts_voice: str = Field(default="mimo_default", max_length=80)
     tts_instruction: str = Field(default="", max_length=2000)
@@ -134,7 +147,9 @@ def public_tts_settings(settings: Settings) -> dict:
         "separate_api_key_configured": bool(settings.tts_api_key.get_secret_value()),
         "api_key_configured": bool(settings.effective_tts_api_key.get_secret_value()),
         "configured": bool(settings.effective_tts_api_key.get_secret_value()) and (
-            settings.tts_model != "mimo-v2.5-tts-voicedesign" or bool(settings.tts_instruction.strip())),
+            settings.tts_provider != "mimo"
+            or settings.tts_model != "mimo-v2.5-tts-voicedesign"
+            or bool(settings.tts_instruction.strip())),
     }
 
 
@@ -145,13 +160,21 @@ def public_settings(settings: Settings) -> dict:
     } | {
         "system_prompt": settings.system_prompt,
         "personal_kb_enabled": settings.personal_kb_enabled,
+        "embedding_enabled": settings.embedding_enabled,
         "weather_enabled": settings.weather_enabled,
         "weather_default_city": settings.weather_default_city,
         "selected_tool_ids": settings.selected_tool_ids if settings.selected_tool_ids is not None else [],
         "selected_kb_ids": settings.selected_kb_ids if settings.selected_kb_ids is not None else [],
         "active_model": settings.active_model,
         "active_provider": settings.active_provider,
-        **{k: getattr(settings,k) for k in ("voice_mode","rt_provider","rt_endpoint","rt_workspace","rt_model","rt_voice")},
+        **{k: getattr(settings, k) for k in (
+            "voice_mode", "rt_provider", "rt_endpoint", "rt_workspace", "rt_model", "rt_voice", "rt_asr_model",
+            "asr_provider", "asr_base_url", "asr_model", "asr_language", "tts_provider",
+        )},
+        "asr_use_text_connection": settings.shared_asr_connection,
+        "asr_effective_base_url": settings.effective_asr_base_url,
+        "asr_separate_key_configured": bool(settings.asr_api_key.get_secret_value()),
+        "asr_key_configured": bool(settings.effective_asr_api_key.get_secret_value()),
         "rt_key_configured": bool(settings.rt_api_key.get_secret_value()),
         "api_key_configured": bool(settings.api_key.get_secret_value().strip()),
         "configured": not settings.missing_config,
@@ -184,7 +207,7 @@ class SettingsStore:
         if isinstance(update, AssistantSelectionUpdate):
             # 选择更新不得顺带规范化音色、样本等无关字段。
             return Settings(_env_file=None, **{**current.model_dump(), **update.model_dump(exclude_unset=True)})
-        key_names = {name for name in ("api_key", "tts_api_key", "rt_api_key") if name in type(update).model_fields}
+        key_names = {name for name in ("api_key", "tts_api_key", "rt_api_key", "asr_api_key") if name in type(update).model_fields}
         values = current.model_dump()
         # 均为“真正部分更新”：只应用请求里显式提交的字段；
         # APISettingsUpdate 继承 ConnectionsUpdate/AssistantUpdate，按子集处理，未提交字段保持现配置。
@@ -193,18 +216,20 @@ class SettingsStore:
         if isinstance(update, AssistantUpdate) and update.system_prompt is None:
             updates.pop("system_prompt", None)
         if isinstance(update, AssistantUpdate):
-            for extra in ("weather_enabled", "weather_default_city"):
+            for extra in ("weather_enabled", "weather_default_city", "tts_provider"):
                 if getattr(update, extra, None) is None:
                     updates.pop(extra, None)
+        if isinstance(update, CapabilitySettingsUpdate) and update.embedding_enabled is None:
+            updates.pop("embedding_enabled", None)
         if isinstance(update, ConnectionsUpdate):
-            for name in ("tts_base_url", "tts_use_text_connection"):
+            for name in ("tts_base_url", "tts_use_text_connection", "asr_use_text_connection"):
                 if updates.get(name) is None:
                     updates.pop(name, None)
         values.update(updates)
         # The clone sample is resolved from the voice id, never accepted from the client:
         # the browser only knows ids, and a path sent from the page would bypass the
         # project-boundary check in voices.resolve().
-        if values.get("tts_model") == CLONE_MODEL:
+        if values.get("tts_provider", "mimo") == "mimo" and values.get("tts_model") == CLONE_MODEL:
             voice_id = str(values.get("tts_voice") or "")
             resolved = voices.sample_for(voice_id)
             if resolved:
@@ -224,7 +249,10 @@ class SettingsStore:
             config.rt_provider != current.rt_provider or config.rt_endpoint != current.rt_endpoint):
             raise ProviderError(422, "key_required_for_new_url", "切换实时接口后，请重新输入 API Key。")
         for key_name in key_names:
-            url_name = "rt_workspace" if key_name == "rt_api_key" else "tts_base_url" if key_name == "tts_api_key" else "base_url"
+            url_name = ("rt_workspace" if key_name == "rt_api_key"
+                        else "tts_base_url" if key_name == "tts_api_key"
+                        else "asr_base_url" if key_name == "asr_api_key"
+                        else "base_url")
             if (getattr(config, url_name) != getattr(current, url_name) and getattr(update, key_name) is None
                     and getattr(current, key_name).get_secret_value().strip()):
                 raise ProviderError(422, "key_required_for_new_url", "接口地址已更改，请重新输入该服务的密钥；不会向新地址发送已有密钥。")
@@ -238,14 +266,14 @@ class SettingsStore:
         if isinstance(update, AssistantUpdate) and update.system_prompt is None:
             managed.remove("system_prompt")
         if isinstance(update, AssistantUpdate):
-            for extra in ("weather_enabled", "weather_default_city"):
+            for extra in ("weather_enabled", "weather_default_city", "tts_provider"):
                 if getattr(update, extra, None) is None:
                     managed.discard(extra)
         if isinstance(update, (ConnectionsUpdate, CapabilitySettingsUpdate, AssistantUpdate, AssistantSelectionUpdate)):
             managed &= update.model_fields_set
         if isinstance(update, ConnectionsUpdate):
-            managed -= {name for name in ("tts_base_url", "tts_use_text_connection") if getattr(update, name) is None}
-        for key_name in ("api_key", "tts_api_key", "rt_api_key"):
+            managed -= {name for name in ("tts_base_url", "tts_use_text_connection", "asr_use_text_connection") if getattr(update, name) is None}
+        for key_name in ("api_key", "tts_api_key", "rt_api_key", "asr_api_key"):
             if key_name in managed and getattr(update, key_name) is None:
                 managed.remove(key_name)
         if isinstance(update, AssistantSelectionUpdate):

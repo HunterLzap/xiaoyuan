@@ -41,6 +41,7 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
         turn.active_response = None
         turn.response_done = False
         turn.transcription_done = False
+        turn.transcription_ready = asyncio.Event()
         turn.saved = False
         turn.input_closed = False
         turn.control_continuation = False

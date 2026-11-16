@@ -71,18 +71,30 @@ class TokenUsage(BaseModel):
             return None
         data = usage if isinstance(usage, dict) else usage.model_dump()
 
-        def counts(value):
-            if isinstance(value, dict):
-                return {key: counts(item) for key, item in value.items()
-                        if isinstance(item, dict) or type(item) is int and item >= 0}
+        def count_int(value) -> int | None:
             return value if type(value) is int and value >= 0 else None
 
+        def count_dict(value) -> dict | None:
+            if not isinstance(value, dict):
+                return None
+            cleaned = {}
+            for key, item in value.items():
+                if isinstance(item, dict):
+                    nested = count_dict(item)
+                    if nested is not None:
+                        cleaned[key] = nested
+                else:
+                    number = count_int(item)
+                    if number is not None:
+                        cleaned[key] = number
+            return cleaned
+
         return cls(
-            prompt_tokens=counts(data.get("input_tokens", data.get("prompt_tokens"))),
-            completion_tokens=counts(data.get("output_tokens", data.get("completion_tokens"))),
-            total_tokens=counts(data.get("total_tokens")),
-            input_tokens_details=counts(data.get("input_tokens_details", data.get("prompt_tokens_details"))),
-            output_tokens_details=counts(data.get("output_tokens_details", data.get("completion_tokens_details"))),
+            prompt_tokens=count_int(data.get("input_tokens", data.get("prompt_tokens"))),
+            completion_tokens=count_int(data.get("output_tokens", data.get("completion_tokens"))),
+            total_tokens=count_int(data.get("total_tokens")),
+            input_tokens_details=count_dict(data.get("input_tokens_details", data.get("prompt_tokens_details"))),
+            output_tokens_details=count_dict(data.get("output_tokens_details", data.get("completion_tokens_details"))),
             response_count=1,
             reported_response_count=1 if data else 0,
         )

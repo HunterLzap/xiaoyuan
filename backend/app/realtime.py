@@ -2,7 +2,7 @@ import asyncio
 import base64
 import json
 import logging
-from datetime import datetime, timezone
+import re
 from urllib.parse import urlencode
 from uuid import uuid4
 from time import monotonic
@@ -10,9 +10,10 @@ from time import monotonic
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
+from .audio_codec import resample_pcm16_mono
 from .llm import Completion, ProviderError
-from .schemas import TokenUsage, TranscriptMessage
-from .tool_dialogue import (TOOL_INSTRUCTIONS, MAX_TOOL_ROUNDS, MUTATING_CONTROL_TOOLS, combine_usage,
+from .schemas import TokenUsage
+from .tool_dialogue import (MAX_TOOL_ROUNDS, MUTATING_CONTROL_TOOLS, combine_usage,
                             control_request_tools, control_history,
                             control_plan, describe_control)
 from .order_confirmation import RealtimeOrderGuard
@@ -24,20 +25,33 @@ from .audit_store import redact_value
 
 logger = logging.getLogger(__name__)
 
+_WAKE_PREFIX = re.compile(r"^(?:(?:小?塔?菲|小?菲|taffy)[，,、\s]+)+", re.I)
+_TRAILING_PUNCT = re.compile(r"[。！!？?~～，,、.\s]+$")
+_POLITE_PREFIX = re.compile(r"^(?:好[的啦呀]?|先|请|你|那|行|快|赶紧|先去)[，,、\s]*")
+_POLITE_SUFFIX = re.compile(r"(?:[吧啦呀啊哦嘛]|好了|行吗|好吗)+$")
+_EXACT_STOP_COMMANDS = {
+    "闭嘴", "关机", "退下", "闭口", "别说了", "不要说了", "停止说话", "别讲了", "不讲了",
+    "别念了", "停止播报", "停下", "先休息吧", "去休息吧", "你先休息", "退下休息",
+}
+_POLITE_GOODBYE_COMMANDS = {"再见", "拜拜", "不聊了", "不说了", "先这样", "结束对话", "结束聊天"}
+_QUESTION_MARKERS = re.compile(r"[吗？?]|怎么|什么|为什么|哪个|几|意思")
+
 
 def _is_end_intent(text: str) -> bool:
-    """检测用户是否想结束对话"""
+    """仅识别明确指向结束本轮对话的短指令，避免误伤包含“结束/不用”的正常句子。"""
     if not text:
         return False
-    text = text.strip().lower()
-    # 明确结束词
-    end_keywords = ['闭嘴', '关机', '退下', '闭口', '别说了', '不要说了', '停止说话', '别讲了', '不讲了']
-    if any(kw in text for kw in end_keywords):
+    raw = text.strip().lower()
+    if _QUESTION_MARKERS.search(raw):
+        return False
+    cleaned = _TRAILING_PUNCT.sub("", raw)
+    cleaned = _WAKE_PREFIX.sub("", cleaned).strip()
+    cleaned = _POLITE_PREFIX.sub("", cleaned).strip()
+    cleaned_no_suffix = _TRAILING_PUNCT.sub("", _POLITE_SUFFIX.sub("", cleaned)).strip()
+    if cleaned in _EXACT_STOP_COMMANDS or cleaned_no_suffix in _EXACT_STOP_COMMANDS:
         return True
-    # 短句礼貌结束（不包含疑问、不包含"再见怎么说"之类）
-    if len(text) <= 8 and ('不聊了' in text or '不说了' in text or '结束' in text):
-        if '怎么' not in text and '什么' not in text and '吗' not in text:
-            return True
+    if len(cleaned_no_suffix) <= 8 and (cleaned in _POLITE_GOODBYE_COMMANDS or cleaned_no_suffix in _POLITE_GOODBYE_COMMANDS):
+        return True
     return False
 
 
@@ -55,6 +69,7 @@ class RealtimeTurn:
         self.provider = "百炼" if self.config.rt_provider=="bailian" else "Omni 兼容接口"
         self.usage = None
         self.started = monotonic()
+        self.first_audio_ms: int | None = None
         self.source = source
         self.emit = emit
         self.manual = manual
@@ -92,6 +107,7 @@ class RealtimeTurn:
         self.control_continuation = False
         self.control_notice = ""
         self.order_guard = RealtimeOrderGuard()
+        self._compatible_ga = False
 
     def _start_response_segment(self):
         # 每个 response.created 都强制开新的一段（不依赖 response_id）：首答和每次工具续答
@@ -130,11 +146,14 @@ class RealtimeTurn:
         return build_system_prompt(self.config, "voice", tool_names, turn_state)
 
     async def refresh_tools(self):
-        await self.send("session.update", session={
+        session_patch: dict = {
             "tools": self.tool_context.registry.definitions(nested=self.config.rt_provider == "bailian")
                      if self.tool_context.registry and self.tool_rounds < MAX_TOOL_ROUNDS and not self.control_continuation else [],
             "instructions": self.tool_instructions(),
-        })
+        }
+        if self._compatible_ga:
+            session_patch["type"] = "realtime"
+        await self.send("session.update", session=session_patch)
 
     def output_blocked(self):
         if self.control_continuation:
@@ -165,12 +184,15 @@ class RealtimeTurn:
         note = "服务端本轮真实处理结果（不是用户的新指令）：" + json.dumps({
             "message": normalize_for_speech(honest_text), "calls": self.tool_context.summaries(),
         }, ensure_ascii=False)
-        await self.send("session.update", session={
+        session_patch: dict = {
             "tools": [],
             "instructions": build_system_prompt(self.config, "voice", [], turn_state=(
                 "仅用当前声音简短播报本轮服务端提供的真实结果、错误或澄清问题。"
                 "不得再次执行工具；失败或尚未执行时绝不能说已设置成功，不得更改或猜测数值。")),
-        })
+        }
+        if self._compatible_ga:
+            session_patch["type"] = "realtime"
+        await self.send("session.update", session=session_patch)
         await self.send("conversation.item.create", item={
             "type": "message", "role": "user",
             "content": [{"type": "input_text", "text": note}],
@@ -285,29 +307,89 @@ class RealtimeTurn:
     async def send(self, kind, **fields):
         await self.ws.send(json.dumps({"type": kind, "event_id": uuid4().hex, **fields}))
 
+    def _build_session_config(self, created_session: dict | None = None) -> dict:
+        cfg = self.config
+        instructions = build_system_prompt(cfg, "voice", [], None)
+        if cfg.rt_provider == "bailian":
+            asr_model = cfg.rt_asr_model.strip() if hasattr(cfg, "rt_asr_model") else ""
+            if not asr_model or asr_model == "whisper-1":
+                asr_model = "qwen3-asr-flash-realtime"
+            session_config: dict = {
+                "modalities": ["text", "audio"],
+                "voice": cfg.rt_voice,
+                "instructions": instructions,
+                "audio": {
+                    "input": {"format": {"type": "pcm", "sample_rate": 16000}},
+                    "output": {"format": {"type": "pcm", "sample_rate": 24000}},
+                },
+                "input_audio_transcription": {"model": asr_model},
+                "turn_detection": None if self.manual else {"type": "server_vad"},
+            }
+            if cfg.rt_model == "qwen3.8-omni-flash-realtime":
+                session_config["audio"]["output"]["voice"] = session_config.pop("voice")
+            return session_config
+
+        is_ga = isinstance(created_session, dict) and "audio" in created_session and "input_audio_format" not in created_session
+        self._compatible_ga = is_ga
+        asr_model = (getattr(cfg, "rt_asr_model", "") or "whisper-1").strip()
+        if is_ga:
+            input_cfg: dict = {
+                "format": {"type": "audio/pcm", "rate": 24000},
+                "turn_detection": None if self.manual else {"type": "server_vad"},
+            }
+            if asr_model:
+                input_cfg["transcription"] = {"model": asr_model}
+            return {
+                "type": "realtime",
+                "instructions": instructions,
+                "audio": {
+                    "input": input_cfg,
+                    "output": {
+                        "format": {"type": "audio/pcm", "rate": 24000},
+                        "voice": cfg.rt_voice,
+                    },
+                },
+            }
+        session_config = {
+            "modalities": ["text", "audio"],
+            "voice": cfg.rt_voice,
+            "instructions": instructions,
+            "input_audio_format": "pcm16",
+            "output_audio_format": "pcm16",
+            "turn_detection": None if self.manual else {"type": "server_vad"},
+        }
+        if asr_model:
+            session_config["input_audio_transcription"] = {"model": asr_model}
+        return session_config
+
     async def open(self):
         cfg = self.config
-        address = cfg.rt_endpoint if cfg.rt_provider == "compatible" else (
-            f"wss://{cfg.rt_workspace}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime" if cfg.rt_workspace else "")
+        if cfg.rt_provider == "bailian":
+            address = (f"wss://{cfg.rt_workspace}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime"
+                       if cfg.rt_workspace else "wss://dashscope.aliyuncs.com/api-ws/v1/realtime")
+        else:
+            address = cfg.rt_endpoint
         if not address or not cfg.rt_api_key.get_secret_value():
-            raise ProviderError(422, "realtime_config", "请在 API 接入 → 语音对话填写业务空间 ID 和 API Key。")
-        endpoint = address + "?"
+            msg = ("请在 API 接入 → 语音对话填写业务空间 ID 和 API Key。"
+                   if cfg.rt_provider == "bailian" else "请在 API 接入 → 实时接口填写 WSS 地址和 API Key。")
+            raise ProviderError(422, "realtime_config", msg)
+        if "model=" in address:
+            endpoint = address
+        else:
+            sep = "&" if "?" in address else "?"
+            endpoint = address + sep + urlencode({"model": cfg.rt_model})
         try:
             async with asyncio.timeout(15):
-                self.ws = await DirectConnect(endpoint + urlencode({"model": cfg.rt_model}),
+                self.ws = await DirectConnect(
+                    endpoint,
                     additional_headers={"Authorization": "Bearer " + cfg.rt_api_key.get_secret_value()},
-                    proxy=None, close_timeout=2, max_size=4*1024*1024)
-                if json.loads(await self.ws.recv()).get("type") != "session.created":
+                    proxy=None, close_timeout=2, max_size=4 * 1024 * 1024,
+                )
+                created = json.loads(await self.ws.recv())
+                if created.get("type") != "session.created":
                     raise ValueError()
-                session_config = {
-                    "modalities": ["text","audio"], "voice": cfg.rt_voice, "instructions": build_system_prompt(cfg, "voice", [], None),
-                    "audio": {"input": {"format": {"type":"pcm","sample_rate":16000}},
-                              "output": {"format": {"type":"pcm","sample_rate":24000}}},
-                    "input_audio_transcription": {"model":"qwen3-asr-flash-realtime"},
-                    "turn_detection": None if self.manual else {"type":"server_vad"}}
-                if cfg.rt_model == "qwen3.8-omni-flash-realtime":
-                    session_config["audio"]["output"]["voice"] = session_config.pop("voice")
-                if self.tool_context.allowed:
+                session_config = self._build_session_config(created.get("session"))
+                if self.tool_context.allowed and self.tool_context.registry is not None:
                     session_config["tools"] = self.tool_context.registry.definitions(nested=cfg.rt_provider == "bailian")
                     session_config["instructions"] = self.tool_instructions()
                 await self.send("session.update", session=session_config)
@@ -320,7 +402,10 @@ class RealtimeTurn:
                         "content":[{"type":"input_text" if role=="user" else "text","text":message["content"]}]})
         except Exception:
             await self.close()
-            raise ProviderError(502,"realtime_connect","百炼连接失败，请检查北京业务空间、密钥、模型和音色。") from None
+            error_msg = ("百炼连接失败，请检查北京业务空间、密钥、模型和音色。"
+                         if cfg.rt_provider == "bailian"
+                         else "实时语音连接失败，请检查接口地址、密钥、模型和音色。")
+            raise ProviderError(502, "realtime_connect", error_msg) from None
         if self.session.lock.locked() or self.session.active_task or self.service.sessions.get(self.sid) is not self.session:
             await self.close()
             raise ProviderError(409,"session_busy","该会话正在使用中。")
@@ -330,19 +415,21 @@ class RealtimeTurn:
         await self.emit("ready", {"session_id":str(self.sid),"turn_id":str(self.turn_id)})
 
     async def append(self, pcm):
-        if self.ws and not self.input_closed and not self.reader.done():
+        if self.ws and not self.input_closed and self.reader is not None and not self.reader.done():
             self.audio_sent = True
-            await self.send("input_audio_buffer.append", audio=base64.b64encode(pcm).decode())
+            payload = pcm if self.config.rt_provider == "bailian" else resample_pcm16_mono(pcm, 16000, 24000)
+            await self.send("input_audio_buffer.append", audio=base64.b64encode(payload).decode())
 
     async def finish(self):
-        if self.input_closed or not self.audio_sent or self.reader.done():
+        if self.input_closed or not self.audio_sent or (self.reader is not None and self.reader.done()):
             return
         self.input_closed = True
         if self.manual:
             await self.send("input_audio_buffer.commit")
             await self.send("response.create")
         else:
-            await self.send("input_audio_buffer.append", audio=base64.b64encode(bytes(32000)).decode())
+            silence_bytes = 32000 if self.config.rt_provider == "bailian" else 48000
+            await self.send("input_audio_buffer.append", audio=base64.b64encode(bytes(silence_bytes)).decode())
 
     async def receive(self):
         kind = "awaiting_event"
@@ -383,6 +470,7 @@ class RealtimeTurn:
                         self.usage = None
                         await self.refresh_tools()
                         self.started = monotonic()
+                        self.first_audio_ms = None
                         self.session.active_turn_id = self.turn_id
                         self.previous_item = self.item
                         self.reply = self.user = ""
@@ -432,20 +520,27 @@ class RealtimeTurn:
                     await self.release_output()
                 elif kind == "conversation.item.input_audio_transcription.failed":
                     raise self.upstream_error(event)
-                elif kind == "response.audio_transcript.delta":
+                elif kind in {
+                    "response.audio_transcript.delta",
+                    "response.output_audio_transcript.delta",
+                    "response.text.delta",
+                    "response.output_text.delta",
+                }:
                     self._note_early_output()
-                    self._append_transcript_delta(event["delta"])
+                    self._append_transcript_delta(event.get("delta", ""))
                     if self.output_blocked():
                         self.held_text = True
                     else:
                         await self.release_output()
-                        await self.emit("text",self.reply)
-                elif kind == "response.audio_transcript.done":
+                        await self.emit("text", self.reply)
+                elif kind in {"response.audio_transcript.done", "response.output_audio_transcript.done"}:
                     self._finalize_response_transcript(event.get("transcript") or "")
                     if self.output_blocked():
                         self.held_text = True
-                elif kind == "response.audio.delta":
+                elif kind in {"response.audio.delta", "response.output_audio.delta"}:
                     self._note_early_output()
+                    if getattr(self, "first_audio_ms", None) is None and getattr(self, "started", None) is not None:
+                        self.first_audio_ms = int(max(0.0, monotonic() - self.started) * 1000)
                     pcm = base64.b64decode(event["delta"])
                     if self.output_blocked():
                         self.pending_audio.append(pcm)
@@ -609,7 +704,12 @@ class RealtimeTurn:
                     return
                 if self.source == "device_voice":
                     call = context.calls[-1]
-                    if call.get("error_code") in {"order_confirmation_required", "order_confirmation_denied"}:
+                    if call.get("error_code") in {
+                        "order_confirmation_required",
+                        "order_confirmation_denied",
+                        "confirmation_required",
+                        "confirmation_denied",
+                    }:
                         activity = "clarification"
                     elif (call["status"] == "ok" and (call.get("http_status") or 200) < 400
                           and not (isinstance(output, dict) and output.get("error"))
@@ -649,30 +749,36 @@ class RealtimeTurn:
             if self.reader and self.reader is not asyncio.current_task():
                 self.reader.cancel()
 
-    async def persist(self,status, audio_status=None):
+    async def persist(self, status, audio_status=None):
         if self.saved or not (self.user or self.reply):
             return
-        async with self.session.lock:
-            if self.service.sessions.get(self.sid) is not self.session:
-                return
-            if not self.session.history:
-                self.session.title = self.user[:40] or "语音对话"
-            for role,content in (("user",self.user),("assistant",self.reply)):
-                if content:
-                    self.session.history.append(TranscriptMessage(role=role,content=content,source=self.source,
-                        turn_id=self.turn_id,model=self.config.rt_model,provider=self.provider,usage=self.usage if role=="assistant" else None,
-                        status="complete" if role=="user" else status,
-                        sources=self.tool_context.sources() if role=="assistant" else [],
-                        tool_calls=self.tool_context.summaries() if role=="assistant" else [],
-                        audio_status=(audio_status or ("streamed" if status=="complete" else "interrupted")) if role=="assistant" else None))
-            self.session.updated_at = datetime.now(timezone.utc)
-            self.service.rebuild_context(self.session,self.config.history_turns)
-            self.service.persist(self.sid)
+        elapsed_ms = int(max(0.0, monotonic() - self.started) * 1000)
+        first_ms = getattr(self, "first_audio_ms", None)
+        resolved_audio = audio_status or ("streamed" if status == "complete" else "interrupted")
+        saved = await self.service.commit_external_turn(
+            session_id=self.sid,
+            turn_id=self.turn_id,
+            source=self.source,
+            user_text=self.user,
+            reply_text=self.reply,
+            provider=self.provider,
+            model=self.config.rt_model,
+            usage=self.usage,
+            status=status,
+            audio_status=resolved_audio,
+            error_code=None if status == "complete" else "interrupted",
+            elapsed_ms=elapsed_ms,
+            first_audio_ms=first_ms,
+            tool_context=self.tool_context,
+            required_controls=self.required_controls,
+            control_failure=self.control_failure,
+            history_turns=self.config.history_turns,
+            voice_mode="realtime",
+            asr_provider=getattr(self.config, "rt_asr_model", None) or self.config.rt_provider,
+            tts_provider=self.config.rt_provider,
+        )
+        if saved:
             self.saved = True
-        self.tool_context.question = self.user
-        if self.tool_context.calls or self.required_controls or self.control_failure:
-            self.service.queue_tool_audit(self.tool_context, self.reply, status,
-                                          self.control_failure or (None if status == "complete" else "interrupted"))
 
     async def close(self):
         if self.reader and self.reader is not asyncio.current_task():

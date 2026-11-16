@@ -514,9 +514,16 @@ class ToolRegistry:
     def names(self):
         return list(self._tools)
 
-    def definitions(self, *, nested=False):
+    def has(self, name: str) -> bool:
+        return name in self._tools
+
+    def get(self, name: str):
+        return self._tools.get(name)
+
+    def definitions(self, *, nested=False, include_side_effects: bool = False):
+        allowed_perms = ("read", "local", "write", "paid") if include_side_effects else ("read", "local")
         definitions = [tool.spec.definition() for tool in self._tools.values()
-                       if tool.spec.permission in ("read", "local")]
+                       if tool.spec.permission in allowed_perms]
         if nested:
             return [{"type": "function", "function": {key: value for key, value in item.items() if key != "type"}}
                     for item in definitions]

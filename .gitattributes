@@ -1,0 +1,19 @@
+# Enforce consistent LF line endings across Mac (dev) and Windows (test)
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.wav binary
+*.ogg binary
+*.opus binary
+*.mp3 binary
+*.bin binary
+*.elf binary
+*.sqlite3 binary
+*.db binary

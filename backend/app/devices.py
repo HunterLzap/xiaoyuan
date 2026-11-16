@@ -19,7 +19,8 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from .config import ROOT
+from .asr import DevicePipelineASR
+from .config import ROOT, Settings
 from .llm import ProviderError
 from .speech_bridge import SpeechRecognizer
 
@@ -103,6 +104,7 @@ class DeviceHub:
         # The conversation loop is attached by the admin app, which owns the model and
         # TTS providers; the gateway can run without it (recognition only).
         self.voice = None
+        self.pipeline_asr = DevicePipelineASR(lambda: self.voice.service.settings if self.voice is not None else Settings.model_construct())
         self.lock = asyncio.Lock()
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -297,11 +299,21 @@ class DeviceHub:
             with suppress(Exception):
                 await self.connection.ws.close(code=1000)
 
+    def use_local_asr(self) -> bool:
+        return self.voice is None or self.voice.service.settings.asr_provider == "local"
+
     async def push_audio(self, payload: bytes):
-        """Forward one microphone frame; the worker decides when the sentence ended."""
-        result = await self.speech.push(payload)
+        """Forward one microphone frame to either local or API pipeline ASR."""
+        local = self.use_local_asr()
+        try:
+            result = await (self.speech.push(payload) if local else self.pipeline_asr.push(payload))
+        except ProviderError as error:
+            self.last_error = error.message
+            logger.warning("device_pipeline_asr_failed code=%s", error.code)
+            return None
+        voice_active = self.speech.voice_active if local else self.pipeline_asr.voice_active
         connection = self.connection
-        if (self.speech.voice_active and connection is not None and connection.client_aec
+        if (voice_active and connection is not None and connection.client_aec
                 and connection.voice_task is not None and not connection.stopped and self.voice is not None):
             await self.voice.interrupt(connection)
         if result is not None:
@@ -309,10 +321,11 @@ class DeviceHub:
         return result
 
     def publish_utterance(self, result: dict):
+        metrics = (self.speech.last_metrics if self.use_local_asr() else self.pipeline_asr.last_metrics) or {}
         self.last_utterance = {"at": self.now(), "state": "recognized",
-                               "text": result.get("text"), "metrics": self.speech.last_metrics}
+                               "text": result.get("text"), "metrics": metrics}
         logger.info("device_audio_recognized %s", json.dumps(
-            {"characters": len(result.get("text") or ""), **self.speech.last_metrics}, ensure_ascii=False))
+            {"characters": len(result.get("text") or ""), **metrics}, ensure_ascii=False))
         # Answering is detached: a slow model must never block the audio loop.
         voice = self.voice
         text = (result.get("text") or "").strip()
@@ -321,8 +334,14 @@ class DeviceHub:
             voice.submit(text, connection)
 
     async def flush_audio(self):
-        """Close the worker stream at disconnect so a pending sentence is not lost."""
-        result = await self.speech.finish()
+        """Close the recognition stream at stop/disconnect so a pending sentence is not lost."""
+        local = self.use_local_asr()
+        try:
+            result = await (self.speech.finish() if local else self.pipeline_asr.finish())
+        except ProviderError as error:
+            self.last_error = error.message
+            logger.warning("device_pipeline_asr_flush_failed code=%s", error.code)
+            return None
         if result is not None:
             self.publish_utterance(result)
         return result
@@ -628,8 +647,10 @@ def create_gateway(hub: DeviceHub):
                             from .device_realtime import DeviceRealtime
                             realtime = DeviceRealtime(hub,conn,mode=="manual")
                             realtime.start()
-                        else:
+                        elif hub.use_local_asr():
                             await hub.speech.ensure_ready(mode)
+                        else:
+                            hub.pipeline_asr.start(mode)
                     elif message.get("type") == "abort":
                         reason = message.get("reason")
                         reason = reason if isinstance(reason, str) and reason else "unknown"
@@ -663,7 +684,9 @@ def create_gateway(hub: DeviceHub):
             if conn.voice_task is not None:
                 with suppress(asyncio.CancelledError):
                     await conn.voice_task
-            await hub.speech.finish()
+            if hub.use_local_asr():
+                await hub.speech.finish()
+            hub.pipeline_asr.close()
             # Snapshot before the connection object is dropped: after a disconnect this is
             # the only evidence of how much audio the device actually sent.
             hub.last_session = {"ended_at": hub.now(), "connected_at": hub.last_connected,

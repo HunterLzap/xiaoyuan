@@ -22,7 +22,14 @@ class Settings(BaseSettings):
     rt_workspace: str = Field(default="", pattern=r"^(?:[a-z0-9][a-z0-9-]{0,62})?$")
     rt_model: str = Field(default="qwen3.8-omni-flash-realtime", min_length=1, max_length=200)
     rt_voice: str = Field(default="Tina", min_length=1, max_length=80)
+    rt_asr_model: str = Field(default="whisper-1", max_length=200)
     rt_api_key: SecretStr = SecretStr("")
+    asr_provider: Literal["openai", "bailian", "local"] = "openai"
+    asr_base_url: str = Field(default="", max_length=500)
+    asr_api_key: SecretStr = SecretStr("")
+    asr_use_text_connection: bool | None = None
+    asr_model: str = Field(default="whisper-1", max_length=200)
+    asr_language: str = Field(default="zh", max_length=20)
     provider: str = "tokendance"
     base_url: str = "https://tokendance.space/gateway/v1"
     api_key: SecretStr = SecretStr("")
@@ -58,6 +65,7 @@ class Settings(BaseSettings):
     embedding_enabled: bool = False
     embedding_model: str = Field(default="qwen3.7-text-embedding", max_length=200)
     embedding_dimensions: int = Field(default=1024, ge=256, le=2560)
+    tts_provider: Literal["mimo", "openai", "bailian"] = "mimo"
     tts_base_url: str = "https://tokendance.space/gateway/v1"
     tts_api_key: SecretStr = SecretStr("")
     tts_use_text_connection: bool | None = None
@@ -73,6 +81,7 @@ class Settings(BaseSettings):
     tts_rate: float = Field(default=1.0, ge=0.5, le=2.0)
     tts_pitch: float = Field(default=0.0, ge=-8.0, le=8.0)
     tts_timeout_seconds: float = Field(default=60, gt=0, le=120)
+    assistant_db_path: Path | None = ROOT / "data" / "assistant_state.sqlite3"
     public_origin: str = ""
     public_base_path: str = ""
     admin_proxy_token: SecretStr = SecretStr("")
@@ -132,6 +141,19 @@ class Settings(BaseSettings):
             raise ValueError("Public mode requires AI_ADMIN_PROXY_TOKEN with at least 32 characters")
         return self
 
+    @field_validator("asr_base_url")
+    @classmethod
+    def validate_asr_url(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        if not value:
+            return ""
+        parts = urlsplit(value)
+        if (parts.scheme not in {"http", "https", "wss"} or not parts.hostname
+                or parts.username or parts.password or parts.query or parts.fragment
+                or any(char.isspace() for char in value)):
+            raise ValueError("ASR URL must be an HTTP(S) or WSS address without credentials or query")
+        return value
+
     @field_validator("base_url", "tts_base_url")
     @classmethod
     def validate_base_url(cls, value: str) -> str:
@@ -142,7 +164,7 @@ class Settings(BaseSettings):
             raise ValueError("Base URL must be an HTTP(S) API root without credentials or query")
         return value
 
-    @field_validator("model", "provider", "currency", "reasoning_effort")
+    @field_validator("model", "provider", "currency", "reasoning_effort", "rt_asr_model", "asr_model", "asr_language")
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
@@ -161,7 +183,7 @@ class Settings(BaseSettings):
             raise ValueError("选择必须是不重复的有效 ID 数组")
         return value
 
-    @field_validator("api_key", "tts_api_key", "rt_api_key")
+    @field_validator("api_key", "tts_api_key", "rt_api_key", "asr_api_key")
     @classmethod
     def validate_api_key(cls, value: SecretStr) -> SecretStr:
         key = value.get_secret_value().strip()
@@ -199,13 +221,56 @@ class Settings(BaseSettings):
     def shared_tts_connection(self) -> bool:
         if self.tts_use_text_connection is not None:
             return self.tts_use_text_connection
+        if self.tts_provider == "bailian":
+            return not bool(self.tts_api_key.get_secret_value())
         return (not bool(self.tts_api_key.get_secret_value()) or
                 self.tts_base_url == self.base_url and self.tts_api_key == self.api_key)
 
     @property
     def effective_tts_base_url(self) -> str:
+        if self.tts_provider == "bailian":
+            if self.rt_workspace:
+                return f"wss://{self.rt_workspace}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime"
+            return "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
         return self.base_url if self.shared_tts_connection else self.tts_base_url
 
     @property
     def effective_tts_api_key(self) -> SecretStr:
+        if self.tts_provider == "bailian":
+            if not self.shared_tts_connection and self.tts_api_key.get_secret_value().strip():
+                return self.tts_api_key
+            if self.rt_api_key.get_secret_value().strip():
+                return self.rt_api_key
+            return self.tts_api_key if self.tts_api_key.get_secret_value().strip() else self.api_key
         return self.api_key if self.shared_tts_connection else self.tts_api_key
+
+    @property
+    def shared_asr_connection(self) -> bool:
+        if self.asr_use_text_connection is not None:
+            return self.asr_use_text_connection
+        if self.asr_provider == "bailian":
+            return not bool(self.asr_api_key.get_secret_value())
+        return (not bool(self.asr_api_key.get_secret_value())
+                and (not self.asr_base_url or self.asr_base_url == self.base_url))
+
+    @property
+    def effective_asr_base_url(self) -> str:
+        if self.asr_provider == "bailian":
+            if self.asr_base_url.startswith("wss://"):
+                return self.asr_base_url
+            if self.rt_workspace:
+                return f"wss://{self.rt_workspace}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime"
+            return "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
+        if self.asr_base_url and not (self.shared_asr_connection and self.asr_base_url == self.base_url):
+            return self.asr_base_url
+        return self.base_url if self.shared_asr_connection else (self.asr_base_url or self.base_url)
+
+    @property
+    def effective_asr_api_key(self) -> SecretStr:
+        if self.asr_provider == "bailian":
+            if not self.shared_asr_connection and self.asr_api_key.get_secret_value().strip():
+                return self.asr_api_key
+            if self.rt_api_key.get_secret_value().strip():
+                return self.rt_api_key
+            return self.asr_api_key if self.asr_api_key.get_secret_value().strip() else self.api_key
+        return self.api_key if self.shared_asr_connection else self.asr_api_key

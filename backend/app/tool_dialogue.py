@@ -14,6 +14,7 @@ from .order_confirmation import (OrderConfirmationStore, choose_order_candidate,
                                  explicit_order_tokens, normalize_order_text, order_related)
 from .schemas import TokenUsage
 from .speech_text import function_call_output_payload
+from .tool_gateway import SideEffectConfirmationDenied, SideEffectConfirmationRequired, ToolGateway
 
 logger = logging.getLogger(__name__)
 TOOL_INSTRUCTIONS = (
@@ -397,19 +398,25 @@ def control_history(history):
 
 class TurnTools:
     def __init__(self, registry, audit, secrets, session_id, turn_id, source, question="",
-                 current_registry=None, order_store: OrderConfirmationStore | None = None):
+                 current_registry=None, order_store: OrderConfirmationStore | None = None,
+                 tool_gateway: ToolGateway | None = None):
         self.registry, self.audit = registry, audit
         self.current_registry = current_registry
         self.secrets = secrets
         self.session_id, self.turn_id, self.source = session_id, turn_id, source
         self.question = question
-        self.history = ()
+        self.history: list = []
         self.order_store = order_store
+        self.tool_gateway = tool_gateway
         self.calls, self.snapshots, self.parse_errors = [], [], []
         self.outputs = {}
         self.started = perf_counter()
         self.finished = False
-        self.allowed = {item["name"] for item in registry.definitions()} if registry else set()
+        allowed_defs = (
+            self.tool_gateway.definitions(registry, include_side_effects=True)
+            if self.tool_gateway is not None else (registry.definitions() if registry else [])
+        )
+        self.allowed = {item["name"] for item in allowed_defs}
 
     def begin_order_turn(self, question: str, history=None) -> None:
         """在拿到用户本条原话后开启确认轮次；语音路径的 question 晚于工具上下文创建。"""
@@ -417,10 +424,17 @@ class TurnTools:
         self.history = list(history or ())
         if self.order_store is not None:
             self.order_store.begin_turn(self.session_id, self.turn_id, self.question, history)
+        if self.tool_gateway is not None:
+            self.tool_gateway.confirmations.begin_turn(self.session_id, self.turn_id, self.question)
 
     def definitions(self, nested=False, compact=False):
         requested = control_request_tools(self.question, self.history)
-        definitions = self.registry.definitions(nested=nested) if self.registry else []
+        if self.tool_gateway is not None:
+            definitions = self.tool_gateway.definitions(
+                self.registry, nested=nested, include_side_effects=True,
+            )
+        else:
+            definitions = self.registry.definitions(nested=nested) if self.registry else []
         selected = [item for item in definitions
                     if (item.get("function", item)["name"] not in MUTATING_CONTROL_TOOLS
                         or item.get("function", item)["name"] in requested)]
@@ -516,10 +530,23 @@ class TurnTools:
                 else:
                     args[order_parameter] = bound
             registry = self.current_registry() if self.current_registry else self.registry
-            if registry is None or name not in {item["name"] for item in registry.definitions()}:
-                raise ProviderError(403, "tool_not_allowed", "工具已被取消选用或停用，未执行。")
-            result = await registry.call(name, args, trace=trace)
-            result = redact_value(result, self.secrets)
+            if self.tool_gateway is not None:
+                if registry is None:
+                    raise ProviderError(403, "tool_not_allowed", "工具已被取消选用或停用，未执行。")
+                result = await self.tool_gateway.execute_conversational(
+                    registry,
+                    name=name,
+                    arguments=args,
+                    session_id=self.session_id,
+                    turn_id=self.turn_id,
+                    secrets=self.secrets,
+                    trace=trace,
+                )
+            else:
+                if registry is None or name not in {item["name"] for item in registry.definitions()}:
+                    raise ProviderError(403, "tool_not_allowed", "工具已被取消选用或停用，未执行。")
+                result = await registry.call(name, args, trace=trace)
+                result = redact_value(result, self.secrets)
             if name == "search_personal_knowledge":
                 self.parse_errors.extend(result.pop("parse_errors", []))
                 for match in result.get("matches", []):
@@ -547,6 +574,19 @@ class TurnTools:
             output = {"error": error.code, "message": error.message,
                       "instruction": "用户已否认此前候选订单号，本轮未执行查询。不得再使用或猜测该编号；"
                                      "请让用户重新提供完整订单号。"}
+        except SideEffectConfirmationRequired as error:
+            call["status"] = "blocked"
+            call["error_code"] = error.code
+            output = {"error": error.code, "message": error.message,
+                      "tool_name": error.tool_name, "summary": error.summary,
+                      "instruction": "该外部写/付费操作尚未经用户确认，本轮未执行。必须先向用户复述操作内容并询问是否确认；"
+                                     "在用户明确确认前不得再次调用本工具，也不得声称已执行。"}
+        except SideEffectConfirmationDenied as error:
+            call["status"] = "blocked"
+            call["error_code"] = error.code
+            output = {"error": error.code, "message": error.message,
+                      "tool_name": error.tool_name,
+                      "instruction": "用户已取消该外部写/付费操作，本轮未执行，不得再次尝试。"}
         except ProviderError as error:
             call["error_code"] = error.code
             blocked = error.code in {"control_intent_required", "control_target_mismatch"}
@@ -651,8 +691,10 @@ class TurnTools:
                 error_code=retrieval_error if status == "complete" else error_code,
                 elapsed_ms=int((perf_counter() - self.started) * 1000))
             for call in self.calls:
+                tool_obj = self.registry.get(call["tool_name"]) if self.registry is not None and hasattr(self.registry, "get") else None
+                permission = tool_obj.spec.permission if tool_obj is not None else "read"
                 await asyncio.to_thread(self.audit.record, "tool_call", **fields,
-                    tool_name=call["tool_name"], call_id=call["call_id"], permission="read",
+                    tool_name=call["tool_name"], call_id=call["call_id"], permission=permission,
                     hit=call["status"] == "ok", status=call["status"], error_code=call["error_code"],
                     calls=[item for item in safe_calls if item["call_id"] == call["call_id"] or item.get("parent_call_id") == call["call_id"]],
                     snapshots=[item for item in self.snapshots if item["call_id"] == call["call_id"]],
@@ -712,9 +754,17 @@ class ToolConversation:
                 async for item in stream:
                     yield item
             return
-        definitions = self.context.definitions(nested=True)
+        raw_definitions = self.context.definitions(nested=True)
+        selection = None
+        if len(raw_definitions) > 5 and self.context.registry is not None:
+            from .text_tool_selection import TextToolSelection
+            selection = TextToolSelection(self.context)
+            extra = selection.instructions()
+            if extra and messages and messages[0].get("role") == "system":
+                messages[0] = {**messages[0], "content": (messages[0].get("content") or "") + extra}
         pending = list(self.context.outputs)
         for round_index in range(MAX_TOOL_ROUNDS + 1):
+            definitions = selection.definitions(nested=True) if selection is not None else self.context.definitions(nested=True)
             text, result = "", None
             try:
                 async with aclosing(self.provider.complete_stream(messages, tools=definitions if round_index < MAX_TOOL_ROUNDS else [])) as stream:

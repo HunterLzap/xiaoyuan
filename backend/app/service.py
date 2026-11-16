@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from time import perf_counter
+from typing import Literal
 from uuid import UUID, uuid4
 
 from .config import Settings
@@ -17,6 +18,7 @@ from .tools import ToolRegistry
 from .knowledge import KnowledgeProvider
 from .community import ConnectionHandler
 from .tool_dialogue import ToolConversation, TurnTools, TOOL_INSTRUCTIONS, combine_usage
+from .tool_gateway import ToolGateway, TurnTraceSummary
 from .order_confirmation import OrderConfirmationStore
 from .prompt_builder import build_system_prompt
 from .schemas import (ChatRequest, ChatResponse, SessionDetail, SessionSummary,
@@ -56,12 +58,161 @@ class ChatService:
         self.audit_tasks = set()
         # 订单编号跨轮确认状态：按会话隔离，避免旧候选串到新会话。
         self.order_confirmations = OrderConfirmationStore()
+        self.tool_gateway = ToolGateway()
 
     def queue_tool_audit(self, context, answer, status, error_code=None):
         task = asyncio.create_task(context.finish(answer, status, error_code))
         self.audit_tasks.add(task)
         task.add_done_callback(self._audit_done)
         return task
+
+    def queue_turn_trace(self, summary: TurnTraceSummary, secrets=()):
+        audit = self.audit
+        if audit is None:
+            return None
+
+        async def _write():
+            try:
+                await asyncio.to_thread(
+                    audit.record_trace,
+                    trace_id=summary.trace_id,
+                    session_id=summary.session_id,
+                    source=summary.source,
+                    voice_mode=summary.voice_mode,
+                    provider=summary.provider,
+                    model=summary.model,
+                    asr_provider=summary.asr_provider,
+                    tts_provider=summary.tts_provider,
+                    user_text=summary.user_text,
+                    reply_text=summary.reply_text,
+                    status=summary.status,
+                    audio_status=summary.audio_status,
+                    error_code=summary.error_code,
+                    elapsed_ms=summary.elapsed_ms,
+                    first_audio_ms=summary.first_audio_ms,
+                    prompt_tokens=summary.prompt_tokens,
+                    completion_tokens=summary.completion_tokens,
+                    total_tokens=summary.total_tokens,
+                    estimated_cost=summary.estimated_cost,
+                    currency=summary.currency,
+                    tool_calls=summary.tool_calls,
+                    secrets=secrets,
+                )
+            except (sqlite3.Error, OSError):
+                logger.warning("全链路追踪记录未写入；对话主链不受影响。")
+
+        task = asyncio.create_task(_write())
+        self.audit_tasks.add(task)
+        task.add_done_callback(self._audit_done)
+        return task
+
+    async def commit_external_turn(
+        self,
+        *,
+        session_id: UUID,
+        turn_id: UUID,
+        source: Literal["text", "web_voice", "device_voice"],
+        user_text: str,
+        reply_text: str,
+        provider: str,
+        model: str,
+        usage: TokenUsage | None = None,
+        status: Literal["complete", "generating", "interrupted", "failed"] = "complete",
+        audio_status: Literal["pending", "streamed", "played", "interrupted", "failed"] | None = None,
+        error_code: str | None = None,
+        elapsed_ms: int = 0,
+        first_audio_ms: int | None = None,
+        tool_context: TurnTools | None = None,
+        required_controls=(),
+        control_failure: str | None = None,
+        default_title: str = "语音对话",
+        history_turns: int | None = None,
+        voice_mode: str = "realtime",
+        asr_provider: str | None = None,
+        tts_provider: str | None = None,
+    ) -> bool:
+        session = self.sessions.get(session_id)
+        if session is None:
+            return False
+        saved = False
+        async with session.lock:
+            if self.sessions.get(session_id) is not session:
+                return False
+            if user_text or reply_text:
+                if not session.history:
+                    session.title = (user_text or "")[:40] or default_title
+                sources = tool_context.sources() if tool_context is not None else []
+                summaries = tool_context.summaries() if tool_context is not None else []
+                if user_text:
+                    session.history.append(TranscriptMessage(
+                        role="user",
+                        content=user_text,
+                        source=source,
+                        turn_id=turn_id,
+                        model=model,
+                        provider=provider,
+                        status="complete",
+                    ))
+                if reply_text:
+                    resolved_audio: Literal["pending", "streamed", "played", "interrupted", "failed"] = (
+                        audio_status if audio_status is not None
+                        else ("streamed" if status == "complete" else "interrupted")
+                    )
+                    session.history.append(TranscriptMessage(
+                        role="assistant",
+                        content=reply_text,
+                        source=source,
+                        turn_id=turn_id,
+                        model=model,
+                        provider=provider,
+                        usage=usage,
+                        status=status,
+                        sources=sources,
+                        tool_calls=summaries,
+                        audio_status=resolved_audio,
+                    ))
+                session.updated_at = datetime.now(timezone.utc)
+                turns = self.settings.history_turns if history_turns is None else history_turns
+                self.rebuild_context(session, turns)
+                self.persist(session_id)
+                saved = True
+        if tool_context is not None:
+            tool_context.question = user_text
+            if tool_context.calls or required_controls or control_failure:
+                self.queue_tool_audit(
+                    tool_context,
+                    reply_text,
+                    status,
+                    control_failure or (None if status == "complete" else "interrupted"),
+                )
+        if saved or (tool_context is not None and tool_context.calls) or error_code or control_failure:
+            summaries = tool_context.summaries() if tool_context is not None else []
+            secrets = tool_context.secrets if tool_context is not None else (self.tool_secrets() if self.tool_secrets else [])
+            self.queue_turn_trace(
+                TurnTraceSummary(
+                    trace_id=str(turn_id),
+                    session_id=str(session_id),
+                    source=source,
+                    voice_mode=voice_mode,
+                    provider=provider,
+                    model=model,
+                    asr_provider=asr_provider,
+                    tts_provider=tts_provider,
+                    user_text=user_text,
+                    reply_text=reply_text,
+                    status=status,
+                    audio_status=audio_status,
+                    error_code=control_failure or error_code,
+                    elapsed_ms=max(0, int(elapsed_ms)),
+                    first_audio_ms=first_audio_ms,
+                    prompt_tokens=usage.prompt_tokens if usage else None,
+                    completion_tokens=usage.completion_tokens if usage else None,
+                    total_tokens=usage.total_tokens if usage else None,
+                    tool_calls=summaries,
+                ),
+                secrets=secrets,
+            )
+        return saved
 
     def _audit_done(self, task):
         self.audit_tasks.discard(task)
@@ -70,15 +221,19 @@ class ChatService:
 
     def tool_context(self, session_id, turn_id, source, question=""):
         secrets = self.tool_secrets() if self.tool_secrets else []
-        history_tool = ConversationHistoryTool(self.get_session(session_id), turn_id)
+        session = self.get_session(session_id)
+        history_tool = ConversationHistoryTool(session, turn_id)
         def current_registry():
             registry = self.tools
             if history_tool.archived():
                 return registry.with_tool(history_tool) if registry else ToolRegistry([history_tool])
             return registry
-        return TurnTools(current_registry(), self.audit, secrets, session_id, turn_id, source, question,
-                         current_registry=current_registry,
-                         order_store=self.order_confirmations)
+        context = TurnTools(current_registry(), self.audit, secrets, session_id, turn_id, source, question,
+                            current_registry=current_registry,
+                            order_store=self.order_confirmations,
+                            tool_gateway=self.tool_gateway)
+        context.history = list(session.history)
+        return context
 
     def summary(self, session_id: UUID) -> SessionSummary:
         session = self.get_session(session_id)
@@ -428,9 +583,38 @@ class ChatService:
                                 perf_counter() - started, config, result)
                 session.active_task = None
                 session.active_turn_id = None
+                turn_status = ("complete" if model_success else
+                               "interrupted" if error_code == "interrupted" else "failed")
                 if tool_context.calls:
-                    self.queue_tool_audit(tool_context, answer.content, "complete" if model_success else
-                        "interrupted" if error_code == "interrupted" else "failed", error_code)
+                    self.queue_tool_audit(tool_context, answer.content, turn_status, error_code)
+                self.queue_turn_trace(
+                    TurnTraceSummary(
+                        trace_id=str(identity),
+                        session_id=str(session_id),
+                        source=source,
+                        voice_mode=config.voice_mode,
+                        provider=config.provider,
+                        model=config.model,
+                        asr_provider=(config.asr_provider if source in ("voice", "device") and config.voice_mode != "realtime" else
+                                      (config.rt_asr_model or config.rt_provider) if config.voice_mode == "realtime" else None),
+                        tts_provider=(config.tts_provider if adapter is not None and config.voice_mode != "realtime" else
+                                      config.rt_provider if config.voice_mode == "realtime" else None),
+                        user_text=request.message,
+                        reply_text=answer.content or "",
+                        status=turn_status,
+                        audio_status=answer.audio_status,
+                        error_code=None if model_success else error_code,
+                        elapsed_ms=int((perf_counter() - started) * 1000),
+                        first_audio_ms=core.first_audio_ms,
+                        prompt_tokens=answer.usage.prompt_tokens if answer.usage else None,
+                        completion_tokens=answer.usage.completion_tokens if answer.usage else None,
+                        total_tokens=answer.usage.total_tokens if answer.usage else None,
+                        estimated_cost=str(answer.estimated_cost) if answer.estimated_cost is not None else None,
+                        currency=config.currency,
+                        tool_calls=answer.tool_calls,
+                    ),
+                    secrets=tool_context.secrets,
+                )
                 await self.release_provider(provider)
             response = ChatResponse(
                 session_id=session_id, reply=answer.content, provider=config.provider,

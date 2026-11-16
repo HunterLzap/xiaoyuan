@@ -1,0 +1,1024 @@
+[
+  {
+    "tool": "pyright",
+    "path": "backend/app/api_requests.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"auth\" is not a known attribute of \"None\"",
+    "source_line": "old_auth = previous.auth"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/api_requests.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"body\" is not a known attribute of \"None\"",
+    "source_line": "if draft.body.secret and draft.body.text is None and draft.body.mode == previous.body.mode:"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/api_requests.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"body\" is not a known attribute of \"None\"",
+    "source_line": "old_fields = {r.key: r for r in previous.body.fields}"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/api_requests.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"body\" is not a known attribute of \"None\"",
+    "source_line": "values[\"body\"][\"text\"] = previous.body.text"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audio_fx.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot access attribute \"tts_pitch\" for class \"object\"\n  Attribute \"tts_pitch\" is unknown",
+    "source_line": "return settings.tts_rate, settings.tts_pitch"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audio_fx.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot access attribute \"tts_rate\" for class \"object\"\n  Attribute \"tts_rate\" is unknown",
+    "source_line": "return settings.tts_rate, settings.tts_pitch"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audio_fx.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"close\" is not a known attribute of \"None\"",
+    "source_line": "process.stdin.close()"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audio_fx.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"drain\" is not a known attribute of \"None\"",
+    "source_line": "await process.stdin.drain()"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audio_fx.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"get\" is not a known attribute of \"None\"",
+    "source_line": "data = await self.queue.get()"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audio_fx.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"put\" is not a known attribute of \"None\"",
+    "source_line": "await self.queue.put(None)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audio_fx.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"put\" is not a known attribute of \"None\"",
+    "source_line": "await self.queue.put(data)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audio_fx.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"read\" is not a known attribute of \"None\"",
+    "source_line": "while chunk := await process.stdout.read(8192):"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audio_fx.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"write\" is not a known attribute of \"None\"",
+    "source_line": "process.stdin.write(chunk)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['answer']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['answer']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['answer']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['answer']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "safe[\"answer\"][:32000] if safe[\"answer\"] is not None else None, None, answer_type,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['answer']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['answer']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['answer']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['answer']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "safe[\"answer\"][:32000] if safe[\"answer\"] is not None else None, None, answer_type,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['answer']\" cannot be assigned to parameter \"s\" of type \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  \"Literal['answer']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "safe[\"answer\"][:32000] if safe[\"answer\"] is not None else None, None, answer_type,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['answer']\" cannot be assigned to parameter \"s\" of type \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  \"Literal['answer']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "safe[\"answer\"][:32000] if safe[\"answer\"] is not None else None, None, answer_type,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['calls']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['calls']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['calls']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['calls']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "json.dumps(safe[\"snapshots\"], ensure_ascii=False), json.dumps(safe[\"calls\"], ensure_ascii=False),"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['calls']\" cannot be assigned to parameter \"s\" of type \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  \"Literal['calls']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "json.dumps(safe[\"snapshots\"], ensure_ascii=False), json.dumps(safe[\"calls\"], ensure_ascii=False),"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['parse_errors']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['parse_errors']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['parse_errors']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['parse_errors']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "json.dumps(safe[\"parse_errors\"], ensure_ascii=False), str(turn_id) if turn_id else None, call_id, source))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['parse_errors']\" cannot be assigned to parameter \"s\" of type \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  \"Literal['parse_errors']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "json.dumps(safe[\"parse_errors\"], ensure_ascii=False), str(turn_id) if turn_id else None, call_id, source))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['question']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['question']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['question']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['question']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "(audit_id, safe[\"question\"][:4000] if safe[\"question\"] is not None else None,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['question']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['question']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['question']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['question']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "(audit_id, safe[\"question\"][:4000] if safe[\"question\"] is not None else None,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['question']\" cannot be assigned to parameter \"s\" of type \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  \"Literal['question']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "(audit_id, safe[\"question\"][:4000] if safe[\"question\"] is not None else None,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['question']\" cannot be assigned to parameter \"s\" of type \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  \"Literal['question']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "(audit_id, safe[\"question\"][:4000] if safe[\"question\"] is not None else None,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['snapshots']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['snapshots']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['snapshots']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['snapshots']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "json.dumps(safe[\"snapshots\"], ensure_ascii=False), json.dumps(safe[\"calls\"], ensure_ascii=False),"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['snapshots']\" cannot be assigned to parameter \"s\" of type \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  \"Literal['snapshots']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "json.dumps(safe[\"snapshots\"], ensure_ascii=False), json.dumps(safe[\"calls\"], ensure_ascii=False),"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['sources']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['sources']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['sources']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['sources']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "json.dumps(safe[\"sources\"], ensure_ascii=False), int(elapsed_ms), status, error_code))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['sources']\" cannot be assigned to parameter \"s\" of type \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  \"Literal['sources']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "json.dumps(safe[\"sources\"], ensure_ascii=False), int(elapsed_ms), status, error_code))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['summary']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['summary']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['summary']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['summary']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "safe[\"summary\"][:200], tool_name, permission, int(bool(hit)), top_k,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['summary']\" cannot be assigned to parameter \"s\" of type \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  \"Literal['summary']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "safe[\"summary\"][:200], tool_name, permission, int(bool(hit)), top_k,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"__getitem__\" match the provided arguments",
+    "source_line": "(audit_id, safe[\"question\"][:4000] if safe[\"question\"] is not None else None,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"__getitem__\" match the provided arguments",
+    "source_line": "(audit_id, safe[\"question\"][:4000] if safe[\"question\"] is not None else None,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"__getitem__\" match the provided arguments",
+    "source_line": "json.dumps(safe[\"parse_errors\"], ensure_ascii=False), str(turn_id) if turn_id else None, call_id, source))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"__getitem__\" match the provided arguments",
+    "source_line": "json.dumps(safe[\"snapshots\"], ensure_ascii=False), json.dumps(safe[\"calls\"], ensure_ascii=False),"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"__getitem__\" match the provided arguments",
+    "source_line": "json.dumps(safe[\"snapshots\"], ensure_ascii=False), json.dumps(safe[\"calls\"], ensure_ascii=False),"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"__getitem__\" match the provided arguments",
+    "source_line": "json.dumps(safe[\"sources\"], ensure_ascii=False), int(elapsed_ms), status, error_code))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"__getitem__\" match the provided arguments",
+    "source_line": "safe[\"answer\"][:32000] if safe[\"answer\"] is not None else None, None, answer_type,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"__getitem__\" match the provided arguments",
+    "source_line": "safe[\"answer\"][:32000] if safe[\"answer\"] is not None else None, None, answer_type,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/audit_store.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"__getitem__\" match the provided arguments",
+    "source_line": "safe[\"summary\"][:200], tool_name, permission, int(bool(hit)), top_k,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/device_realtime.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal[True]\" cannot be assigned to parameter \"value\" of type \"str\" in function \"__setitem__\"\n  \"Literal[True]\" is not assignable to \"str\"",
+    "source_line": "payload[\"interrupt\"] = True"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/device_realtime.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"int | None\" cannot be assigned to parameter \"arg2\" of type \"SupportsRichComparisonT@max\" in function \"max\"\n  Type \"int | None\" is not assignable to type \"int\"\n    \"None\" is not assignable to \"int\"",
+    "source_line": "\"ack_to_answer_gap_ms\": (max(0, since(self.ack_end_at, self.answer_first_packet_at))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/device_realtime.py",
+    "code": "reportOperatorIssue",
+    "message": "Operator \"-\" not supported for types \"float\" and \"float | None\"\n  Operator \"-\" not supported for types \"float\" and \"None\"",
+    "source_line": "remaining = self.buffer_target_ms / 1000 - (monotonic() - self.prebuffer_started_at)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/device_realtime.py",
+    "code": "reportOperatorIssue",
+    "message": "Operator \"-\" not supported for types \"float\" and \"float | None\"\n  Operator \"-\" not supported for types \"float\" and \"None\"",
+    "source_line": "self._adapt_buffer((now - self.last_send_at) * 1000)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/devices.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot assign to attribute \"welcome_msg\" for class \"DeviceConnection\"\n  Attribute \"welcome_msg\" is unknown",
+    "source_line": "conn.welcome_msg = {"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/devices.py",
+    "code": "reportGeneralTypeIssues",
+    "message": "\"Never\" is not awaitable",
+    "source_line": "await conn.voice_task"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/devices.py",
+    "code": "reportGeneralTypeIssues",
+    "message": "\"Never\" is not awaitable",
+    "source_line": "await hub.voice.interrupt(conn)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/devices.py",
+    "code": "reportGeneralTypeIssues",
+    "message": "\"Never\" is not awaitable",
+    "source_line": "await hub.voice.interrupt(conn)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/devices.py",
+    "code": "reportGeneralTypeIssues",
+    "message": "\"Never\" is not awaitable",
+    "source_line": "await self.voice.interrupt(connection)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/devices.py",
+    "code": "reportGeneralTypeIssues",
+    "message": "Expected mapping for dictionary unpack operator",
+    "source_line": "hub.last_utterance = {**hub.last_utterance,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/devices.py",
+    "code": "reportGeneralTypeIssues",
+    "message": "Expected mapping for dictionary unpack operator",
+    "source_line": "{\"characters\": len(result.get(\"text\") or \"\"), **self.speech.last_metrics}, ensure_ascii=False))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/devices.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"ready\" is not a known attribute of \"None\"",
+    "source_line": "\"ready\": connected and self.connection.ready,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/devices.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"server_info\" is not a known attribute of \"None\"",
+    "source_line": "\"server_info\": self.connection.server_info if connected else None,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/devices.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"tools\" is not a known attribute of \"None\"",
+    "source_line": "\"tools\": sorted(self.connection.tools) if connected else [],"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/knowledge.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal[True]\" cannot be assigned to parameter \"value\" of type \"str\" in function \"__setitem__\"\n  \"Literal[True]\" is not assignable to \"str\"",
+    "source_line": "arguments[\"is_chip\"] = True"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/knowledge.py",
+    "code": "reportIndexIssue",
+    "message": "\"__getitem__\" method not defined on type \"EllipsisType\"",
+    "source_line": "return payload[name][:MAX_REMOTE_CHARS]"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/knowledge.py",
+    "code": "reportIndexIssue",
+    "message": "\"__getitem__\" method not defined on type \"bool\"",
+    "source_line": "return payload[name][:MAX_REMOTE_CHARS]"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/knowledge.py",
+    "code": "reportIndexIssue",
+    "message": "\"__getitem__\" method not defined on type \"complex\"",
+    "source_line": "return payload[name][:MAX_REMOTE_CHARS]"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/knowledge.py",
+    "code": "reportIndexIssue",
+    "message": "\"__getitem__\" method not defined on type \"float\"",
+    "source_line": "return payload[name][:MAX_REMOTE_CHARS]"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/knowledge.py",
+    "code": "reportIndexIssue",
+    "message": "\"__getitem__\" method not defined on type \"int\"",
+    "source_line": "return payload[name][:MAX_REMOTE_CHARS]"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/knowledge.py",
+    "code": "reportOptionalSubscript",
+    "message": "Object of type \"None\" is not subscriptable",
+    "source_line": "return payload[name][:MAX_REMOTE_CHARS]"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/knowledge.py",
+    "code": "reportReturnType",
+    "message": "Type \"Unknown | str | bytes\" is not assignable to return type \"str\"\n  Type \"Unknown | str | bytes\" is not assignable to type \"str\"\n    \"bytes\" is not assignable to \"str\"",
+    "source_line": "return payload[name][:MAX_REMOTE_CHARS]"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/llm.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"list[dict[Unknown, Unknown]]\" cannot be assigned to parameter \"messages\" of type \"Iterable[ChatCompletionMessageParam]\" in function \"create\"\n  \"list[dict[Unknown, Unknown]]\" is not assignable to \"Iterable[ChatCompletionMessageParam]\"\n    Type parameter \"_T_co@Iterable\" is covariant, but \"dict[Unknown, Unknown]\" is not a subtype of \"ChatCompletionMessageParam\"\n      Type \"dict[Unknown, Unknown]\" is not assignable to type \"ChatCompletionMessageParam\"\n        \"dict[Unknown, Unknown]\" is not assignable to \"ChatCompletionDeveloperMessageParam\"\n        \"dict[Unknown, Unknown]\" is not assignable to \"ChatCompletionSystemMessageParam\"\n        \"dict[Unknown, Unknown]\" is not assignable to \"ChatCompletionUserMessageParam\"\n        \"dict[Unknown, Unknown]\" is not assignable to \"ChatCompletionAssistantMessageParam\"\n        \"dict[Unknown, Unknown]\" is not assignable to \"ChatCompletionToolMessageParam\"\n  ...",
+    "source_line": "model=self.settings.model, messages=messages,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/llm.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"list[dict[str, str]]\" cannot be assigned to parameter \"messages\" of type \"Iterable[ChatCompletionMessageParam]\" in function \"create\"\n  \"list[dict[str, str]]\" is not assignable to \"Iterable[ChatCompletionMessageParam]\"\n    Type parameter \"_T_co@Iterable\" is covariant, but \"dict[str, str]\" is not a subtype of \"ChatCompletionMessageParam\"\n      Type \"dict[str, str]\" is not assignable to type \"ChatCompletionMessageParam\"\n        \"dict[str, str]\" is not assignable to \"ChatCompletionDeveloperMessageParam\"\n        \"dict[str, str]\" is not assignable to \"ChatCompletionSystemMessageParam\"\n        \"dict[str, str]\" is not assignable to \"ChatCompletionUserMessageParam\"\n        \"dict[str, str]\" is not assignable to \"ChatCompletionAssistantMessageParam\"\n        \"dict[str, str]\" is not assignable to \"ChatCompletionToolMessageParam\"\n  ...",
+    "source_line": "model=self.settings.model, messages=messages,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/llm.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"str\" cannot be assigned to parameter \"value\" of type \"int\" in function \"__setitem__\"\n  \"str\" is not assignable to \"int\"",
+    "source_line": "options[\"reasoning_effort\"] = self.settings.reasoning_effort"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/llm.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"create\" match the provided arguments",
+    "source_line": "response = await self.client.chat.completions.create("
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/llm.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"create\" match the provided arguments",
+    "source_line": "stream = await self.client.chat.completions.create("
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/main.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"str | None\" cannot be assigned to parameter \"object\" of type \"str\" in function \"append\"\n  Type \"str | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+    "source_line": "allowed_hosts.append(urllib.parse.urlsplit(startup_config.public_origin).hostname)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/main.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"tuple[Task[Message], Task[None] | None]\" cannot be assigned to parameter \"fs\" of type \"Iterable[_FT@wait]\" in function \"wait\"\n  Type \"Task[None] | None\" is not assignable to type \"Future[Any]\"\n    Type \"Task[None] | None\" is not assignable to type \"Future[Any]\"\n      \"None\" is not assignable to \"Future[Any]\"",
+    "source_line": "finished,_ = await asyncio.wait((recv,turn.reader),return_when=asyncio.FIRST_COMPLETED)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/main.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot assign to attribute \"voice\" for class \"DeviceHub\"\n  Expression of type \"DeviceVoice\" cannot be assigned to attribute \"voice\" of class \"DeviceHub\"\n    \"DeviceVoice\" is not assignable to \"None\"",
+    "source_line": "app.state.devices.voice = DeviceVoice("
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/main.py",
+    "code": "reportCallIssue",
+    "message": "No parameter named \"_env_file\"",
+    "source_line": "config = Settings(_env_file=None, **{**current.model_dump(), name: value})"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/main.py",
+    "code": "reportGeneralTypeIssues",
+    "message": "Expected mapping for dictionary unpack operator",
+    "source_line": "return {\"request_id\": str(body.request_id), **result}"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/main.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"cancelling\" is not a known attribute of \"None\"",
+    "source_line": "and marker[\"turn_id\"] is not None and task.cancelling() == 1):"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/main.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"done\" is not a known attribute of \"None\"",
+    "source_line": "while not turn.reader.done():"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/personal_kb.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"string\" of type \"bytes | bytearray\" in function \"quote\"\n  Type \"Unknown | None\" is not assignable to type \"bytes | bytearray\"\n    Type \"None\" is not assignable to type \"bytes | bytearray\"\n      \"None\" is not assignable to \"bytes\"\n      \"None\" is not assignable to \"bytearray\"",
+    "source_line": "+ \"/original?version=\" + quote(version, safe=\"\")) if state == \"available\" else None"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/personal_kb.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"string\" of type \"bytes | bytearray\" in function \"quote\"\n  Type \"Unknown | None\" is not assignable to type \"bytes | bytearray\"\n    Type \"None\" is not assignable to type \"bytes | bytearray\"\n      \"None\" is not assignable to \"bytes\"\n      \"None\" is not assignable to \"bytearray\"",
+    "source_line": "item[\"original_url\"] = (\"/api/knowledge/personal/\" + quote(doc_id, safe=\"\")"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/personal_kb.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"quote\" match the provided arguments",
+    "source_line": "+ \"/original?version=\" + quote(version, safe=\"\")) if state == \"available\" else None"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/personal_kb.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"quote\" match the provided arguments",
+    "source_line": "item[\"original_url\"] = (\"/api/knowledge/personal/\" + quote(doc_id, safe=\"\")"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/realtime.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"str\" cannot be assigned to parameter \"role\" of type \"Literal['user', 'assistant']\" in function \"__init__\"\n  Type \"str\" is not assignable to type \"Literal['user', 'assistant']\"\n    \"str\" is not assignable to type \"Literal['user']\"\n    \"str\" is not assignable to type \"Literal['assistant']\"",
+    "source_line": "self.session.history.append(TranscriptMessage(role=role,content=content,source=self.source,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/realtime.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"close\" is not a known attribute of \"None\"",
+    "source_line": "await self.ws.close()"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/realtime.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"done\" is not a known attribute of \"None\"",
+    "source_line": "if self.input_closed or not self.audio_sent or self.reader.done():"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/realtime.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"done\" is not a known attribute of \"None\"",
+    "source_line": "if self.ws and not self.input_closed and not self.reader.done():"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/realtime.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"recv\" is not a known attribute of \"None\"",
+    "source_line": "event = json.loads(await asyncio.wait_for(self.ws.recv(), 30 if self.saved else 150))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/realtime.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"send\" is not a known attribute of \"None\"",
+    "source_line": "await self.ws.send(json.dumps({\"type\": kind, \"event_id\": uuid4().hex, **fields}))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/realtime_text.py",
+    "code": "reportGeneralTypeIssues",
+    "message": "\"CoroutineType[Any, Any, Unknown]\" is not iterable\n  \"__aiter__\" method not defined",
+    "source_line": "async for item in self.complete_stream(messages):"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/realtime_text.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"definitions\" is not a known attribute of \"None\"",
+    "source_line": "session_config[\"tools\"] = tool_context.registry.definitions(nested=settings.rt_provider == \"bailian\")"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/service.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"float\" cannot be assigned to parameter \"timeout\" of type \"int\" in function \"__init__\"\n  \"float\" is not assignable to \"int\"",
+    "source_line": "timeout=max(config.timeout_seconds, config.tts_timeout_seconds) * 2)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/service.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"str\" cannot be assigned to parameter \"source\" of type \"Literal['text', 'web_voice', 'device_voice']\" in function \"__init__\"\n  Type \"str\" is not assignable to type \"Literal['text', 'web_voice', 'device_voice']\"\n    \"str\" is not assignable to type \"Literal['text']\"\n    \"str\" is not assignable to type \"Literal['web_voice']\"\n    \"str\" is not assignable to type \"Literal['device_voice']\"",
+    "source_line": "answer = TranscriptMessage(role=\"assistant\", content=\"\", source=source,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/service.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"str\" cannot be assigned to parameter \"source\" of type \"Literal['text', 'web_voice', 'device_voice']\" in function \"__init__\"\n  Type \"str\" is not assignable to type \"Literal['text', 'web_voice', 'device_voice']\"\n    \"str\" is not assignable to type \"Literal['text']\"\n    \"str\" is not assignable to type \"Literal['web_voice']\"\n    \"str\" is not assignable to type \"Literal['device_voice']\"",
+    "source_line": "source=source, turn_id=identity)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/service.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot assign to attribute \"audio_status\" for class \"TranscriptMessage\"\n  Type \"str\" is not assignable to type \"Literal['pending', 'streamed', 'played', 'interrupted', 'failed'] | None\"\n    \"str\" is not assignable to \"None\"\n    \"str\" is not assignable to type \"Literal['pending']\"\n    \"str\" is not assignable to type \"Literal['streamed']\"\n    \"str\" is not assignable to type \"Literal['played']\"\n    \"str\" is not assignable to type \"Literal['interrupted']\"\n    \"str\" is not assignable to type \"Literal['failed']\"",
+    "source_line": "message.audio_status = state"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/settings_store.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot access attribute \"rt_api_key\" for class \"AssistantUpdate\"\n  Attribute \"rt_api_key\" is unknown",
+    "source_line": "if \"rt_api_key\" in key_names and update.rt_api_key is None and current.rt_api_key.get_secret_value() and ("
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/settings_store.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot access attribute \"rt_api_key\" for class \"CapabilitySettingsUpdate\"\n  Attribute \"rt_api_key\" is unknown",
+    "source_line": "if \"rt_api_key\" in key_names and update.rt_api_key is None and current.rt_api_key.get_secret_value() and ("
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/settings_store.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot access attribute \"rt_api_key\" for class \"SettingsUpdate\"\n  Attribute \"rt_api_key\" is unknown",
+    "source_line": "if \"rt_api_key\" in key_names and update.rt_api_key is None and current.rt_api_key.get_secret_value() and ("
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/settings_store.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot access attribute \"rt_api_key\" for class \"TTSSettingsUpdate\"\n  Attribute \"rt_api_key\" is unknown",
+    "source_line": "if \"rt_api_key\" in key_names and update.rt_api_key is None and current.rt_api_key.get_secret_value() and ("
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/settings_store.py",
+    "code": "reportCallIssue",
+    "message": "No parameter named \"_env_file\"",
+    "source_line": "config = Settings(_env_file=None, **values)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/settings_store.py",
+    "code": "reportCallIssue",
+    "message": "No parameter named \"_env_file\"",
+    "source_line": "return Settings(_env_file=None, **{**current.model_dump(), **update.model_dump(exclude_unset=True)})"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/speech_bridge.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"readuntil\" is not a known attribute of \"None\"",
+    "source_line": "line = await asyncio.wait_for(self.process.stdout.readuntil(b\"\\n\"), START_TIMEOUT)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['document_id']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['document_id']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['document_id']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['document_id']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "match[\"original_url\"] = (\"/api/knowledge/personal/\" + quote(match[\"document_id\"], safe=\"\")"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Literal['document_version']\" cannot be assigned to parameter \"key\" of type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\" in function \"__getitem__\"\n  Type \"Literal['document_version']\" is not assignable to type \"SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"\n    \"Literal['document_version']\" is incompatible with protocol \"SupportsIndex\"\n      \"__index__\" is not present\n    \"Literal['document_version']\" is not assignable to \"slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | None]\"",
+    "source_line": "+ \"/original?version=\" + quote(match[\"document_version\"], safe=\"\"))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"list[Any | None]\" cannot be assigned to parameter \"iterable\" of type \"Iterable[_SupportsSumNoDefaultT@sum]\" in function \"sum\"\n  \"list[Any | None]\" is not assignable to \"Iterable[_SupportsSumNoDefaultT@sum]\"\n    Type parameter \"_T_co@Iterable\" is covariant, but \"Any | None\" is not a subtype of \"_SupportsSumNoDefaultT@sum\"\n      Type \"Any | None\" is not assignable to type \"_SupportsSumWithNoDefaultGiven\"\n        Type \"Any | None\" is not assignable to type \"_SupportsSumWithNoDefaultGiven\"\n          \"None\" is incompatible with protocol \"_SupportsSumWithNoDefaultGiven\"",
+    "source_line": "counts[key] = sum(values) if all(value is not None for value in values) else None"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot access attribute \"get\" for class \"list[Unknown]\"\n  Attribute \"get\" is unknown",
+    "source_line": "for match in result.get(\"matches\", []):"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot access attribute \"get\" for class \"str\"\n  Attribute \"get\" is unknown",
+    "source_line": "for match in result.get(\"matches\", []):"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot access attribute \"pop\" for class \"str\"\n  Attribute \"pop\" is unknown",
+    "source_line": "self.parse_errors.extend(result.pop(\"parse_errors\", []))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportCallIssue",
+    "message": "Expected 1 positional argument",
+    "source_line": "self.parse_errors.extend(result.pop(\"parse_errors\", []))"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportCallIssue",
+    "message": "No overloads for \"sum\" match the provided arguments",
+    "source_line": "counts[key] = sum(values) if all(value is not None for value in values) else None"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportGeneralTypeIssues",
+    "message": "Expected mapping for dictionary unpack operator",
+    "source_line": "self.snapshots.append({**match, \"call_id\": call_id, \"sent_to_model\": False, \"cited\": None})"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportIndexIssue",
+    "message": "\"__setitem__\" method not defined on type \"str\"",
+    "source_line": "match[\"citation\"] = citation"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tool_dialogue.py",
+    "code": "reportIndexIssue",
+    "message": "\"__setitem__\" method not defined on type \"str\"",
+    "source_line": "match[\"original_url\"] = (\"/api/knowledge/personal/\" + quote(match[\"document_id\"], safe=\"\")"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tools.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"str\" cannot be assigned to parameter \"method\" of type \"Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']\" in function \"__init__\"\n  Type \"str\" is not assignable to type \"Literal['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']\"\n    \"str\" is not assignable to type \"Literal['GET']\"\n    \"str\" is not assignable to type \"Literal['POST']\"\n    \"str\" is not assignable to type \"Literal['PUT']\"\n    \"str\" is not assignable to type \"Literal['PATCH']\"\n    \"str\" is not assignable to type \"Literal['DELETE']\"\n    \"str\" is not assignable to type \"Literal['HEAD']\"\n    \"str\" is not assignable to type \"Literal['OPTIONS']\"",
+    "source_line": "self.request = RequestDraft(method=self.method, url=self.url, auth=auth,"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tools.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"str\" cannot be assigned to parameter \"scheme\" of type \"Literal['Bearer', 'raw']\" in function \"__init__\"\n  Type \"str\" is not assignable to type \"Literal['Bearer', 'raw']\"\n    \"str\" is not assignable to type \"Literal['Bearer']\"\n    \"str\" is not assignable to type \"Literal['raw']\"",
+    "source_line": "header=self.auth_header, scheme=self.auth_scheme)"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tools.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"get\" is not a known attribute of \"None\"",
+    "source_line": "\"theme\": screen.get(\"theme\"), \"verified\": True, \"read_at\": self.devices.now(),"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tools.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"get\" is not a known attribute of \"None\"",
+    "source_line": "return {\"volume\": audio.get(\"volume\"), \"brightness\": screen.get(\"brightness\"),"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tools.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"get\" is not a known attribute of \"None\"",
+    "source_line": "return {\"volume\": audio.get(\"volume\"), \"brightness\": screen.get(\"brightness\"),"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/tools.py",
+    "code": "reportOptionalMemberAccess",
+    "message": "\"model_copy\" is not a known attribute of \"None\"",
+    "source_line": "cfg = cfg.model_copy(update={\"request\": cfg.request.model_copy(update={\"auth\": previous.request.auth})})"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/voice_transport.py",
+    "code": "reportAttributeAccessIssue",
+    "message": "Cannot access attribute \"aclose\" for class \"AsyncContentStream\"\n  Attribute \"aclose\" is unknown",
+    "source_line": "await self.body_iterator.aclose()"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/voices.py",
+    "code": "reportArgumentType",
+    "message": "Argument of type \"Unknown | None\" cannot be assigned to parameter \"sample\" of type \"str | Path\" in function \"resolve\"\n  Type \"Unknown | None\" is not assignable to type \"str | Path\"\n    Type \"None\" is not assignable to type \"str | Path\"\n      \"None\" is not assignable to \"str\"\n      \"None\" is not assignable to \"Path\"",
+    "source_line": "return sample if resolve(sample) else \"\""
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/voices.py",
+    "code": "reportReturnType",
+    "message": "Type \"Unknown | Literal[''] | None\" is not assignable to return type \"str\"\n  Type \"Unknown | Literal[''] | None\" is not assignable to type \"str\"\n    \"None\" is not assignable to \"str\"",
+    "source_line": "return sample if resolve(sample) else \"\""
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/weather.py",
+    "code": "reportIndexIssue",
+    "message": "\"__getitem__\" method not defined on type \"int\"",
+    "source_line": "cache_key = f\"{lat:.3f},{lon:.3f}|{scope_value[0].isoformat()}|{scope_value[1].isoformat()}\""
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/weather.py",
+    "code": "reportIndexIssue",
+    "message": "\"__getitem__\" method not defined on type \"int\"",
+    "source_line": "cache_key = f\"{lat:.3f},{lon:.3f}|{scope_value[0].isoformat()}|{scope_value[1].isoformat()}\""
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/weather.py",
+    "code": "reportIndexIssue",
+    "message": "\"__getitem__\" method not defined on type \"int\"",
+    "source_line": "params[\"end_date\"] = scope_value[1].isoformat()"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/weather.py",
+    "code": "reportIndexIssue",
+    "message": "\"__getitem__\" method not defined on type \"int\"",
+    "source_line": "params[\"start_date\"] = scope_value[0].isoformat()"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/weather.py",
+    "code": "reportOptionalSubscript",
+    "message": "Object of type \"None\" is not subscriptable",
+    "source_line": "cache_key = f\"{lat:.3f},{lon:.3f}|{scope_value[0].isoformat()}|{scope_value[1].isoformat()}\""
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/weather.py",
+    "code": "reportOptionalSubscript",
+    "message": "Object of type \"None\" is not subscriptable",
+    "source_line": "cache_key = f\"{lat:.3f},{lon:.3f}|{scope_value[0].isoformat()}|{scope_value[1].isoformat()}\""
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/weather.py",
+    "code": "reportOptionalSubscript",
+    "message": "Object of type \"None\" is not subscriptable",
+    "source_line": "params[\"end_date\"] = scope_value[1].isoformat()"
+  },
+  {
+    "tool": "pyright",
+    "path": "backend/app/weather.py",
+    "code": "reportOptionalSubscript",
+    "message": "Object of type \"None\" is not subscriptable",
+    "source_line": "params[\"start_date\"] = scope_value[0].isoformat()"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/devices.py",
+    "code": "F401",
+    "message": "`pydantic.ValidationError` imported but unused",
+    "source_line": "from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/embeddings.py",
+    "code": "B905",
+    "message": "`zip()` without an explicit `strict=` parameter",
+    "source_line": "dot = sum(x * y for x, y in zip(a, b))"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/knowledge.py",
+    "code": "B905",
+    "message": "`zip()` without an explicit `strict=` parameter",
+    "source_line": "payload = {key.value: value.value for key, value in zip(tree.keys, tree.values)"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/knowledge.py",
+    "code": "E702",
+    "message": "Multiple statements on one line (semicolon)",
+    "source_line": "sources.append(source); seen.add(source.url)"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/main.py",
+    "code": "B904",
+    "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+    "source_line": "raise ProviderError(409, \"tool_cancelled\","
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/main.py",
+    "code": "B904",
+    "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+    "source_line": "raise ProviderError(error.status, error.code, error.message)"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/main.py",
+    "code": "B904",
+    "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+    "source_line": "raise ProviderError(error.status, error.code, error.message)"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/main.py",
+    "code": "B904",
+    "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+    "source_line": "raise ProviderError(error.status, error.code, error.message)"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/main.py",
+    "code": "B904",
+    "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+    "source_line": "raise ProviderError(error.status, error.code, error.message)"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/main.py",
+    "code": "B904",
+    "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+    "source_line": "raise ProviderError(error.status, error.code, error.message)"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/realtime.py",
+    "code": "F401",
+    "message": "`.tool_dialogue.TOOL_INSTRUCTIONS` imported but unused",
+    "source_line": "from .tool_dialogue import (TOOL_INSTRUCTIONS, MAX_TOOL_ROUNDS, combine_usage,"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/realtime.py",
+    "code": "F401",
+    "message": "`.tool_dialogue.control_request_tools` imported but unused",
+    "source_line": "control_request_tools, control_history,"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/service.py",
+    "code": "F401",
+    "message": "`.tool_dialogue.TOOL_INSTRUCTIONS` imported but unused",
+    "source_line": "from .tool_dialogue import ToolConversation, TurnTools, TOOL_INSTRUCTIONS, combine_usage"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/tools.py",
+    "code": "B904",
+    "message": "Within an `except` clause, raise exceptions with `raise ... from err` or `raise ... from None` to distinguish them from errors in exception handling",
+    "source_line": "raise ProviderError(error.status, error.code, error.message)"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/tools.py",
+    "code": "F401",
+    "message": "`httpx` imported but unused",
+    "source_line": "import httpx"
+  },
+  {
+    "tool": "ruff",
+    "path": "backend/app/tools.py",
+    "code": "F401",
+    "message": "`urllib.parse.urlsplit` imported but unused",
+    "source_line": "from urllib.parse import urlsplit"
+  },
+  {
+    "tool": "ruff",
+    "path": "tests/test_api_configuration.py",
+    "code": "F401",
+    "message": "`test_api.isolate_environment` imported but unused",
+    "source_line": "from test_api import HEADERS, completion, draft, running, isolate_environment"
+  },
+  {
+    "tool": "ruff",
+    "path": "tests/test_devices.py",
+    "code": "F401",
+    "message": "`backend.app.settings_store.SettingsStore` imported but unused",
+    "source_line": "from backend.app.settings_store import SettingsStore"
+  },
+  {
+    "tool": "ruff",
+    "path": "tests/test_settings_workflow.py",
+    "code": "F401",
+    "message": "`test_api.isolate_environment` imported but unused",
+    "source_line": "from test_api import HEADERS, isolate_environment"
+  },
+  {
+    "tool": "ruff",
+    "path": "tests/test_tts.py",
+    "code": "F401",
+    "message": "`test_api.isolate_environment` imported but unused",
+    "source_line": "from test_api import Gateway, HEADERS, draft, isolate_environment"
+  },
+  {
+    "tool": "ruff",
+    "path": "tests/test_voices.py",
+    "code": "F401",
+    "message": "`pathlib.Path` imported but unused",
+    "source_line": "from pathlib import Path"
+  }
+]

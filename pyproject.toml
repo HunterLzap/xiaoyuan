@@ -1,0 +1,20 @@
+[tool.ruff]
+target-version = "py311"
+include = ["backend/**/*.py", "tests/**/*.py"]
+src = ["backend", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/app/community.py" = ["E402"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
+include = ["backend"]
+exclude = ["firmware", "third_party", "output", "models", "data", "logs", "**/__pycache__", ".venv"]
+extraPaths = ["third_party/xiaozhi-server"]
+typeCheckingMode = "basic"

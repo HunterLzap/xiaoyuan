@@ -101,7 +101,7 @@ class RealtimeTextProvider:
                             if not function_calls:
                                 yield replace(result, usage=combine_usage(round_results))
                                 return
-                            if tool_context is None:
+                            if tool_context is None or selection is None:
                                 raise ProviderError(502, "tool_not_configured", "模型请求了未配置的工具。")
                             if round_index >= MAX_TOOL_ROUNDS:
                                 raise ProviderError(502, "tool_limit", "本轮工具调用已达上限，未继续执行。")

@@ -10,7 +10,7 @@ let sessionHasMore = false, sessionLoading = false, sessionError = "", sessionOf
 let sessionLoadId = 0, sessionController = null, sessionSearchTimer = null;
 const capabilityState = { tools:[], documents:[], total:0, offset:0, loading:false, busy:false, queryId:0, supportedFileTypes:[".txt",".md",".markdown",".docx"], selectedCapability:null, libraries:[], selectionSupported:false, selectedTools:[], selectedKbs:[], activeLibraryId:null, toolsLoaded:false, librariesLoaded:false, librariesError:false, selectionFetched:false, selectionError:false, selectionSaving:false };
 const INSIGHT_PAGE = 25;
-const insightState = {kb:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},tools:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null}};
+const insightState = {kb:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},tools:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},traces:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null}};
 let insightDeleteState = null;
 let savedFingerprint = "";
 let savedConfig = null, savedTtsConfig = null, modelsFetched = false, speechModels = [];
@@ -20,11 +20,16 @@ let qwenVoices = [], realtimeSampleUrl = null, realtimePreviewController = null;
 const CLONE_MODEL = "mimo-v2.5-tts-voiceclone";
 const VOICEDESIGN_MODEL = "mimo-v2.5-tts-voicedesign";
 const PRESET_VOICES = ["mimo_default","冰糖","茉莉","苏打","白桦","Mia","Chloe","Milo","Dean"];
-let clonedVoices = [];
+const OPENAI_TTS_MODELS = ["tts-1", "tts-1-hd", "gpt-4o-mini-tts"];
+const OPENAI_TTS_VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse"];
+const BAILIAN_TTS_MODELS = ["qwen3-tts-flash-realtime", "qwen3-tts-vc-realtime"];
+const BAILIAN_TTS_VOICES = ["Cherry", "Serena", "Ethan", "Chelsie", "Momo", "Vivian", "Moon", "Maia", "Kai", "Nofish", "Bella", "Jennifer", "Ryan", "Katerina", "Elias"];
+const MIMO_TTS_MODELS = ["mimo-v2.5-tts", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts-voiceclone"];
+let clonedVoices = [], bailianTtsVoices = [], voiceProfiles = {};
 // Fixed speaking-style hint for the TTS provider; deliberately not the role text.
 const SPEAKING_STYLE = "用活泼轻快、带点主播感的语气说，语速正常，咬字清楚，不要含糊。";
 let ttsLoaded = false, ttsBusy = false, ttsController = null, ttsAudioUrl = null;
-const ttsIds = ["tts_model", "tts_voice"];
+const ttsIds = ["tts_provider", "tts_model", "tts_voice"];
 function node(tag, className = "", text) {
   const result = document.createElement(tag);
   if (className) result.className = className;
@@ -474,36 +479,137 @@ function connectionPayload() {
   const result = {};
   for (const id of configIds.filter(id => id !== "model")) result[id] = el(id).value.trim();
   result.m5stack_enabled = el("m5stack_enabled").checked;
+  result.tts_provider = el("tts_provider").value;
   result.tts_use_text_connection = !el("tts-separate-service").checked;
+  result.asr_provider = el("asr_provider").value;
+  result.asr_model = el("asr_model").value.trim() || (result.asr_provider === "bailian" ? "qwen3-asr-flash-realtime" : "whisper-1");
+  result.asr_language = el("asr_language").value.trim();
+  result.asr_use_text_connection = !el("asr-separate-service").checked;
   if (el("api_key").value.trim()) result.api_key = el("api_key").value.trim();
   if (!result.tts_use_text_connection) {
     result.tts_base_url = el("tts_base_url").value.trim();
     if (el("tts_api_key").value.trim()) result.tts_api_key = el("tts_api_key").value.trim();
   }
+  if (!result.asr_use_text_connection && result.asr_provider !== "local") {
+    result.asr_base_url = el("asr_base_url").value.trim();
+    if (el("asr_api_key").value.trim()) result.asr_api_key = el("asr_api_key").value.trim();
+  }
   return result;
 }
 function realtimePayload() {
-  const data = Object.fromEntries(["voice_mode","rt_provider","rt_endpoint","rt_workspace","rt_model","rt_voice"].map(id => [id,el(id).value.trim()]));
+  const data = Object.fromEntries(["voice_mode","rt_provider","rt_endpoint","rt_workspace","rt_model","rt_voice","rt_asr_model"].map(id => [id,el(id).value.trim()]));
   if (el("rt_api_key").value.trim()) data.rt_api_key = el("rt_api_key").value.trim();
   return data;
+}
+function selectedSpeechModel() {
+  const picked = el("tts_model").value;
+  if (picked === MANUAL) return el("tts_model_custom").value.trim();
+  return picked;
+}
+function selectedSpeechVoice() {
+  const picked = el("tts_voice").value;
+  if (picked === MANUAL) return el("tts_voice_custom").value.trim();
+  return picked;
+}
+function realtimeScopeKey() {
+  return `realtime:${el("rt_provider").value}:${el("rt_model").value.trim()}`;
+}
+function ttsScopeKey() {
+  return `tts:${el("tts_provider").value}:${selectedSpeechModel()}`;
+}
+function restoreSavedProfileForCurrentTarget(targetKind) {
+  if (targetKind === "realtime") {
+    const profile = voiceProfiles[realtimeScopeKey()];
+    if (profile) {
+      if (profile.voice) el("rt_voice").value = profile.voice;
+      if (el("voice_mode").value === "realtime") resetTuning({rate: profile.rate, pitch: profile.pitch});
+    } else if (el("rt_provider").value === "compatible" && (!el("rt_voice").value || el("rt_voice").value.startsWith("qwen-"))) {
+      el("rt_voice").value = "alloy";
+    } else if (el("rt_provider").value === "bailian" && !el("rt_voice").value) {
+      el("rt_voice").value = "Tina";
+    }
+    syncRealtimeVoices();
+    return;
+  }
+  const provider = el("tts_provider").value;
+  const profile = voiceProfiles[ttsScopeKey()];
+  if (profile) {
+    setSpeechVoice(profile.voice);
+    if (el("voice_mode").value === "pipeline") resetTuning({rate: profile.rate, pitch: profile.pitch});
+  } else if (provider === "openai") {
+    setSpeechVoice("alloy");
+  } else if (provider === "bailian") {
+    setSpeechVoice(selectedSpeechModel().startsWith("qwen3-tts-vc-") ? (bailianTtsVoices[0]?.voice || "") : "Cherry");
+  } else if (selectedSpeechModel() === CLONE_MODEL) {
+    setSpeechVoice(clonedVoices[0]?.id || "");
+  } else {
+    setSpeechVoice("mimo_default");
+  }
+  renderVoiceOptions();
+}
+function confirmVoiceSchemeChange(nextMode, nextRtProvider, nextRtModel, nextTtsProvider, nextTtsModel) {
+  if (!savedConfig || !savedTtsConfig) return true;
+  const modeChanged = nextMode !== savedConfig.voice_mode;
+  const rtChanged = nextMode === "realtime" && (nextRtProvider !== savedConfig.rt_provider || nextRtModel !== savedConfig.rt_model);
+  const ttsChanged = nextMode === "pipeline" && (
+    nextTtsProvider !== (savedTtsConfig.tts_provider || "mimo")
+    || (nextTtsModel !== savedTtsConfig.tts_model
+        && (nextTtsModel === CLONE_MODEL || savedTtsConfig.tts_model === CLONE_MODEL
+            || nextTtsModel.startsWith("qwen3-tts-vc-") || savedTtsConfig.tts_model.startsWith("qwen3-tts-vc-")))
+  );
+  if (!modeChanged && !rtChanged && !ttsChanged) return true;
+  return confirm(
+    "切换语音模式或服务商/模型后，原方案的复刻音色不会自动迁移到新方案（若新方案尚无对应音色，需重新选择或复刻）。\n\n"
+    + "原方案已绑定的音色与语速音调均已保留，以后切回可直接恢复。\n\n确认切换并保存吗？"
+  );
 }
 document.querySelectorAll('input[name="voice-route"]').forEach(radio => radio.addEventListener("change", () => {
   stopRealtimeSample();
   el("voice_mode").value = radio.value === "pipeline" ? "pipeline" : "realtime";
+  restoreSavedProfileForCurrentTarget(el("voice_mode").value === "realtime" ? "realtime" : "tts");
   updateConnectionMode(); dirty();
 }));
 el("rt_provider").addEventListener("change", () => {
-  stopRealtimeSample(); el("rt_api_key").value = ""; updateConnectionMode(); dirty();
+  stopRealtimeSample(); el("rt_api_key").value = "";
+  if (el("rt_provider").value === "compatible" && el("rt_model").value === "qwen3.8-omni-flash-realtime") {
+    el("rt_model").value = "gpt-realtime";
+  } else if (el("rt_provider").value === "bailian" && ["gpt-realtime", "gpt-4o-realtime-preview"].includes(el("rt_model").value)) {
+    el("rt_model").value = "qwen3.8-omni-flash-realtime";
+  }
+  restoreSavedProfileForCurrentTarget("realtime");
+  updateConnectionMode(); dirty();
+});
+el("rt_model").addEventListener("change", () => { restoreSavedProfileForCurrentTarget("realtime"); dirty(); });
+el("asr_provider").addEventListener("change", () => {
+  if (el("asr_provider").value === "bailian" && (!el("asr_model").value || el("asr_model").value === "whisper-1")) {
+    el("asr_model").value = "qwen3-asr-flash-realtime";
+  } else if (el("asr_provider").value === "openai" && el("asr_model").value === "qwen3-asr-flash-realtime") {
+    el("asr_model").value = "whisper-1";
+  }
+  updateConnectionMode(); dirty();
+});
+el("tts_provider").addEventListener("change", () => {
+  const provider = el("tts_provider").value;
+  populateSpeechModels(provider);
+  if (provider === "openai") setSpeechModel("tts-1");
+  else if (provider === "bailian") setSpeechModel("qwen3-tts-flash-realtime");
+  else setSpeechModel("mimo-v2.5-tts");
+  restoreSavedProfileForCurrentTarget("tts");
+  if (provider === "bailian") loadBailianTtsVoices();
+  updateConnectionMode(); updateTtsMode(); assistantDirty(); dirty();
 });
 function fingerprint() { const payload = {...connectionPayload(), model:el("model").value.trim(),
-  tts_model:el("tts_model").value, tts_voice:el("tts_voice").value}; Object.assign(payload,realtimePayload()); delete payload.rt_api_key; delete payload.api_key; delete payload.tts_api_key; return JSON.stringify(payload); }
-function dirty() { el("dirty-state").textContent = fingerprint() !== savedFingerprint || el("rt_api_key").value || el("api_key").value || el("tts_api_key").value ? "有未保存的修改" : ""; }
+  tts_provider:el("tts_provider").value, tts_model:selectedSpeechModel(), tts_voice:selectedSpeechVoice()}; Object.assign(payload,realtimePayload()); delete payload.rt_api_key; delete payload.api_key; delete payload.tts_api_key; delete payload.asr_api_key; return JSON.stringify(payload); }
+function dirty() { el("dirty-state").textContent = fingerprint() !== savedFingerprint || el("rt_api_key").value || el("api_key").value || el("tts_api_key").value || el("asr_api_key").value ? "有未保存的修改" : ""; }
 function voiceChoice() {
   // Only the voice id travels from the page; the server resolves the sample path so a
   // request can never point the clone model at an arbitrary file.
-  const model = el("tts_model").value;
-  const pick = el("tts_voice").value;
-  return {tts_voice:pick || "mimo_default"};
+  const provider = el("tts_provider").value;
+  const pick = selectedSpeechVoice();
+  if (pick) return {tts_voice: pick};
+  if (provider === "openai") return {tts_voice: "alloy"};
+  if (provider === "bailian") return {tts_voice: "Cherry"};
+  return {tts_voice: "mimo_default"};
 }
 function assistantPayload() {
   const prompt = el("system_prompt").value.trim();
@@ -512,13 +618,14 @@ function assistantPayload() {
   // short instruction. Reusing the whole role text here overflowed its length limit and
   // made a long persona break voice preview.
   // 选择能力/知识库走独立的 /api/assistant/selection，这里只提交提示词与声音，避免两次保存互相污染。
-  return {system_prompt:prompt, tts_model:el("tts_model").value, tts_voice:choice.tts_voice,
+  return {system_prompt:prompt, tts_provider:el("tts_provider").value, tts_model:selectedSpeechModel(), tts_voice:choice.tts_voice,
     tts_rate:Number(el("tts_rate").value), tts_pitch:Number(el("tts_pitch").value),
     tts_instruction:SPEAKING_STYLE, tts_timeout_seconds:savedTtsConfig?.tts_timeout_seconds ?? 60};
 }
 function assistantDirty() {
   const changed = el("system_prompt").value.trim() !== (savedConfig?.system_prompt || "")
-    || el("tts_model").value !== savedTtsConfig?.tts_model
+    || el("tts_provider").value !== (savedTtsConfig?.tts_provider || "mimo")
+    || selectedSpeechModel() !== savedTtsConfig?.tts_model
     || voiceChoice().tts_voice !== savedTtsConfig?.tts_voice
     || Number(el("tts_rate").value) !== Number(savedTtsConfig?.tts_rate ?? 1)
     || Number(el("tts_pitch").value) !== Number(savedTtsConfig?.tts_pitch ?? 0)
@@ -538,32 +645,110 @@ function syncModelOption() {
   select.value = model;
   el("model").hidden = true;
 }
+function populateSpeechModels(provider) {
+  const select = el("tts_model");
+  const base = provider === "openai" ? OPENAI_TTS_MODELS : provider === "bailian" ? BAILIAN_TTS_MODELS : MIMO_TTS_MODELS;
+  const options = [...base, ...speechModels.filter(m => !base.includes(m))];
+  select.replaceChildren(...options.map(m => new Option(m, m)), new Option("手动填写模型 ID…", MANUAL));
+}
 function setSpeechModel(value) {
   const select = el("tts_model");
-  if (!Array.from(select.options).some(option => option.value === value)) select.append(new Option(value, value));
-  select.value = value;
+  const custom = el("tts_model_custom");
+  if (!value) return;
+  if (Array.from(select.options).some(option => option.value === value && option.value !== MANUAL)) {
+    select.value = value;
+    custom.hidden = true;
+    custom.value = "";
+  } else {
+    select.value = MANUAL;
+    custom.hidden = false;
+    custom.value = value;
+  }
+}
+function setSpeechVoice(value) {
+  const select = el("tts_voice");
+  const custom = el("tts_voice_custom");
+  if (!value) return;
+  if (Array.from(select.options).some(option => option.value === value && option.value !== MANUAL)) {
+    select.value = value;
+    custom.hidden = true;
+    custom.value = "";
+  } else {
+    custom.dataset.pendingValue = value;
+  }
+}
+async function loadBailianTtsVoices() {
+  try {
+    const model = selectedSpeechModel();
+    const data = await request(`/api/voices/qwen?target_model=${encodeURIComponent(model || "qwen3-tts-vc-realtime")}`);
+    bailianTtsVoices = Array.isArray(data.voices) ? data.voices : [];
+  } catch {
+    bailianTtsVoices = [];
+  }
+  renderVoiceOptions();
 }
 function renderVoiceOptions() {
-  // Presets and cloned voices live in the same control but never mix: the model decides.
+  // Presets and cloned voices live in the same control but never mix: the provider & model decide.
   const select = el("tts_voice");
-  const model = el("tts_model").value;
-  const previous = select.value;
-  if (model === CLONE_MODEL) {
+  const custom = el("tts_voice_custom");
+  const provider = el("tts_provider").value;
+  const model = selectedSpeechModel();
+  const previous = custom.dataset.pendingValue || (select.value === MANUAL ? custom.value : select.value);
+  delete custom.dataset.pendingValue;
+  if (provider === "mimo" && model === CLONE_MODEL) {
     if (!clonedVoices.length) {
       select.replaceChildren(new Option("还没有克隆的声音", ""));
       el("delete-clone").hidden = true;
     } else {
       select.replaceChildren(...clonedVoices.map(v => new Option(`${v.name}（${v.kb}KB）`, v.id)));
-      el("delete-clone").hidden = false;
+      if (clonedVoices.some(v => v.id === previous)) select.value = previous;
+      el("delete-clone").hidden = !select.value;
     }
+    custom.hidden = true;
     el("clone-new").hidden = false;
+  } else if (provider === "openai") {
+    select.replaceChildren(...OPENAI_TTS_VOICES.map(v => new Option(v, v)), new Option("自定义音色 ID…", MANUAL));
+    if (previous && !OPENAI_TTS_VOICES.includes(previous)) {
+      select.value = MANUAL; custom.hidden = false; custom.value = previous;
+    } else {
+      if (previous) select.value = previous;
+      custom.hidden = true;
+    }
+    el("clone-new").hidden = true;
+    el("delete-clone").hidden = true;
+  } else if (provider === "bailian") {
+    if (model.startsWith("qwen3-tts-vc-")) {
+      const opts = bailianTtsVoices.map(v => new Option(`${v.name}（百炼复刻）`, v.voice));
+      select.replaceChildren(...(opts.length ? opts : [new Option("填入或复刻音色 ID", "")]), new Option("自定义音色 ID…", MANUAL));
+      if (previous && bailianTtsVoices.some(v => v.voice === previous)) {
+        select.value = previous; custom.hidden = true;
+      } else if (previous) {
+        select.value = MANUAL; custom.hidden = false; custom.value = previous;
+      } else {
+        custom.hidden = select.value !== MANUAL;
+      }
+      el("clone-new").hidden = true;
+      el("delete-clone").hidden = true;
+    } else {
+      select.replaceChildren(...BAILIAN_TTS_VOICES.map(v => new Option(v, v)), new Option("自定义音色 ID…", MANUAL));
+      if (previous && !BAILIAN_TTS_VOICES.includes(previous)) {
+        select.value = MANUAL; custom.hidden = false; custom.value = previous;
+      } else {
+        if (previous) select.value = previous;
+        custom.hidden = true;
+      }
+      el("clone-new").hidden = true;
+      el("delete-clone").hidden = true;
+    }
   } else {
     select.replaceChildren(...PRESET_VOICES.map(v => new Option(v === "mimo_default" ? "默认" : v, v)));
     if (PRESET_VOICES.includes(previous)) select.value = previous;
+    custom.hidden = true;
     el("clone-new").hidden = true;
     el("delete-clone").hidden = true;
   }
-  el("tts_voice").hidden = model === VOICEDESIGN_MODEL;
+  el("tts_voice").hidden = provider === "mimo" && model === VOICEDESIGN_MODEL;
+  if (el("tts_voice").hidden) custom.hidden = true;
 }
 async function loadVoices() {
   try {
@@ -591,16 +776,24 @@ function renderConnectionStatus() {
   const connected = savedConfig?.api_key_configured;
   el("connection-summary").textContent = connected ? "已接入" : "未配置";
   el("speech-api-state").textContent = savedTtsConfig?.api_key_configured ? "已接入" : "未配置";
+  el("asr-api-state").textContent = savedConfig?.asr_provider === "local" ? "本地识别" : (savedConfig?.asr_key_configured ? "已接入" : "未配置");
   const missing = [];
   if (savedConfig?.voice_mode !== "realtime" && !savedConfig?.api_key_configured) missing.push("文字");
   if (savedConfig?.voice_mode === "realtime" ? !savedConfig.rt_key_configured : !savedTtsConfig?.api_key_configured) missing.push("语音");
+  if (savedConfig?.voice_mode !== "realtime" && savedConfig?.asr_provider !== "local" && !savedConfig?.asr_key_configured) missing.push("识别");
   let hint;
   if (missing.length) hint = `${missing.join("、")}服务尚未接入，请到「API接入」填写`;
   else hint = savedConfig.voice_mode === "realtime" ? savedConfig.rt_model : `${savedConfig.model || "未选择"} · ${savedTtsConfig.tts_model}`;
   document.querySelectorAll(".model-hint").forEach(node => { node.textContent = hint; });
 }
 function applyConfig(data, preserve = false) {
-  for (const id of ["voice_mode","rt_provider","rt_endpoint","rt_workspace","rt_model","rt_voice"]) el(id).value = data[id];
+  if (data.voice_profiles) voiceProfiles = data.voice_profiles;
+  for (const id of ["voice_mode","rt_provider","rt_endpoint","rt_workspace","rt_model","rt_voice","rt_asr_model","asr_provider","asr_model","asr_language"]) el(id).value = data[id] ?? "";
+  el("asr_base_url").value = data.asr_base_url || "";
+  el("asr_api_key").value = ""; el("asr_api_key").type = "password";
+  el("asr-show-key").textContent = "显示"; el("asr-show-key").setAttribute("aria-pressed", "false");
+  el("asr_api_key").placeholder = data.asr_separate_key_configured ? "已保存，留空保留" : "输入识别服务密钥";
+  el("asr-separate-service").checked = !data.asr_use_text_connection;
   el("rt-fields").hidden = data.voice_mode !== "realtime";
   el("rt_api_key").value = ""; el("rt_api_key").placeholder = data.rt_key_configured ? "已保存，留空保留" : "输入百炼 API Key";
   const model = el("model").value;
@@ -625,13 +818,15 @@ function usageText(data) {
   return `输入 ${usage?.prompt_tokens ?? "未知"} · 输出 ${usage?.completion_tokens ?? "未知"} · 合计 ${usage?.total_tokens ?? "未知"} Token\n估算费用：${data.estimated_cost === null ? "未知（未配置价格或用量缺失）" : `${data.estimated_cost} ${data.currency}`}`;
 }
 function ttsPayload() {
-  const {tts_model, tts_voice, tts_instruction, tts_rate, tts_pitch} = assistantPayload();
-  return {tts_base_url: savedTtsConfig?.tts_base_url || savedConfig?.base_url || "",
+  const {tts_provider, tts_model, tts_voice, tts_instruction, tts_rate, tts_pitch} = assistantPayload();
+  return {tts_provider, tts_base_url: savedTtsConfig?.tts_base_url || savedConfig?.base_url || "",
     tts_model, tts_voice, tts_instruction, tts_rate, tts_pitch,
     tts_timeout_seconds:savedTtsConfig?.tts_timeout_seconds ?? 60};
 }
 function updateTtsMode() {
-  el("tts_voice").hidden = el("tts_model").value === "mimo-v2.5-tts-voicedesign";
+  const design = el("tts_provider").value === "mimo" && selectedSpeechModel() === "mimo-v2.5-tts-voicedesign";
+  el("tts_voice").hidden = design;
+  if (design) el("tts_voice_custom").hidden = true;
 }
 function clearTtsAudio() {
   el("tts-audio").pause(); el("tts-audio").removeAttribute("src"); el("tts-audio").load(); el("tts-audio").hidden = true;
@@ -641,13 +836,16 @@ function clearTtsAudio() {
 function stopTtsPreview() { ttsController?.abort(); clearTtsAudio(); }
 function applyTtsConfig(data, preserve = false) {
   savedTtsConfig = data;
-  for (const id of ttsIds) {
-    if (preserve && ["tts_model", "tts_voice"].includes(id)) continue;
-    if (id === "tts_model") setSpeechModel(data.tts_model); else el(id).value = data[id];
+  if (data.voice_profiles) voiceProfiles = data.voice_profiles;
+  const provider = data.tts_provider || "mimo";
+  if (!preserve) {
+    el("tts_provider").value = provider;
+    populateSpeechModels(provider);
+    setSpeechModel(data.tts_model);
+    setSpeechVoice(data.tts_voice);
   }
   renderVoiceOptions();
-  if (!preserve && data.tts_model === CLONE_MODEL) {
-    // The saved voice is identified by id; a stale id falls back to the first available.
+  if (!preserve && provider === "mimo" && data.tts_model === CLONE_MODEL) {
     const saved = data.tts_voice || "";
     if (clonedVoices.some(v => v.id === saved)) el("tts_voice").value = saved;
   }
@@ -659,6 +857,7 @@ function applyTtsConfig(data, preserve = false) {
   updateConnectionMode();
   el("tts-show-key").textContent = "显示"; el("tts-show-key").setAttribute("aria-pressed", "false");
   updateTtsMode(); assistantDirty(); renderConnectionStatus(); savedFingerprint = fingerprint(); dirty();
+  if (!preserve && provider === "bailian") loadBailianTtsVoices();
 }
 function stopRealtimeSample() {
   realtimePreviewController?.abort();
@@ -822,11 +1021,24 @@ function updateConnectionMode() {
   el("rt-fields").hidden = !rt;
   el("rt-custom-row").hidden = el("rt_provider").value !== "compatible";
   el("rt-workspace-row").hidden = !el("rt-custom-row").hidden;
-  el("tts-separate-service").closest(".api-service-choice").hidden = rt;
-  const separate = !rt && el("tts-separate-service").checked;
+  const asrLocal = el("asr_provider").value === "local";
+  el("asr-model-row").hidden = asrLocal;
+  el("asr-lang-row").hidden = asrLocal;
+  el("asr-separate-choice").hidden = asrLocal;
+  const asrSeparate = !rt && !asrLocal && el("asr-separate-service").checked;
+  el("asr-separate-fields").hidden = !asrSeparate;
+  el("asr-shared-note").hidden = asrSeparate || asrLocal;
+  for (const id of ["asr_base_url", "asr_api_key", "asr-show-key"]) el(id).disabled = !asrSeparate;
+  const ttsBailian = el("tts_provider").value === "bailian";
+  el("tts-separate-service").closest(".api-service-choice").hidden = rt || ttsBailian;
+  const separate = !rt && !ttsBailian && el("tts-separate-service").checked;
   el("tts-separate-fields").hidden = !separate; el("shared-service-note").hidden = separate;
   for (const id of ["tts_base_url", "tts_api_key", "tts-show-key"]) el(id).disabled = !separate;
 }
+el("asr-show-key").addEventListener("click", () => {
+  const show = el("asr_api_key").type === "password"; el("asr_api_key").type = show ? "text" : "password";
+  el("asr-show-key").textContent = show ? "隐藏" : "显示"; el("asr-show-key").setAttribute("aria-pressed", String(show));
+});
 el("tts-show-key").addEventListener("click", () => {
   const show = el("tts_api_key").type === "password"; el("tts_api_key").type = show ? "text" : "password";
   el("tts-show-key").textContent = show ? "隐藏" : "显示"; el("tts-show-key").setAttribute("aria-pressed", String(show));
@@ -853,10 +1065,12 @@ el("assistant-form").addEventListener("invalid", event => {
 }, true);
 el("assistant-form").addEventListener("submit", async event => {
   event.preventDefault(); if (ttsBusy || state.busy) return;
+  if (!confirmVoiceSchemeChange(el("voice_mode").value, el("rt_provider").value, el("rt_model").value.trim(), el("tts_provider").value, selectedSpeechModel())) return;
   ttsBusy = true; refreshControls();
   try {
     const data = await request("/api/settings/assistant", "PUT", {...assistantPayload(), model:savedConfig.model});
     savedConfig = data.text; savedTtsConfig = data.tts; state.configured = data.text.configured;
+    if (data.text.voice_profiles) voiceProfiles = data.text.voice_profiles;
     // Volume belongs to the device record, so it is saved separately from the voice config.
     const volume = Number(el("device-volume").value);
     if (!deviceData) await loadDevices();
@@ -894,8 +1108,22 @@ el("tts-preview").addEventListener("click", async () => {
 });
 el("tts-cancel").addEventListener("click", stopTtsPreview);
 // Model selection swaps the voice list between presets and cloned voices.
-el("tts_model").addEventListener("change", () => { renderVoiceOptions(); assistantDirty(); dirty(); });
-el("tts_voice").addEventListener("change", () => { el("delete-clone").hidden = el("tts_model").value !== CLONE_MODEL || !el("tts_voice").value; assistantDirty(); dirty(); });
+el("tts_model").addEventListener("change", () => {
+  el("tts_model_custom").hidden = el("tts_model").value !== MANUAL;
+  if (el("tts_model").value === MANUAL) el("tts_model_custom").focus();
+  restoreSavedProfileForCurrentTarget("tts");
+  assistantDirty(); dirty();
+});
+el("tts_model_custom").addEventListener("input", () => {
+  renderVoiceOptions(); assistantDirty(); dirty();
+});
+el("tts_voice").addEventListener("change", () => {
+  el("tts_voice_custom").hidden = el("tts_voice").value !== MANUAL;
+  if (el("tts_voice").value === MANUAL) el("tts_voice_custom").focus();
+  el("delete-clone").hidden = el("tts_provider").value !== "mimo" || selectedSpeechModel() !== CLONE_MODEL || !el("tts_voice").value;
+  assistantDirty(); dirty();
+});
+el("tts_voice_custom").addEventListener("input", () => { assistantDirty(); dirty(); });
 ["tts_rate", "tts_pitch"].forEach(id => el(id).addEventListener("input", () => { applyTuning(); assistantDirty(); }));
 el("device-volume").addEventListener("input", () => {applyTuning(); assistantDirty(); el("volume-status").textContent = "";});
 el("tuning-reset").addEventListener("click", () => {resetTuning(); assistantDirty();});
@@ -935,7 +1163,9 @@ el("clone-form").addEventListener("submit", async event => {
     if (!response.ok) throw new Error(data?.detail?.message || "克隆失败。");
     el("clone-status").textContent = `已生成「${data.name}」，样本 ${data.kb}KB。可以在音色里选中并试听。`;
     await loadVoices();
-    el("tts_model").value = CLONE_MODEL;
+    el("tts_provider").value = "mimo";
+    populateSpeechModels("mimo");
+    setSpeechModel(CLONE_MODEL);
     renderVoiceOptions();
     el("tts_voice").value = data.id;
     el("delete-clone").hidden = false;
@@ -946,8 +1176,8 @@ el("clone-form").addEventListener("submit", async event => {
   } finally { submit.disabled = false; }
 });
 el("delete-clone").addEventListener("click", async () => {
-  const id = el("tts_voice").value;
-  if (el("tts_model").value !== CLONE_MODEL || !id) return;
+  const id = selectedSpeechVoice();
+  if (el("tts_provider").value !== "mimo" || selectedSpeechModel() !== CLONE_MODEL || !id) return;
   if (!confirm("删除这个克隆的声音？已保存的参考音频也会被移除。")) return;
   try {
     await request(`/api/voices/${encodeURIComponent(id)}`, "DELETE");
@@ -995,11 +1225,9 @@ async function refreshModelChoices() {
   finally { busy(false); }
 }
 function renderSpeechOptions(models) {
-  const current = el("tts_model").value;
-  const options = [...models];
-  if (current && !options.includes(current)) options.push(current);
-  el("tts_model").replaceChildren(...options.map(model => new Option(model, model)));
-  el("tts_model").value = current;
+  const current = selectedSpeechModel();
+  populateSpeechModels(el("tts_provider").value);
+  setSpeechModel(current);
 }
 async function refreshSpeechModels(silent = false) {
   if (state.busy || !state.loaded || !savedConfig) return;
@@ -1019,10 +1247,14 @@ async function refreshSpeechModels(silent = false) {
 el("fetch-models").addEventListener("click", refreshModelChoices);
 el("fetch-speech-models").addEventListener("click", () => refreshSpeechModels());
 el("config-form").addEventListener("submit", async event => {
-  event.preventDefault(); if (state.busy || ttsBusy) return; busy(true);
+  event.preventDefault(); if (state.busy || ttsBusy) return;
+  const rt = realtimePayload();
+  const speechModel = selectedSpeechModel();
+  if (!confirmVoiceSchemeChange(rt.voice_mode, rt.rt_provider, rt.rt_model, el("tts_provider").value, speechModel)) return;
+  busy(true);
   try {
-    const data = await request("/api/settings/api", "PUT", {...connectionPayload(), ...realtimePayload(),
-      model:el("model").value.trim(), tts_model:el("tts_model").value, tts_voice:el("tts_voice").value});
+    const data = await request("/api/settings/api", "PUT", {...connectionPayload(), ...rt,
+      model:el("model").value.trim(), tts_model:speechModel, tts_voice:voiceChoice().tts_voice});
     applyConfig(data.text, true); applyTtsConfig(data.tts, true); stopTtsPreview(); el("test-panel").hidden = true;
     closeSettings(); notice("配置已保存。", "success");
   } catch (error) { notice(error.message, "error"); } finally { busy(false); }
@@ -2201,11 +2433,14 @@ function insightControls(kind) {
   const panel = insightState[kind];
   el(`insights-${kind}-prev`).disabled = panel.loading || panel.offset === 0;
   el(`insights-${kind}-next`).disabled = panel.loading || panel.offset + INSIGHT_PAGE >= panel.total;
-  el("insights-refresh").disabled = insightState.kb.loading || insightState.tools.loading;
+  el("insights-refresh").disabled = insightState.kb.loading || insightState.tools.loading || insightState.traces.loading;
   el(`insights-${kind}`).setAttribute("aria-busy",String(panel.loading));
-  let filtersMatch = false;
-  try {filtersMatch = JSON.stringify(panel.filters) === JSON.stringify(insightFilterValues(kind));} catch {}
-  el(`insights-${kind}-clear`).disabled = panel.loading || panel.total === 0 || !filtersMatch || Object.keys(panel.filters).length === 0;
+  const clearBtn = el(`insights-${kind}-clear`);
+  if (clearBtn) {
+    let filtersMatch = false;
+    try {filtersMatch = JSON.stringify(panel.filters) === JSON.stringify(insightFilterValues(kind));} catch {}
+    clearBtn.disabled = panel.loading || panel.total === 0 || !filtersMatch || Object.keys(panel.filters).length === 0;
+  }
 }
 function insightTime(value) {
   if (!value) return "时间未提供";
@@ -2227,19 +2462,37 @@ function renderInsightRecords(kind, data) {
   el(`insights-${kind}-meta`).textContent = `共 ${data.total} 条`;
   el(`insights-${kind}-page`).textContent = data.items.length ? `${panel.offset + 1}–${panel.offset + data.items.length} 条` : "";
   if (!data.items.length) {area.append(node("p","insight-empty",panel.offset ? "本页已无记录，请返回上一页或刷新。" : insightFiltersActive(kind) ? "没有匹配的记录，试试调整搜索或筛选条件。" : "尚无记录。实际问答或调用后可在这里查看。")); return;}
-  const statusLabels = {ok:"成功",empty:"未命中",error:"失败",unavailable:"不可用",not_requested:"未调用",cancelled:"已取消",failed:"执行失败",interrupted:"已打断"};
+  const statusLabels = {complete:"成功",ok:"成功",empty:"未命中",error:"失败",unavailable:"不可用",not_requested:"未调用",cancelled:"已取消",failed:"执行失败",interrupted:"已打断"};
+  const sourceLabels = {text:"文字",voice:"网页语音",device:"硬件设备"};
   const table = node("table","insight-table"), head = node("thead"), hr = node("tr"), body = node("tbody");
-  for (const label of kind === "kb" ? ["问题","回答类型","得到的答案","时间","操作"] : ["工具","状态","请求摘要","耗时","时间","操作"]) {const th = node("th","",label); th.scope = "col"; hr.append(th);}
+  const columns = kind === "kb"
+    ? ["问题","回答类型","得到的答案","时间","操作"]
+    : kind === "tools"
+      ? ["工具","状态","请求摘要","耗时","时间","操作"]
+      : ["渠道/模式","模型 / ASR / TTS","问题","状态","耗时","时间","操作"];
+  for (const label of columns) {const th = node("th","",label); th.scope = "col"; hr.append(th);}
   head.append(hr); table.append(head,body);
   for (const item of data.items) {
     const tr = node("tr","insight-row"), time = node("time","small-note",insightTime(item.ts));
     const detail = node("div","insight-row-actions");
-    const view = capabilityButton("详情",() => openInsightDetail(kind,item.id));
+    const itemId = kind === "traces" ? item.trace_id : item.id;
+    const view = capabilityButton("详情",() => openInsightDetail(kind, itemId));
     const remove = node("button","icon-button insight-remove"); remove.type = "button"; remove.append(icon("trash"));
-    remove.setAttribute("aria-label",`删除${kind === "kb" ? "知识库" : "API"}记录 ${item.id}`); remove.title = "删除记录";
-    remove.addEventListener("click",() => openInsightDelete(kind,item)); detail.append(view,remove);
-    if (kind === "kb") tr.append(insightEllipsisCell(item.question ?? item.query_summary ?? "未记录"),insightTableTag(insightAnswerType(item.answer_type),"type"),insightEllipsisCell(item.answer || "暂无生成回答"),insightTableNode(time),insightTableNode(detail));
-    else {const status = node("span","insight-status",statusLabels[item.status] || item.status || "未提供"); status.dataset.state = item.status || "unknown"; tr.append(insightEllipsisCell(item.tool_name || "未提供"),insightTableNode(status),insightEllipsisCell(item.query_summary || "未提供"),insightTableCell(insightNumber(item.elapsed_ms," ms")),insightTableNode(time),insightTableNode(detail));}
+    remove.setAttribute("aria-label",`删除${kind === "kb" ? "知识库" : kind === "tools" ? "API" : "追踪"}记录 ${itemId}`); remove.title = "删除记录";
+    const delTarget = kind === "traces" ? {...item, id: item.trace_id, question: item.user_text || item.trace_id} : item;
+    remove.addEventListener("click",() => openInsightDelete(kind, delTarget)); detail.append(view,remove);
+    if (kind === "kb") {
+      tr.append(insightEllipsisCell(item.question ?? item.query_summary ?? "未记录"),insightTableTag(insightAnswerType(item.answer_type),"type"),insightEllipsisCell(item.answer || "暂无生成回答"),insightTableNode(time),insightTableNode(detail));
+    } else if (kind === "tools") {
+      const status = node("span","insight-status",statusLabels[item.status] || item.status || "未提供"); status.dataset.state = item.status || "unknown";
+      tr.append(insightEllipsisCell(item.tool_name || "未提供"),insightTableNode(status),insightEllipsisCell(item.query_summary || "未提供"),insightTableCell(insightNumber(item.elapsed_ms," ms")),insightTableNode(time),insightTableNode(detail));
+    } else {
+      const status = node("span","insight-status",statusLabels[item.status] || item.status || "未提供"); status.dataset.state = item.status || "unknown";
+      const channel = `${sourceLabels[item.source] || item.source || "未记录"} · ${item.voice_mode || "pipeline"}`;
+      const stack = [item.model || null, item.asr_provider ? `ASR:${item.asr_provider}` : null, item.tts_provider ? `TTS:${item.tts_provider}` : null].filter(Boolean).join(" · ") || "未提供";
+      const latency = item.first_audio_ms != null ? `${item.first_audio_ms} / ${insightNumber(item.elapsed_ms," ms")}` : insightNumber(item.elapsed_ms," ms");
+      tr.append(insightTableCell(channel),insightEllipsisCell(stack),insightEllipsisCell(item.user_text || "未记录"),insightTableNode(status),insightTableCell(latency),insightTableNode(time),insightTableNode(detail));
+    }
     body.append(tr);
   }
   area.append(table);
@@ -2265,8 +2518,49 @@ async function openInsightDetail(kind, id) {
   hideInsightTooltip();
   el("insights-list-view").hidden = true; el("insights-detail-view").hidden = false;
   el("insights-detail-meta").textContent = ""; el("insights-detail").replaceChildren(node("p","insight-empty","正在加载详情…"));
-  try {const data = await request(`/api/insights/${kind}/${encodeURIComponent(id)}`); insightDetailState.kind = kind; insightDetailState.item = data; renderInsightDetail(data);}
+  try {
+    const data = await request(`/api/insights/${kind}/${encodeURIComponent(id)}`);
+    insightDetailState.kind = kind; insightDetailState.item = data;
+    if (kind === "traces") renderTraceDetail(data);
+    else renderInsightDetail(data);
+  }
   catch (error) {el("insights-detail").replaceChildren(node("p","insight-error",error.status === 404 ? "未找到该记录，或详情接口尚未加载。" : `详情加载失败：${error.message}`));}
+}
+function renderTraceDetail(item) {
+  const area = el("insights-detail"); area.replaceChildren();
+  el("insights-detail-meta").textContent = `${insightTime(item.ts)} · Turn ${item.trace_id}`;
+  const head = node("div","insight-detail-head");
+  head.append(node("h2","",item.user_text || "（无用户输入文本）"));
+  const meta = node("div","insight-detail-tags");
+  meta.append(node("span","insight-tag",`${item.source || "text"} · ${item.voice_mode || "pipeline"}`));
+  meta.append(node("span","insight-tag",item.status || "未记录"));
+  if (item.model) meta.append(node("span","insight-tag",`${item.provider || ""} ${item.model}`.trim()));
+  if (item.asr_provider) meta.append(node("span","insight-tag",`ASR: ${item.asr_provider}`));
+  if (item.tts_provider) meta.append(node("span","insight-tag",`TTS: ${item.tts_provider}`));
+  if (item.first_audio_ms != null) meta.append(node("span","small-note",`首包 ${item.first_audio_ms} ms`));
+  meta.append(node("span","small-note",`总耗时 ${insightNumber(item.elapsed_ms," ms")}`));
+  if (item.total_tokens != null) meta.append(node("span","small-note",`Tokens ${item.total_tokens}`));
+  if (item.error_code) meta.append(node("span","insight-tag",`错误 ${item.error_code}`));
+  head.append(meta); area.append(head);
+  const summaryCard = node("div","insight-answer-card");
+  summaryCard.append(node("h3","","助手回复"),node("p","insight-answer-text",item.reply_text || "暂无回复正文。"));
+  area.append(summaryCard);
+  const tools = item.tool_calls || [];
+  const toolBox = node("div","insight-answer-card");
+  toolBox.append(node("h3","",`工具调用摘要（${tools.length}）`));
+  if (!tools.length) toolBox.append(node("p","small-note","本轮未调用工具。"));
+  else toolBox.append(node("pre","insight-json",insightJson(tools)));
+  area.append(toolBox);
+  const audits = item.audits || [];
+  const auditBox = node("div","insight-answer-card");
+  auditBox.append(node("h3","",`关联知识库与工具审计（${audits.length}）`));
+  if (!audits.length) auditBox.append(node("p","small-note","本轮无关联 KB / API 审计细节。"));
+  for (const audit of audits) {
+    const det = node("details");
+    det.append(node("summary","",`${audit.surface} · ${audit.tool_name || "-"} · ${audit.status || "-"} (${insightNumber(audit.elapsed_ms," ms")})`),node("pre","insight-json",insightJson(audit)));
+    auditBox.append(det);
+  }
+  area.append(auditBox);
 }
 function renderInsightDetail(item) {
   const area = el("insights-detail"), kind = insightDetailState.kind; area.replaceChildren();
@@ -2328,7 +2622,8 @@ function insightFilterValues(kind) {
   const values = {}, q = el(`insights-${kind}-q`).value.trim();
   if (q) values.q = q;
   if (kind === "kb") {const type = el("insights-kb-type").value; if (type) values.answer_type = type;}
-  else {const status = el("insights-tools-status").value; if (status) values.status = status; const name = el("insights-tools-name").value.trim(); if (name) values.tool_name = name;}
+  else if (kind === "tools") {const status = el("insights-tools-status").value; if (status) values.status = status; const name = el("insights-tools-name").value.trim(); if (name) values.tool_name = name;}
+  else {const source = el("insights-traces-source").value; if (source) values.source = source; const status = el("insights-traces-status").value; if (status) values.status = status;}
   const since = el(`insights-${kind}-since`).value, until = el(`insights-${kind}-until`).value;
   if (since && until && since > until) throw new Error("起始日期不能晚于结束日期。");
   if (since) values.since = new Date(`${since}T00:00:00`).toISOString();
@@ -2358,23 +2653,22 @@ async function loadInsightRecords(kind, offset = 0) {
   } finally {if (id === panel.requestId) {panel.loading = false; panel.controller = null; insightControls(kind);}}
 }
 async function loadInsights() {
-  insightNotice(); await Promise.allSettled([loadInsightRecords("kb"),loadInsightRecords("tools")]);
+  insightNotice(); await Promise.allSettled([loadInsightRecords("kb"),loadInsightRecords("tools"),loadInsightRecords("traces")]);
 }
-for (const kind of ["kb","tools"]) {
+for (const kind of ["kb","tools","traces"]) {
   el(`insights-${kind}-prev`).addEventListener("click",() => loadInsightRecords(kind,Math.max(0,insightState[kind].offset - INSIGHT_PAGE)));
   el(`insights-${kind}-next`).addEventListener("click",() => loadInsightRecords(kind,insightState[kind].offset + INSIGHT_PAGE));
 }
 el("insights-refresh").addEventListener("click",loadInsights);
 let insightActiveTab = "kb", insightTipTimer = null;
 function showInsightTab(tab) {
-  insightActiveTab = tab === "tools" ? "tools" : "kb";
-  const kb = insightActiveTab === "kb";
-  el("insights-panel-kb").hidden = !kb;
-  el("insights-panel-tools").hidden = kb;
-  el("insights-tab-kb").setAttribute("aria-selected",String(kb));
-  el("insights-tab-tools").setAttribute("aria-selected",String(!kb));
-  el("insights-tab-kb").tabIndex = kb ? 0 : -1;
-  el("insights-tab-tools").tabIndex = kb ? -1 : 0;
+  insightActiveTab = ["kb","tools","traces"].includes(tab) ? tab : "kb";
+  for (const key of ["kb","tools","traces"]) {
+    const active = insightActiveTab === key;
+    el(`insights-panel-${key}`).hidden = !active;
+    el(`insights-tab-${key}`).setAttribute("aria-selected",String(active));
+    el(`insights-tab-${key}`).tabIndex = active ? 0 : -1;
+  }
   hideInsightTooltip();
 }
 function insightTooltip() {
@@ -2405,12 +2699,16 @@ function showInsightTooltip(node) {
 function insightTipSource(target) {return target instanceof Element ? target.closest(".insight-truncate,.insight-hint") : null;}
 el("insights-tab-kb").addEventListener("click",() => showInsightTab("kb"));
 el("insights-tab-tools").addEventListener("click",() => showInsightTab("tools"));
+el("insights-tab-traces").addEventListener("click",() => showInsightTab("traces"));
 el("insights-view").addEventListener("keydown",event => {
   if (!event.target.classList || !event.target.classList.contains("insight-tab")) return;
   if (!["ArrowLeft","ArrowRight","Home","End"].includes(event.key)) return;
   event.preventDefault();
-  const next = event.key === "ArrowLeft" || event.key === "Home" ? "kb" : "tools";
-  showInsightTab(next); el(next === "kb" ? "insights-tab-kb" : "insights-tab-tools").focus();
+  const order = ["kb","tools","traces"];
+  const idx = order.indexOf(insightActiveTab);
+  const next = event.key === "Home" ? "kb" : event.key === "End" ? "traces"
+    : order[(idx + (event.key === "ArrowLeft" ? order.length - 1 : 1)) % order.length];
+  showInsightTab(next); el(`insights-tab-${next}`).focus();
 });
 el("insights-view").addEventListener("pointerover",event => {const node = insightTipSource(event.target); if (node) showInsightTooltip(node);});
 el("insights-view").addEventListener("pointerout",event => {const node = insightTipSource(event.target); if (!node) return; const tip = document.getElementById("insight-tooltip"); if (tip && event.relatedTarget && tip.contains(event.relatedTarget)) return; insightTipTimer = setTimeout(hideInsightTooltip,120);});
@@ -2421,15 +2719,19 @@ window.addEventListener("resize",hideInsightTooltip);
 document.addEventListener("scroll",event => {const tip = document.getElementById("insight-tooltip"); if (!tip?.contains(event.target)) hideInsightTooltip();},true);
 document.addEventListener("keydown",event => {const tip = document.getElementById("insight-tooltip"); if (event.key === "Escape" && tip && !tip.hidden) {hideInsightTooltip(); event.preventDefault(); event.stopPropagation();}},true);
 showInsightTab("kb");
-for (const kind of ["kb","tools"]) {
+for (const kind of ["kb","tools","traces"]) {
   const panel = insightState[kind], search = el(`insights-${kind}-q`);
   const schedule = event => {if (event.isComposing) return; clearTimeout(panel.searchTimer); panel.searchTimer = setTimeout(() => loadInsightRecords(kind,0),300); insightControls(kind);};
-  const controls = kind === "kb" ? ["insights-kb-type","insights-kb-since","insights-kb-until"] : ["insights-tools-status","insights-tools-name","insights-tools-since","insights-tools-until"];
+  const controls = kind === "kb"
+    ? ["insights-kb-type","insights-kb-since","insights-kb-until"]
+    : kind === "tools"
+      ? ["insights-tools-status","insights-tools-name","insights-tools-since","insights-tools-until"]
+      : ["insights-traces-source","insights-traces-status","insights-traces-since","insights-traces-until"];
   search.addEventListener("input",schedule); search.addEventListener("compositionend",schedule);
   search.addEventListener("keydown",event => {if (event.key === "Enter" && !event.isComposing) {event.preventDefault(); loadInsightRecords(kind,0);}});
   for (const id of controls) el(id).addEventListener(id.endsWith("-name") ? "input" : "change",id.endsWith("-name") ? schedule : () => loadInsightRecords(kind,0));
   el(`insights-${kind}-reset`).addEventListener("click",() => {search.value = ""; for (const id of controls) el(id).value = ""; loadInsightRecords(kind,0);});
-  el(`insights-${kind}-clear`).addEventListener("click",() => openInsightDelete(kind));
+  el(`insights-${kind}-clear`)?.addEventListener("click",() => openInsightDelete(kind));
 }
 async function openInsightDelete(kind, item = null) {
   hideInsightTooltip();
@@ -2437,7 +2739,7 @@ async function openInsightDelete(kind, item = null) {
   if (!item && (!Object.keys(filters).length || panel.loading || !panel.total)) return;
   const pending = {kind,id:item?.id ?? null,filters,total:item ? 1 : 0,busy:false,ready:false};
   insightDeleteState = pending;
-  const label = kind === "kb" ? "知识库记录" : "API记录";
+  const label = kind === "kb" ? "知识库记录" : kind === "tools" ? "API记录" : "追踪记录";
   el("insight-delete-title").textContent = item ? `删除${label}` : `清空筛选的${label}`;
   el("insight-delete-count").textContent = item ? "将删除 1 条记录" : "正在确认匹配数量…";
   el("insight-delete-status").textContent = ""; el("insight-delete-confirm").disabled = true;

@@ -101,6 +101,18 @@ class AuditStore:
                     answer_type TEXT NOT NULL, snapshots TEXT NOT NULL, calls TEXT NOT NULL,
                     parse_errors TEXT NOT NULL, turn_id TEXT, call_id TEXT, source TEXT
                 );
+                CREATE TABLE IF NOT EXISTS turn_traces (
+                    trace_id TEXT PRIMARY KEY, ts TEXT NOT NULL, session_id TEXT,
+                    source TEXT NOT NULL, voice_mode TEXT NOT NULL, provider TEXT NOT NULL DEFAULT '',
+                    model TEXT NOT NULL DEFAULT '', asr_provider TEXT, tts_provider TEXT,
+                    user_text TEXT, reply_text TEXT, status TEXT NOT NULL,
+                    audio_status TEXT, error_code TEXT, elapsed_ms INTEGER NOT NULL DEFAULT 0,
+                    first_audio_ms INTEGER, prompt_tokens INTEGER, completion_tokens INTEGER,
+                    total_tokens INTEGER, estimated_cost TEXT, currency TEXT,
+                    tool_calls TEXT NOT NULL DEFAULT '[]'
+                );
+                CREATE INDEX IF NOT EXISTS idx_turn_traces_ts ON turn_traces(ts DESC);
+                CREATE INDEX IF NOT EXISTS idx_audit_details_turn ON kb_audit_details(turn_id);
             """)
         except Exception:
             connection.close()
@@ -252,3 +264,170 @@ class AuditStore:
                 VALUES(?,?,'retrieval_only','[]','[]','[]')
                 ON CONFLICT(audit_id) DO UPDATE SET correct_answer=excluded.correct_answer""", (audit_id, safe))
         return self.detail(audit_id, "kb_search")
+
+    def record_trace(
+        self,
+        *,
+        trace_id: str,
+        session_id: str | None = None,
+        source: str = "text",
+        voice_mode: str = "pipeline",
+        provider: str = "",
+        model: str = "",
+        asr_provider: str | None = None,
+        tts_provider: str | None = None,
+        user_text: str | None = None,
+        reply_text: str | None = None,
+        status: str = "complete",
+        audio_status: str | None = None,
+        error_code: str | None = None,
+        elapsed_ms: int = 0,
+        first_audio_ms: int | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
+        estimated_cost: str | None = None,
+        currency: str | None = None,
+        tool_calls: list[dict] | None = None,
+        secrets=(),
+    ) -> str:
+        safe_user_val = redact_value(user_text, secrets) if isinstance(user_text, str) else None
+        safe_reply_val = redact_value(reply_text, secrets) if isinstance(reply_text, str) else None
+        safe_calls_val = redact_value(tool_calls or [], secrets)
+        safe_user = safe_user_val[:4000] if isinstance(safe_user_val, str) else None
+        safe_reply = safe_reply_val[:32000] if isinstance(safe_reply_val, str) else None
+        safe_calls = safe_calls_val if isinstance(safe_calls_val, list) else []
+        with closing(self._connect()) as connection, connection:
+            connection.execute(
+                """
+                INSERT INTO turn_traces (
+                    trace_id, ts, session_id, source, voice_mode, provider, model,
+                    asr_provider, tts_provider, user_text, reply_text, status, audio_status,
+                    error_code, elapsed_ms, first_audio_ms, prompt_tokens, completion_tokens,
+                    total_tokens, estimated_cost, currency, tool_calls
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(trace_id) DO UPDATE SET
+                    ts = excluded.ts,
+                    provider = excluded.provider,
+                    model = excluded.model,
+                    asr_provider = excluded.asr_provider,
+                    tts_provider = excluded.tts_provider,
+                    user_text = COALESCE(excluded.user_text, turn_traces.user_text),
+                    reply_text = COALESCE(excluded.reply_text, turn_traces.reply_text),
+                    status = excluded.status,
+                    audio_status = COALESCE(excluded.audio_status, turn_traces.audio_status),
+                    error_code = excluded.error_code,
+                    elapsed_ms = excluded.elapsed_ms,
+                    first_audio_ms = COALESCE(excluded.first_audio_ms, turn_traces.first_audio_ms),
+                    prompt_tokens = COALESCE(excluded.prompt_tokens, turn_traces.prompt_tokens),
+                    completion_tokens = COALESCE(excluded.completion_tokens, turn_traces.completion_tokens),
+                    total_tokens = COALESCE(excluded.total_tokens, turn_traces.total_tokens),
+                    estimated_cost = COALESCE(excluded.estimated_cost, turn_traces.estimated_cost),
+                    currency = COALESCE(excluded.currency, turn_traces.currency),
+                    tool_calls = excluded.tool_calls
+                """,
+                (
+                    trace_id,
+                    datetime.now(timezone.utc).isoformat(),
+                    session_id,
+                    source,
+                    voice_mode,
+                    provider,
+                    model,
+                    asr_provider,
+                    tts_provider,
+                    safe_user,
+                    safe_reply,
+                    status,
+                    audio_status,
+                    error_code,
+                    int(elapsed_ms),
+                    first_audio_ms,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    estimated_cost,
+                    currency,
+                    json.dumps(safe_calls, ensure_ascii=False),
+                ),
+            )
+        return trace_id
+
+    @staticmethod
+    def _public_trace(row) -> dict:
+        item = dict(row)
+        item["tool_calls"] = json.loads(item.get("tool_calls") or "[]")
+        return item
+
+    def list_traces(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        q: str = "",
+        source: str | None = None,
+        status: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> dict:
+        clauses = ["1=1"]
+        params: list = []
+        needle = (q or "").strip()
+        if needle:
+            escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            like = "%" + escaped + "%"
+            clauses.append("(user_text LIKE ? ESCAPE '\\' OR reply_text LIKE ? ESCAPE '\\' OR model LIKE ? ESCAPE '\\')")
+            params.extend([like, like, like])
+        if source:
+            clauses.append("source = ?")
+            params.append(source)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        since_value = _normalize_time(since, end=False)
+        until_value = _normalize_time(until, end=True)
+        if since_value:
+            clauses.append("ts >= ?")
+            params.append(since_value)
+        if until_value:
+            clauses.append("ts <= ?")
+            params.append(until_value)
+        where = " FROM turn_traces WHERE " + " AND ".join(clauses)
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT *" + where + " ORDER BY ts DESC LIMIT ? OFFSET ?",
+                (*params, max(1, min(int(limit), 200)), max(0, int(offset))),
+            ).fetchall()
+            total = connection.execute("SELECT count(*)" + where, params).fetchone()[0]
+        return {"items": [self._public_trace(row) for row in rows], "total": total}
+
+    def trace_detail(self, trace_id: str) -> dict | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute("SELECT * FROM turn_traces WHERE trace_id = ?", (trace_id,)).fetchone()
+            if row is None:
+                return None
+            audits = connection.execute(
+                """
+                SELECT a.id, a.ts, a.surface, a.tool_name, a.status, a.error_code, a.elapsed_ms,
+                       d.answer_type, d.calls, d.snapshots, d.parse_errors
+                FROM kb_audit a
+                JOIN kb_audit_details d ON d.audit_id = a.id
+                WHERE d.turn_id = ?
+                ORDER BY a.id ASC
+                """,
+                (trace_id,),
+            ).fetchall()
+        item = self._public_trace(row)
+        linked = []
+        for audit in audits:
+            entry = dict(audit)
+            for col in ("calls", "snapshots", "parse_errors"):
+                entry[col] = json.loads(entry.get(col) or "[]")
+            linked.append(entry)
+        item["audits"] = linked
+        return item
+
+    def delete_trace(self, trace_id: str) -> bool:
+        with closing(self._connect()) as connection, connection:
+            cursor = connection.execute("DELETE FROM turn_traces WHERE trace_id = ?", (trace_id,))
+            return cursor.rowcount > 0

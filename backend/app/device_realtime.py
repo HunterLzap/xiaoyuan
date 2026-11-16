@@ -1,11 +1,8 @@
 import asyncio
 import base64
-import ctypes as c
-from ctypes.util import find_library
 from contextlib import suppress
 import logging
 import json
-import os
 from array import array
 from math import ceil
 from time import monotonic
@@ -13,6 +10,7 @@ from threading import Lock
 
 from websockets.exceptions import ConnectionClosed
 
+from .audio_codec import DeviceCodec
 from .audio_metrics import PlaybackMetrics
 from .community import AudioRateController
 from .config import ROOT
@@ -39,56 +37,6 @@ FRAME_MS = 60
 # A send-start gap over 1.5 frames is a pacing anomaly, not proof of speaker silence.
 STARVE_GAP_MS = 90
 AUDIO_METRICS_LOCK = Lock()
-
-class DeviceCodec:
-    def __init__(self):
-        self.decoder = self.encoder = None
-        name = str(ROOT/"models"/"codecs"/"opus.dll") if os.name=="nt" else find_library("opus")
-        if not name:
-            raise RuntimeError("libopus unavailable")
-        self.lib = c.CDLL(name)
-        p, i = c.c_void_p, c.c_int
-        for fn,args,ret in (
-            ("opus_decoder_create",[i,i,c.POINTER(i)],p),("opus_encoder_create",[i,i,i,c.POINTER(i)],p),
-            ("opus_decode",[p,c.c_char_p,i,p,i,i],i),("opus_encode",[p,c.c_char_p,i,p,i],i),
-            ("opus_decoder_destroy",[p],None),("opus_encoder_destroy",[p],None)):
-            method = getattr(self.lib,fn)
-            method.argtypes,method.restype = args,ret
-        err = i()
-        self.decoder = self.lib.opus_decoder_create(16000,1,c.byref(err))
-        self.encoder = self.lib.opus_encoder_create(24000,1,2049,c.byref(err))
-        if not self.decoder or not self.encoder:
-            self.close()
-            raise RuntimeError("opus init failed")
-        self.pending = bytearray()
-
-    def decode(self,data):
-        out = c.create_string_buffer(3840)
-        size = self.lib.opus_decode(self.decoder,data,len(data),out,1920,0)
-        if size < 0:
-            raise ValueError("invalid opus frame")
-        return out.raw[:2*size]
-
-    def encode(self,data,finish=False):
-        self.pending.extend(data)
-        frame = 2880
-        if finish:
-            self.pending.extend(bytes((-len(self.pending)) % frame))
-        while len(self.pending)>=frame:
-            out = c.create_string_buffer(4096)
-            size = self.lib.opus_encode(self.encoder, bytes(self.pending[:frame]),1440,out,len(out))
-            if size < 0:
-                raise ValueError("opus encode failed")
-            del self.pending[:frame]
-            yield out.raw[:size]
-
-    def close(self):
-        if self.decoder:
-            self.lib.opus_decoder_destroy(self.decoder)
-            self.decoder = None
-        if self.encoder:
-            self.lib.opus_encoder_destroy(self.encoder)
-            self.encoder = None
 
 
 class DeviceRealtime:
@@ -165,7 +113,7 @@ class DeviceRealtime:
         self.input_task = asyncio.create_task(self._receive_audio())
 
     def queue_audio(self, packet):
-        if self.input_task.done():
+        if self.input_task is None or self.input_task.done():
             self.frames_dropped_after_turn += 1
             self.conn.frames_dropped += 1
             return
@@ -605,6 +553,8 @@ class DeviceRealtime:
             await self.stop_audio(interrupt=is_end_intent)
             await self._archive_metrics("end_intent" if is_end_intent else "idle")
             await conn.send({"type": "ui", "state": "sleep"})
+            with suppress(Exception):
+                await conn.send({"type": "tts", "state": "stop"})
             with suppress(Exception):
                 await conn.ws.close()
         elif kind=="user":

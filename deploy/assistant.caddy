@@ -7,6 +7,7 @@ handle @xiaodan_device {
 }
 
 handle_path {$AI_PUBLIC_BASE_PATH}/* {
+    # 网页按当前约定免登录；HTTPS 与后端 X-Assistant-Admin 代理凭据作为公网边界。
     reverse_proxy 127.0.0.1:{$AI_ADMIN_PORT} {
         header_up X-Assistant-Admin {$AI_ADMIN_PROXY_TOKEN}
     }

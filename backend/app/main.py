@@ -18,7 +18,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import qwen_voices, voices
-from .config import Settings
+from .asr import transcribe_browser_wav
+from .config import ROOT, Settings
 from .llm import ChatProvider, OpenAICompatibleProvider, ProviderError
 from .realtime_text import build_chat_provider
 from .schemas import (ChatRequest, ChatResponse, KnowledgeResult, KnowledgeSearchRequest,
@@ -41,8 +42,9 @@ from .settings_store import (SettingsStore, SettingsUpdate, public_settings, API
                              TTSSettingsUpdate, TTSPreview, public_tts_settings,
                              ConnectionsUpdate, AssistantUpdate, CapabilitySettingsUpdate,
                              AssistantSelectionUpdate)
-from .tts import (MiMoTTSProvider, CLONE_MODEL, PRESET_VOICES,
+from .tts import (CLONE_MODEL, PRESET_VOICES, TTSProvider, build_tts_provider,
                   shared_client, close_shared_client)
+from .voice_profiles import BUSINESS_STATE_FIELDS, VoiceProfileStore
 from .devices import DeviceHub, DeviceSetup, DevicePreferences
 from .voice_transport import DeviceVoice, VoiceStreamingResponse, sse
 from .speech_bridge import SpeechRecognizer, SPEECH_PYTHON
@@ -53,7 +55,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                provider_factory: Callable[[Settings], ChatProvider] = build_chat_provider,
                knowledge_factory: Callable[[Settings], KnowledgeProvider] | None = None,
                device_hub: DeviceHub | None = None,
-               tts_factory: Callable[[Settings], MiMoTTSProvider] = MiMoTTSProvider) -> FastAPI:
+               tts_factory: Callable[[Settings], TTSProvider] = build_tts_provider) -> FastAPI:
     # Bracketed IPv6 entries in NO_PROXY make httpx fail on construction, which would
     # otherwise abort startup when the model client is built in the lifespan below.
     for name in ("no_proxy", "NO_PROXY"):
@@ -65,7 +67,16 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     build_knowledge = knowledge_factory or (lambda config: M5StackKnowledge(config.m5stack_timeout_seconds))
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        config = startup_config
+        state_db_path = (
+            startup_config.assistant_db_path
+            if startup_config.assistant_db_path != ROOT / "data" / "assistant_state.sqlite3"
+            else (store.path.parent / "data" / "assistant_state.sqlite3"
+                  if (settings_store is not None or startup_config.history_db_path is not None
+                      or startup_config.personal_kb_db_path is not None)
+                  else None)
+        )
+        voice_profiles = VoiceProfileStore(state_db_path)
+        config = voice_profiles.overlay_settings(startup_config)
         adapter = provider
         if adapter is None and not config.missing_config:
             adapter = provider_factory(config)
@@ -82,9 +93,20 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                         app.state.external_tools) if item["kind"] in {"official", "weather", "http"} and item["enabled"]]
             kb_defaults = ([app.state.personal_kb.default_library_id()]
                            if config.selected_kb_ids is None and config.personal_kb_enabled and app.state.personal_kb is not None else [])
-            config = store.initialize_selection(config, defaults, kb_defaults)
+            if state_db_path is not None:
+                missing = {}
+                if config.selected_tool_ids is None:
+                    missing["selected_tool_ids"] = defaults
+                if config.selected_kb_ids is None:
+                    missing["selected_kb_ids"] = kb_defaults
+                voice_profiles.save_settings(missing)
+                config = Settings.model_validate({**config.model_dump(), **missing})
+            else:
+                config = store.initialize_selection(config, defaults, kb_defaults)
             app.state.service.settings = config
         app.state.audit = AuditStore(config.personal_kb_db_path) if config.personal_kb_db_path is not None else None
+        app.state.voice_profiles = voice_profiles
+        app.state.voice_profiles.seed_from_settings(config)
         app.state.embedder = build_embedder(config)
         app.state.kb_index_lock = asyncio.Lock()
         app.state.tool_call_locks = {}
@@ -106,12 +128,12 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         refresh_tools()
         # Pay the TTS client's CA-load cost at startup instead of on the first turn.
         shared_client(config.tts_timeout_seconds)
-        # Warm the ASR worker in the background so the first utterance after a restart
-        # does not pay the model load (~3-4s) before recognition starts.
+        # Warm the local ASR worker only when explicit local recognition mode is selected.
         speech = app.state.devices.speech
         app.state.speech_prewarm = (
             asyncio.create_task(speech.ensure_ready())
-            if config.voice_mode == "pipeline" and getattr(speech, "available", False) else None
+            if config.voice_mode == "pipeline" and config.asr_provider == "local" and getattr(speech, "available", False)
+            else None
         )
         try:
             yield
@@ -371,9 +393,9 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         if not raw or len(raw) > 20 * 1024 * 1024:
             raise ProviderError(422, "voice_audio_invalid", "录音为空或过大。")
         started = time.perf_counter()
-        result = await app.state.devices.speech.transcribe(raw)
-        if result is None:
-            raise ProviderError(502, "voice_asr_failed", "本地识别失败；请检查语音环境。")
+        result = await transcribe_browser_wav(
+            app.state.service.settings, raw, app.state.devices.speech,
+        )
         return {**result, "ms": int((time.perf_counter() - started) * 1000)}
 
     @app.post("/api/voice/turn")
@@ -426,31 +448,52 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     async def app_styles():
         return FileResponse(Path(__file__).with_name("app.css"), media_type="text/css")
 
+    def settings_payload(config: Settings) -> dict:
+        return {**public_settings(config), "voice_profiles": app.state.voice_profiles.all_profiles()}
+
+    def tts_settings_payload(config: Settings) -> dict:
+        return {**public_tts_settings(config), "voice_profiles": app.state.voice_profiles.all_profiles()}
+
     @app.get("/api/settings")
     async def get_settings():
-        return public_settings(app.state.service.settings)
+        return settings_payload(app.state.service.settings)
 
     @app.get("/api/settings/tts")
     async def get_tts_settings():
-        return public_tts_settings(app.state.service.settings)
+        return tts_settings_payload(app.state.service.settings)
 
     async def save_grouped_settings(update: ConnectionsUpdate | AssistantUpdate | CapabilitySettingsUpdate):
         async with app.state.operation_lock:
             service = app.state.service
             config = store.prepare(service.settings, update)
-            if isinstance(update, AssistantUpdate) and config.tts_model == "mimo-v2.5-tts-voicedesign" and not config.tts_instruction.strip():
+            if (isinstance(update, AssistantUpdate) and config.tts_provider == "mimo"
+                    and config.tts_model == "mimo-v2.5-tts-voicedesign" and not config.tts_instruction.strip()):
                 raise ProviderError(422, "tts_voice_description_required", "请填写音色描述。")
             text_changed = any(getattr(config, name) != getattr(service.settings, name)
                                for name in ("base_url", "api_key", "model", "provider", "timeout_seconds", "max_tokens",
                                             "voice_mode", "rt_workspace", "rt_endpoint", "rt_provider", "rt_api_key", "rt_model"))
             knowledge_changed = config.m5stack_enabled != service.settings.m5stack_enabled
+            embedding_changed = config.embedding_enabled != service.settings.embedding_enabled
             adapter = provider_factory(config) if text_changed and not config.missing_config else None
-            try:
-                store.save(config, update)
-            except Exception:
-                if adapter is not None:
-                    await adapter.close()
-                raise
+            if isinstance(update, CapabilitySettingsUpdate):
+                app.state.voice_profiles.save_settings(
+                    {k: getattr(config, k) for k in update.model_fields_set if k in BUSINESS_STATE_FIELDS}
+                )
+            else:
+                try:
+                    store.save(config, update)
+                except Exception:
+                    if adapter is not None:
+                        await adapter.close()
+                    raise
+                state_updates = {k: getattr(config, k) for k in (update.model_fields_set & BUSINESS_STATE_FIELDS)}
+                if state_updates:
+                    app.state.voice_profiles.save_settings(state_updates)
+            app.state.voice_profiles.record_from_settings(
+                config,
+                save_realtime=isinstance(update, ConnectionsUpdate) or config.voice_mode == "realtime",
+                save_tts=isinstance(update, (ConnectionsUpdate, AssistantUpdate)) or config.voice_mode == "pipeline",
+            )
             if text_changed:
                 old_adapter = service.provider
                 service.apply_settings(config, adapter)
@@ -460,8 +503,13 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                 service.settings = config
             if knowledge_changed:
                 service.knowledge = build_knowledge(config) if config.m5stack_enabled else None
+            if embedding_changed:
+                old_embedder = app.state.embedder
+                app.state.embedder = build_embedder(config)
+                if old_embedder is not None:
+                    await old_embedder.close()
             refresh_tools()
-            return {"text": public_settings(config), "tts": public_tts_settings(config)}
+            return {"text": settings_payload(config), "tts": tts_settings_payload(config)}
 
     @app.put("/api/settings/api")
     async def save_api_settings(update: APISettingsUpdate):
@@ -473,6 +521,10 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
 
     @app.put("/api/settings/assistant")
     async def save_assistant(update: AssistantUpdate):
+        return await save_grouped_settings(update)
+
+    @app.put("/api/settings/capabilities")
+    async def save_capabilities(update: CapabilitySettingsUpdate):
         return await save_grouped_settings(update)
 
     @app.get("/api/assistant/selection")
@@ -494,7 +546,9 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             if "selected_kb_ids" in update.model_fields_set and update.selected_kb_ids:
                 await asyncio.to_thread(get_personal_kb().assert_libraries, update.selected_kb_ids)
             config = store.prepare(service.settings, update)
-            store.save(config, update)
+            app.state.voice_profiles.save_settings(
+                {k: getattr(config, k) for k in update.model_fields_set if k in BUSINESS_STATE_FIELDS}
+            )
             service.settings = config
             refresh_tools()
             return {"selected_tool_ids": config.selected_tool_ids,
@@ -504,11 +558,13 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     async def save_tts_settings(update: TTSSettingsUpdate):
         async with app.state.operation_lock:
             config = store.prepare(app.state.service.settings, update)
-            if config.tts_model == "mimo-v2.5-tts-voicedesign" and not config.tts_instruction.strip():
+            if (config.tts_provider == "mimo" and config.tts_model == "mimo-v2.5-tts-voicedesign"
+                    and not config.tts_instruction.strip()):
                 raise ProviderError(422, "tts_voice_description_required", "VoiceDesign 需要填写音色描述。")
             store.save(config, update)
             app.state.service.settings = config
-            return public_tts_settings(config)
+            app.state.voice_profiles.record_from_settings(config, save_realtime=False, save_tts=True)
+            return tts_settings_payload(config)
 
     @app.post("/api/settings/tts/preview")
     async def preview_tts(request: TTSPreview):
@@ -534,8 +590,8 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                 "clone_model": CLONE_MODEL}
 
     @app.get("/api/voices/qwen")
-    async def list_qwen_voices():
-        return {"voices": await qwen_voices.list_public(app.state.service.settings)}
+    async def list_qwen_voices(target_model: str | None = None):
+        return {"voices": await qwen_voices.list_public(app.state.service.settings, target_model=target_model)}
 
     @app.post("/api/voices/qwen")
     async def create_qwen_voice(request: Request):
@@ -550,8 +606,9 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             raise ProviderError(422, "voice_audio_too_large", "音频不能超过 10MB。")
         name = urllib.parse.unquote(request.headers.get("x-voice-name", ""))
         filename = urllib.parse.unquote(request.headers.get("x-voice-filename", "upload.wav"))
+        target_model = urllib.parse.unquote(request.headers.get("x-target-model", "")).strip() or None
         async with app.state.operation_lock:
-            return await qwen_voices.create(app.state.service.settings, raw, filename, name)
+            return await qwen_voices.create(app.state.service.settings, raw, filename, name, target_model=target_model)
 
     @app.post("/api/voices/qwen/preview")
     async def preview_qwen_voice(body: QwenVoicePreview):
@@ -667,8 +724,13 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             config = Settings(_env_file=None, **{**current.model_dump(), name: value})
         except _PydValidationError:
             raise ProviderError(422, "setting_range", "数值超出允许范围。") from None
-        store.update_fields(config, [name])
+        app.state.voice_profiles.save_settings({name: getattr(config, name)})
         app.state.service.settings = config
+        app.state.voice_profiles.record_from_settings(
+            config,
+            save_realtime=config.voice_mode == "realtime",
+            save_tts=config.voice_mode == "pipeline",
+        )
         return getattr(config, name)
 
     def refresh_tools():
@@ -724,22 +786,30 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     @app.post("/api/tools/{name}/call")
     async def call_tool(name: str, body: ToolCallRequest):
         registry = app.state.resource_tools
-        if name not in registry.names:
+        tool = registry.get(name)
+        if tool is None:
             raise ProviderError(404, "tool_not_found", "工具不存在或未启用。")
         lock = app.state.tool_call_locks.setdefault(name, asyncio.Lock())
         if lock.locked():
             raise ProviderError(409, "tool_busy", "该工具已有请求执行中，请勿重复提交。")
-        tool = registry._tools[name]
         permission = tool.spec.permission
         summary = json.dumps(body.arguments, ensure_ascii=False)
-        started = time.perf_counter()
-        result, state, error_code = None, "error", None
+        trace_data: dict = {}
+        outcome: dict | None = None
+        state, error_code = "error", None
         async with lock:
-            if hasattr(tool, "last_exchange"):
-                tool.last_exchange = None
             try:
-                result = await registry.call(name, body.arguments, confirmed=body.confirmed)
+                call_outcome = await app.state.service.tool_gateway.execute_manual(
+                    registry,
+                    name,
+                    body.arguments,
+                    confirmed=body.confirmed,
+                    secrets=audit_secrets(),
+                    trace_out=trace_data,
+                )
+                outcome = call_outcome
                 state = "ok"
+                return call_outcome["result"]
             except (ProviderError, KnowledgeError, EmbeddingError) as error:
                 error_code = error.code
                 raise
@@ -747,20 +817,35 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                 state, error_code = "cancelled", "tool_cancelled"
                 raise
             finally:
-                elapsed = int((time.perf_counter() - started) * 1000)
-                exchange = getattr(tool, "last_exchange", None) or {}
-                response = exchange.get("response", result)
+                elapsed = (trace_data.get("_gateway") or {}).get("elapsed_ms", 0)
+                result_payload = outcome.get("result") if outcome is not None else None
+                response = trace_data.get("response", result_payload)
                 http_status = response.get("status") if isinstance(response, dict) and isinstance(response.get("status"), int) else None
-                calls = [{"tool_name": name, "trigger_question": None,
-                          "request": exchange.get("request", {"arguments": body.arguments}),
-                          "response": response, "http_status": http_status, "elapsed_ms": elapsed,
-                          "status": state, "error_code": error_code}]
+                calls = [{
+                    "tool_name": name,
+                    "trigger_question": None,
+                    "request": trace_data.get("request", {"arguments": body.arguments}),
+                    "response": response,
+                    "http_status": http_status,
+                    "elapsed_ms": elapsed,
+                    "status": state,
+                    "error_code": error_code,
+                }]
                 snapshots = [{**match, "sent_to_model": False, "cited": False}
-                             for match in (result or {}).get("matches", [])]
-                await record_audit("tool_call", query_summary=summary, tool_name=name, permission=permission,
-                    hit=state == "ok", status=state, error_code=error_code, elapsed_ms=elapsed,
-                    calls=calls, snapshots=snapshots, source="manual_tool")
-        return result
+                             for match in ((result_payload or {}).get("matches", []) if isinstance(result_payload, dict) else [])]
+                await record_audit(
+                    "tool_call",
+                    query_summary=summary,
+                    tool_name=name,
+                    permission=permission,
+                    hit=state == "ok",
+                    status=state,
+                    error_code=error_code,
+                    elapsed_ms=elapsed,
+                    calls=calls,
+                    snapshots=snapshots,
+                    source="manual_tool",
+                )
 
     @app.get("/api/tools/{name}")
     async def get_external_tool(name: str):
@@ -1060,6 +1145,40 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             return {"items": [], "total": 0}
         return await asyncio.to_thread(app.state.audit.list_tools, limit, offset, q=q,
             answer_type=answer_type, status=status, tool_name=tool_name, since=since, until=until)
+
+    @app.get("/api/insights/traces")
+    async def insights_traces(limit: int = Query(default=50, ge=1, le=200),
+                              offset: int = Query(default=0, ge=0),
+                              q: str = Query(default="", max_length=200),
+                              source: str | None = Query(default=None, max_length=40),
+                              status: str | None = Query(default=None, max_length=40),
+                              since: str | None = Query(default=None, max_length=40),
+                              until: str | None = Query(default=None, max_length=40)):
+        if app.state.audit is None:
+            return {"items": [], "total": 0}
+        return await asyncio.to_thread(
+            app.state.audit.list_traces, limit, offset, q=q,
+            source=source, status=status, since=since, until=until,
+        )
+
+    @app.get("/api/insights/traces/{trace_id}")
+    async def insights_trace_detail(trace_id: str):
+        if app.state.audit is None:
+            raise ProviderError(404, "insight_not_found", "追踪记录不存在。")
+        detail = await asyncio.to_thread(app.state.audit.trace_detail, trace_id)
+        if detail is None:
+            raise ProviderError(404, "insight_not_found", "追踪记录不存在。")
+        return detail
+
+    @app.delete("/api/insights/traces/{trace_id}", status_code=204)
+    async def delete_insight_trace(trace_id: str, confirm: bool = Query(default=False)):
+        if app.state.audit is None:
+            raise ProviderError(404, "insight_not_found", "追踪记录不存在。")
+        if not confirm:
+            raise ProviderError(422, "confirm_required", "删除记录需明确确认。")
+        if not await asyncio.to_thread(app.state.audit.delete_trace, trace_id):
+            raise ProviderError(404, "insight_not_found", "追踪记录不存在。")
+        return Response(status_code=204)
 
     @app.get("/api/insights/parsing")
     async def insights_parsing(limit: int = Query(default=50, ge=1, le=200),

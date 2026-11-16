@@ -8,6 +8,7 @@ import anyio
 from fastapi.responses import StreamingResponse
 from starlette.requests import ClientDisconnect
 
+from .audio_codec import DeviceCodec
 from .community import AudioRateController, handleAbortMessage
 from .llm import ProviderError
 from .schemas import ChatRequest
@@ -89,14 +90,15 @@ class DeviceVoice:
         connection.voice_turn_id = identity
         controller = AudioRateController(frame_duration=60)
         connection.audio_controller = controller
-        encoded = False
+        codec = None
         completed = False
         try:
             await connection.send({"type": "stt", "text": text})
             await connection.send({"type": "tts", "state": "start"})
-            if not await self.hub.speech.start_pcm():
-                raise ProviderError(503, "opus_unavailable", "设备语音编码尚不可用。")
-            encoded = True
+            try:
+                codec = DeviceCodec(decode=False)
+            except RuntimeError:
+                raise ProviderError(503, "opus_unavailable", "设备语音编码尚不可用。") from None
             controller.start_sending(connection.send_audio)
             async with aclosing(self.service.turn(
                 ChatRequest(message=text, session_id=connection.voice_session_id),
@@ -116,15 +118,14 @@ class DeviceVoice:
 
                         controller.add_message(announce)
                     elif kind == "audio":
-                        for packet in await self.hub.speech.push_pcm(payload):
+                        for packet in codec.encode(payload):
                             controller.add_audio(packet)
                     elif kind == "warning":
                         self.hub.last_error = payload["message"]
                     elif kind == "done":
                         completed = True
-            for packet in await self.hub.speech.end_pcm():
+            for packet in codec.encode(b"", True):
                 controller.add_audio(packet)
-            encoded = False
             await controller.wait_finished()
             if completed and not connection.stopped:
                 await connection.send({"type": "tts", "state": "stop"})
@@ -139,9 +140,8 @@ class DeviceVoice:
             if controller.pending_send_task is not None:
                 with suppress(asyncio.CancelledError, ProviderError, OSError, RuntimeError):
                     await controller.pending_send_task
-            if encoded:
-                with suppress(RuntimeError):
-                    await self.hub.speech.end_pcm()
+            if codec is not None:
+                codec.close()
             if not completed and connection is self.hub.connection:
                 with suppress(ProviderError):
                     await connection.send({"type": "tts", "state": "stop"})

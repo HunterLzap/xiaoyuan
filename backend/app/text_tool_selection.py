@@ -67,7 +67,12 @@ class TextToolSelection:
         return names
 
     def available(self):
-        enabled = {item["name"] for item in self.current_registry().definitions()}
+        gateway = getattr(self.context, "tool_gateway", None)
+        registry = self.current_registry()
+        if gateway is not None:
+            enabled = {item["name"] for item in gateway.definitions(registry, include_side_effects=True)}
+        else:
+            enabled = {item["name"] for item in registry.definitions()}
         return self.catalog.keys() & enabled
 
     def active_names(self):

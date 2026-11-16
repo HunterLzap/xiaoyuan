@@ -22,7 +22,25 @@ SUPPORTED_MODELS = {
     "qwen3.8-omni-flash-realtime",
     "qwen3.5-omni-flash-realtime",
     "qwen3.5-omni-plus-realtime",
+    "qwen3-tts-vc-realtime",
 }
+
+
+def is_supported_target_model(model: str) -> bool:
+    name = (model or "").strip()
+    return name in SUPPORTED_MODELS or name.startswith("qwen3-tts-vc-realtime")
+
+
+def _active_target_model(settings: Settings) -> str:
+    if settings.voice_mode == "pipeline" and settings.tts_provider == "bailian":
+        return settings.tts_model
+    return settings.rt_model
+
+
+def _active_api_key(settings: Settings) -> str:
+    if settings.voice_mode == "pipeline" and settings.tts_provider == "bailian":
+        return settings.effective_tts_api_key.get_secret_value()
+    return settings.rt_api_key.get_secret_value()
 
 
 def _read_records() -> list[dict]:
@@ -55,12 +73,15 @@ def _write_records(records: list[dict]) -> None:
 
 
 def _endpoint(settings: Settings) -> str:
-    if settings.rt_provider != "bailian" or not settings.rt_workspace:
-        raise ProviderError(422, "qwen_clone_unavailable", "音色复刻仅支持已配置的百炼北京业务空间。")
-    if not settings.rt_api_key.get_secret_value():
+    key = _active_api_key(settings).strip()
+    if not key:
         raise ProviderError(422, "qwen_clone_unavailable", "请先保存百炼 API Key。")
-    return (f"https://{settings.rt_workspace}.cn-beijing.maas.aliyuncs.com"
-            "/api/v1/services/audio/tts/customization")
+    if settings.rt_workspace:
+        return (f"https://{settings.rt_workspace}.cn-beijing.maas.aliyuncs.com"
+                "/api/v1/services/audio/tts/customization")
+    if settings.voice_mode == "realtime" and settings.rt_provider != "bailian":
+        raise ProviderError(422, "qwen_clone_unavailable", "音色复刻仅支持已配置的百炼服务。")
+    return "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization"
 
 
 async def _request(settings: Settings, payload: dict) -> dict:
@@ -69,7 +90,7 @@ async def _request(settings: Settings, payload: dict) -> dict:
             response = await client.post(
                 _endpoint(settings),
                 headers={
-                    "Authorization": "Bearer " + settings.rt_api_key.get_secret_value(),
+                    "Authorization": "Bearer " + _active_api_key(settings).strip(),
                     "Content-Type": "application/json",
                 },
                 json=payload,
@@ -93,19 +114,23 @@ def _local_records(target_model: str) -> list[dict]:
             if item.get("target_model") == target_model]
 
 
-def _merge_remote(settings: Settings, remote: list[dict]) -> list[dict]:
-    local = {item["voice"]: item for item in _local_records(settings.rt_model)}
+def _merge_remote(settings: Settings, remote: list[dict], target_model: str | None = None) -> list[dict]:
+    model = target_model or _active_target_model(settings)
+    local = {item["voice"]: item for item in _local_records(model)}
     result = []
     for item in remote:
         voice = item.get("voice") or item.get("voice_id")
         if not isinstance(voice, str) or not voice:
+            continue
+        item_model = item.get("target_model") or model
+        if target_model and item.get("target_model") and item_model != target_model:
             continue
         saved = local.get(voice)
         name = saved["name"] if saved else f"克隆音色 {voice[-6:]}"
         result.append({
             "voice": voice,
             "name": name,
-            "target_model": item.get("target_model") or settings.rt_model,
+            "target_model": item_model,
             "created": (saved or {}).get("created") or item.get("gmt_create"),
             "cloned": True,
         })
@@ -114,18 +139,20 @@ def _merge_remote(settings: Settings, remote: list[dict]) -> list[dict]:
     return result
 
 
-async def list_public(settings: Settings) -> list[dict]:
+async def list_public(settings: Settings, target_model: str | None = None) -> list[dict]:
+    model = target_model or _active_target_model(settings)
     data = await _request(settings, {
         "model": "qwen-voice-enrollment",
         "input": {"action": "list", "page_index": 0, "page_size": 100},
     })
     remote = data.get("output", {}).get("voice_list") or []
-    return _merge_remote(settings, [item for item in remote if isinstance(item, dict)])
+    return _merge_remote(settings, [item for item in remote if isinstance(item, dict)], target_model=model)
 
 
-async def create(settings: Settings, raw: bytes, filename: str, name: str) -> dict:
-    if settings.rt_model not in SUPPORTED_MODELS:
-        raise ProviderError(422, "qwen_clone_model", "当前实时模型不支持音色复刻。")
+async def create(settings: Settings, raw: bytes, filename: str, name: str, target_model: str | None = None) -> dict:
+    model = (target_model or _active_target_model(settings)).strip()
+    if not is_supported_target_model(model):
+        raise ProviderError(422, "qwen_clone_model", "当前模型不支持百炼音色复刻。")
     local = voices.process_upload(raw, filename, name)
     try:
         sample = voices.resolve(local.get("sample", ""))
@@ -137,7 +164,7 @@ async def create(settings: Settings, raw: bytes, filename: str, name: str) -> di
             "model": "qwen-voice-enrollment",
             "input": {
                 "action": "create",
-                "target_model": settings.rt_model,
+                "target_model": model,
                 "preferred_name": preferred_name,
                 "audio": {"data": "data:audio/mpeg;base64," + base64.b64encode(encoded).decode("ascii")},
                 "language": "zh",
@@ -156,7 +183,7 @@ async def create(settings: Settings, raw: bytes, filename: str, name: str) -> di
     record = {
         "name": local["name"],
         "voice": voice,
-        "target_model": settings.rt_model,
+        "target_model": model,
         "created": datetime.now(timezone.utc).isoformat(),
     }
     records = [item for item in _read_records() if item.get("voice") != voice]
@@ -179,8 +206,9 @@ async def preview(settings: Settings, voice: str, text: str) -> bytes:
     from uuid import uuid4
     import wave
 
-    endpoint = (f"wss://{settings.rt_workspace}.cn-beijing.maas.aliyuncs.com"
-                "/api-ws/v1/realtime?") + urlencode({"model": settings.rt_model})
+    base = (f"wss://{settings.rt_workspace}.cn-beijing.maas.aliyuncs.com"
+            "/api-ws/v1/realtime?") if settings.rt_workspace else "wss://dashscope.aliyuncs.com/api-ws/v1/realtime?"
+    endpoint = base + urlencode({"model": settings.rt_model})
     audio = bytearray()
     try:
         async with connect(

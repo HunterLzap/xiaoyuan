@@ -201,7 +201,8 @@
 </div></div><p id="rt-sample-error" class="small-note" role="status" hidden></p>
 <audio id="rt-sample" preload="none" hidden></audio></div>
 <details class="api-disclosure"><summary>高级设置</summary><div class="api-group">
-<div class="settings-row"><label for="rt_model">实时模型</label><input id="rt_model" list="rt-models" maxlength="200"><datalist id="rt-models"><option value="qwen3.8-omni-flash-realtime"></datalist></div>
+<div class="settings-row"><label for="rt_model">实时模型</label><input id="rt_model" list="rt-models" maxlength="200"><datalist id="rt-models"><option value="qwen3.8-omni-flash-realtime"><option value="gpt-realtime"><option value="gpt-4o-realtime-preview"></datalist></div>
+<div class="settings-row" id="rt-asr-row"><label for="rt_asr_model">转录模型</label><input id="rt_asr_model" maxlength="200" placeholder="whisper-1（百炼默认 qwen3-asr）"></div>
 </div></details></section>
           <section class="api-text-settings" id="text-services" hidden><h2 id="text-services-title" hidden>分模型</h2><section class="api-panel">
             <h2 class="api-panel-title">文字服务<span id="connection-summary" class="connection-label"></span></h2>
@@ -219,10 +220,20 @@
             <p id="models-status" class="small-note" role="status" aria-live="polite"></p>
             <div id="test-panel" class="test-panel" hidden><h2>模型测试</h2><p id="test-result"></p><div id="test-usage" class="metadata"></div></div>
           </section>
-          <section class="api-panel"><h2 class="api-panel-title">语音识别</h2><div class="api-group"><div class="settings-row"><label>识别模型</label><span>SenseVoice · 本地</span></div></div></section>
+          <section class="api-panel"><h2 class="api-panel-title">语音识别<span id="asr-api-state" class="connection-label"></span></h2><div class="api-group">
+            <div class="settings-row"><label for="asr_provider">识别服务</label><select id="asr_provider"><option value="openai">OpenAI 兼容接口</option><option value="bailian">百炼实时识别</option><option value="local">本地 SenseVoice (.venv-speech)</option></select></div>
+            <div class="settings-row" id="asr-model-row"><label for="asr_model">识别模型</label><input id="asr_model" list="asr-models" maxlength="200" placeholder="whisper-1 / qwen3-asr-flash-realtime"><datalist id="asr-models"><option value="whisper-1"><option value="qwen3-asr-flash-realtime"><option value="FunAudioLLM/SenseVoiceSmall"></datalist></div>
+            <div class="settings-row" id="asr-lang-row"><label for="asr_language">识别语种</label><input id="asr_language" maxlength="20" placeholder="zh（留空自动）"></div>
+            <div class="api-service-choice" id="asr-separate-choice"><label class="checkbox-control"><input id="asr-separate-service" type="checkbox"><span>识别使用独立接口</span></label><span id="asr-shared-note" class="small-note">默认共用文字/百炼服务凭据</span></div>
+            <div id="asr-separate-fields" hidden>
+              <div class="settings-row"><label for="asr_base_url">识别地址</label><input id="asr_base_url" maxlength="500" autocomplete="off" placeholder="https://.../v1 或 wss://..."></div>
+              <div class="settings-row"><label for="asr_api_key">识别 Key</label><div class="key-input"><input id="asr_api_key" type="password" autocomplete="new-password" spellcheck="false"><button id="asr-show-key" type="button" class="text-button" aria-pressed="false">显示</button></div></div>
+            </div>
+          </div></section>
           <section class="api-panel"><h2 class="api-panel-title">语音合成</h2>
-            <div class="settings-row voice-row"><label for="tts_model">模型</label><div class="voice-inline"><select id="tts_model" aria-label="声音模型"><option value="mimo-v2.5-tts">mimo-v2.5-tts</option><option value="mimo-v2.5-tts-voicedesign">mimo-v2.5-tts-voicedesign</option><option value="mimo-v2.5-tts-voiceclone">mimo-v2.5-tts-voiceclone</option></select><button id="fetch-speech-models" type="button" class="secondary-button" disabled>刷新</button></div></div>
-            <div class="settings-row voice-row" id="voice-pick-row"><label for="tts_voice">音色</label><div class="voice-inline"><select id="tts_voice" aria-label="音色"><option value="mimo_default">默认</option><option>冰糖</option><option>茉莉</option><option>苏打</option><option>白桦</option><option>Mia</option><option>Chloe</option><option>Milo</option><option>Dean</option></select><button id="clone-new" type="button" class="secondary-button">新建复刻</button><button id="delete-clone" type="button" class="secondary-button" hidden>删除</button></div></div>
+            <div class="settings-row"><label for="tts_provider">合成服务</label><select id="tts_provider"><option value="mimo">小米 MiMo</option><option value="openai">OpenAI 兼容 TTS</option><option value="bailian">百炼实时 TTS</option></select></div>
+            <div class="settings-row voice-row"><label for="tts_model">模型</label><div class="voice-inline"><select id="tts_model" aria-label="声音模型"><option value="mimo-v2.5-tts">mimo-v2.5-tts</option><option value="mimo-v2.5-tts-voicedesign">mimo-v2.5-tts-voicedesign</option><option value="mimo-v2.5-tts-voiceclone">mimo-v2.5-tts-voiceclone</option><option value="__manual__">手动填写模型 ID…</option></select><input id="tts_model_custom" maxlength="200" autocomplete="off" placeholder="例如：tts-1 / qwen3-tts-flash-realtime" hidden><button id="fetch-speech-models" type="button" class="secondary-button" disabled>刷新</button></div></div>
+            <div class="settings-row voice-row" id="voice-pick-row"><label for="tts_voice">音色</label><div class="voice-inline"><select id="tts_voice" aria-label="音色"><option value="mimo_default">默认</option></select><input id="tts_voice_custom" maxlength="80" autocomplete="off" placeholder="填写目标音色 ID" hidden><button id="clone-new" type="button" class="secondary-button">新建复刻</button><button id="delete-clone" type="button" class="secondary-button" hidden>删除</button></div></div>
           </section></section>
           <section class="api-panel api-common"><button type="button" class="text-button" data-view="capabilities">管理工具与个人知识库 →</button><input id="m5stack_enabled" type="checkbox" checked hidden></section>
         </fieldset><div class="settings-actions"><span id="dirty-state">接入已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="settings-api-cancel" type="button" class="secondary-button">取消</button><button id="save" type="submit" class="primary-button" disabled>保存并关闭</button></div></div></form>
@@ -306,6 +317,7 @@
         <div class="insight-tabbar" role="tablist" aria-label="数据洞察分类">
           <button id="insights-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="insights-panel-kb" data-insight-tab="kb"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>知识库记录</span><span class="insight-hint" data-tip="问题、回答类型、答案与时间；点「详情」看引用片段与调用记录。没有真实生成时显示“暂无生成回答”；检索分数不代表答案准确率。">ⓘ</span></button>
           <button id="insights-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-tools" data-insight-tab="tools" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-plug"/></svg><span>API记录</span><span class="insight-hint" data-tip="工具名称、请求摘要、状态与耗时；缺失字段显示「未提供」，此处不计算费用。点「详情」查看请求与响应。">ⓘ</span></button>
+          <button id="insights-tab-traces" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-traces" data-insight-tab="traces" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-panel"/></svg><span>全链路追踪</span><span class="insight-hint" data-tip="按轮次查看文字、网页语音与设备语音全链路：ASR/TTS 厂商、模型、首包音频耗时、总耗时与关联工具。">ⓘ</span></button>
         </div>
         <section id="insights-panel-kb" class="capability-section insight-panel" role="tabpanel" aria-labelledby="insights-tab-kb">
           <div class="insight-filters">
@@ -331,6 +343,18 @@
           </div>
           <div id="insights-tools" class="insight-list" aria-live="polite"><p class="small-note">尚未加载记录。</p></div>
           <div class="insight-pagination"><button id="insights-tools-prev" type="button" class="text-button" disabled>上一页</button><span id="insights-tools-page" class="small-note"></span><button id="insights-tools-next" type="button" class="text-button" disabled>下一页</button></div>
+        </section>
+        <section id="insights-panel-traces" class="capability-section insight-panel" role="tabpanel" aria-labelledby="insights-tab-traces" hidden>
+          <div class="insight-filters">
+            <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-traces-q" type="search" maxlength="200" placeholder="搜索问题、回答或模型" aria-label="搜索全链路追踪"></label>
+            <select id="insights-traces-source" aria-label="按通道来源筛选"><option value="">全部来源</option><option value="text">网页文字</option><option value="voice">网页语音</option><option value="device">硬件设备</option></select>
+            <select id="insights-traces-status" aria-label="按状态筛选"><option value="">全部状态</option><option value="complete">成功</option><option value="interrupted">已打断</option><option value="failed">失败</option></select>
+            <div class="insight-daterange"><input id="insights-traces-since" type="date" aria-label="起始日期"><span>至</span><input id="insights-traces-until" type="date" aria-label="结束日期"></div>
+            <button id="insights-traces-reset" type="button" class="text-button insight-reset">重置</button>
+            <span id="insights-traces-meta" class="insight-count"></span>
+          </div>
+          <div id="insights-traces" class="insight-list" aria-live="polite"><p class="small-note">尚未加载记录。</p></div>
+          <div class="insight-pagination"><button id="insights-traces-prev" type="button" class="text-button" disabled>上一页</button><span id="insights-traces-page" class="small-note"></span><button id="insights-traces-next" type="button" class="text-button" disabled>下一页</button></div>
         </section>
         </div>
         <div id="insights-detail-view" hidden>
