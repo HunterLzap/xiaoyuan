@@ -62,10 +62,10 @@
 
 ## 当前技术与数据边界
 
-- **三端协作与版本同步**：**白天 Mac 开发、晚上 Windows 测试、服务部署在云端**，以 GitHub（`origin`）为唯一代码同步枢纽。
-  - **Mac 端**：负责日常功能开发、增量 Lint、JS 语法校验与无本地语音模型/无真机依赖的路由与单元测试。
-  - **Windows 端**：`git pull` 后保留本地 `.env`、`data/`、`.venv-speech`，负责本地音频、浏览器实操（`tests/voice_browser.cjs`）及真机直连联调。
-  - **云端（`47.112.16.195`）**：安装 Git 后维护只读镜像仓（如 `/opt/xiaodan/repo`），通过 [release_from_git.sh](deploy/release_from_git.sh) 导出构建至 `/opt/xiaodan/releases/` 并挂载 `/opt/xiaodan/shared/{.env,data,logs}`、原子切换 `/opt/xiaodan/current`；**不在运行目录直接 `git pull`**，以免破坏软链或权限属主。
+- **三端协作与版本同步**：**白天 Mac 开发、晚上 Windows 测试、服务部署在云端**，以 **Gitee（`https://gitee.com/ryan406/xiaoyuan.git`）** 作为国内高速同步与云端免密拉取主通道，Mac 本机 `origin` 配置一键双推同时同步至 GitHub（备份）与 Gitee。
+  - **Mac 端**：负责日常功能开发、增量 Lint、JS 语法校验与无本地语音模型/无真机依赖的路由与单元测试；推送 `git push origin main` 自动同步双端仓库。
+  - **Windows 端**：从 Gitee `git pull` 拉取最新版（保留本地 `.env`、`data/`、`.venv-speech`），负责本地音频、浏览器实操（`tests/voice_browser.cjs`）及真机直连联调。
+  - **云端（`47.112.16.195`）**：安装 Git 后维护公开只读镜像仓 `/opt/xiaodan/repo`（零密钥 HTTPS 拉取 Gitee），通过 [release_from_git.sh](deploy/release_from_git.sh) 导出构建至 `/opt/xiaodan/releases/` 并挂载 `/opt/xiaodan/shared/{.env,data,logs}`、原子切换 `/opt/xiaodan/current`；**不在运行目录直接 `git pull`**，以免破坏软链或权限属主。
 - 技术栈为 FastAPI + 原生 HTML/CSS/JavaScript + SQLite；主线支持百炼 `qwen3.8-omni-flash-realtime` 与 OpenAI 兼容 Realtime，同时支持可切换的分模型 Pipeline（LLM + 在线/可选本地 ASR + MiMo/OpenAI/百炼 TTS）。
 - 已有塔菲复刻音色、语速/音调处理、正式回答首句开场与基础交流继续保留，各 `(mode, provider, model)` 作用域音色与业务选用状态存入 `assistant_state.sqlite3`（不覆盖切换前配置）；改动已跑通/用户确认的功能前先说明并取得相应同意。当前实现和证据以 [progress](agent/docs/progress.md) 为准。
 - 多库与助手能力选择已实现并完成部分真实验证，确切范围看 progress；不能将文字/资料操作通过写成所有语音链通过。外部写/发送/删除/付费工具没有完整对话确认时，不得自动放行。已明确开放的本地设备/声音控制按现有规则执行。

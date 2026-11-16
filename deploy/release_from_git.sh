@@ -5,7 +5,7 @@ set -euo pipefail
 
 BASE_DIR="${BASE_DIR:-/opt/xiaodan}"
 REPO_DIR="${REPO_DIR:-${BASE_DIR}/repo}"
-REPO_URL="${REPO_URL:-https://github.com/HunterLzap/xiaoyuan.git}"
+REPO_URL="${REPO_URL:-https://gitee.com/ryan406/xiaoyuan.git}"
 SERVICE_NAME="${SERVICE_NAME:-xiaodan}"
 APP_USER="${APP_USER:-voice-assistant}"
 APP_GROUP="${APP_GROUP:-voice-assistant}"
@@ -13,6 +13,7 @@ REF="${REF:-main}"
 KEEP_RELEASES="${KEEP_RELEASES:-5}"
 PIP_SYNC="auto"
 ROLLBACK_TARGET=""
+NO_FETCH=0
 DRY_RUN=0
 
 usage() {
@@ -24,6 +25,7 @@ Usage: release_from_git.sh [options]
   --service <name>           systemd unit name to restart (default: xiaodan)
   --pip-sync                 Force running pip install -r requirements.txt
   --no-pip-sync              Skip pip install check
+  --no-fetch                 Skip git fetch and deploy directly from local mirror ref
   --rollback <release-name>  Switch current symlink to an existing release dir and restart
   --keep <N>                 Keep latest N releases during pruning (default: 5)
   --dry-run                  Print actions without making changes
@@ -39,6 +41,7 @@ while [[ $# -gt 0 ]]; do
     --service) SERVICE_NAME="$2"; shift 2 ;;
     --pip-sync) PIP_SYNC="always"; shift ;;
     --no-pip-sync) PIP_SYNC="never"; shift ;;
+    --no-fetch) NO_FETCH=1; shift ;;
     --rollback) ROLLBACK_TARGET="$2"; shift 2 ;;
     --keep) KEEP_RELEASES="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
@@ -111,18 +114,42 @@ if [[ ! -d "${REPO_DIR}/.git" && ! -f "${REPO_DIR}/HEAD" ]]; then
   run "git clone --bare '${REPO_URL}' '${REPO_DIR}'"
 fi
 
-log "Fetching updates in ${REPO_DIR} (ref=${REF})..."
+fetch_with_retry() {
+  local attempt=1
+  local max_attempts=3
+  while [[ $attempt -le $max_attempts ]]; do
+    if "$@"; then
+      return 0
+    fi
+    if [[ $attempt -lt $max_attempts ]]; then
+      log "WARN: fetch attempt ${attempt}/${max_attempts} failed, retrying in 2s..."
+      sleep 2
+    fi
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
+if [[ "$NO_FETCH" -eq 1 ]]; then
+  log "Skipping fetch (--no-fetch) in ${REPO_DIR} (ref=${REF})..."
+else
+  log "Fetching updates in ${REPO_DIR} (ref=${REF})..."
+fi
 if [[ "$DRY_RUN" -eq 0 ]]; then
   IS_BARE="$(git -C "${REPO_DIR}" rev-parse --is-bare-repository)"
   if [[ "$IS_BARE" == "true" ]]; then
-    git -C "${REPO_DIR}" fetch --prune origin '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+    if [[ "$NO_FETCH" -eq 0 ]]; then
+      fetch_with_retry git -C "${REPO_DIR}" fetch --prune origin '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+    fi
     TARGET_COMMIT="$(git -C "${REPO_DIR}" rev-parse "${REF}")"
   else
     if [[ -n "$(git -C "${REPO_DIR}" status --porcelain)" ]]; then
       echo "Refusing deploy: ${REPO_DIR} has dirty working tree changes." >&2
       exit 1
     fi
-    git -C "${REPO_DIR}" fetch --prune origin
+    if [[ "$NO_FETCH" -eq 0 ]]; then
+      fetch_with_retry git -C "${REPO_DIR}" fetch --prune origin
+    fi
     if git -C "${REPO_DIR}" show-ref --verify --quiet "refs/remotes/origin/${REF}"; then
       TARGET_COMMIT="$(git -C "${REPO_DIR}" rev-parse "refs/remotes/origin/${REF}")"
     else
