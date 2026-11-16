@@ -520,7 +520,8 @@ body.voice-mode { overflow:hidden; }
 .kb-match > .text-button {font-size:12px}
 @media(max-width:820px) {.kb-upload-row {grid-template-columns:minmax(0,1fr)}.kb-doc-list {overflow-x:auto}.kb-doc-table {min-width:640px}}
 /* 资料内容对话框 */
-#kb-content-dialog {width:min(760px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:22px 24px;display:flex;flex-direction:column}
+#kb-content-dialog {width:min(760px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:22px 24px}
+#kb-content-dialog[open] {display:flex;flex-direction:column}
 .kb-content-head {display:flex;align-items:center;justify-content:space-between;gap:12px}
 .kb-content-head h2 {font-size:17px;margin:0;overflow-wrap:anywhere}
 .kb-content-meta {color:var(--muted);font-size:12px;line-height:1.7;margin:8px 0 12px;overflow-wrap:anywhere}
