@@ -216,6 +216,24 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
         bridge.stop_audio.assert_awaited_once_with(interrupt=True)
         bridge.show_text.assert_awaited_once_with(bridge.hub.last_error)
 
+    async def test_end_intent_cancels_active_response_and_emits_idle(self):
+        turn = self.make_turn()
+        turn.active_response = "resp_1"
+        turn.pending_tools = {}
+        turn.reply = "好的"
+        turn.ws.send = AsyncMock()
+        turn.ws.recv = AsyncMock(side_effect=[json.dumps({
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "塔菲关闭",
+        })])
+        await turn.receive()
+        self.assertIn("resp_1", turn.ignore_responses)
+        sent_types = [json.loads(call.args[0])["type"] for call in turn.ws.send.await_args_list]
+        self.assertIn("response.cancel", sent_types)
+        self.assertIn("session.update", sent_types)
+        turn.emit.assert_any_await("idle", {"reason": "end_intent"})
+        self.assertTrue(turn.saved)
+
     async def test_provider_finish_close_does_not_close_device(self):
         bridge = self.make_bridge()
         with self.assertLogs("backend.app.device_realtime", level="ERROR"):

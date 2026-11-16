@@ -235,3 +235,25 @@ def test_real_socket_rejects_auth_and_command_failures(tmp_path):
                     with suppress(asyncio.CancelledError):
                         await task
     asyncio.run(scenario())
+
+
+def test_negotiate_failure_clears_connection_without_idle_hang(tmp_path):
+    async def scenario():
+        async with network_bridge(tmp_path) as (hub, url):
+            headers = {"Authorization": f"Bearer {hub.token}", "Device-Id": MAC, "Protocol-Version": "1"}
+            async with connect(url, additional_headers=headers) as ws:
+                await ws.send(json.dumps({"type": "hello", "transport": "websocket", "version": 1, "features": {"mcp": True}}))
+                first = json.loads(await ws.recv())
+                assert first["type"] == "hello"
+                req = json.loads(await ws.recv())
+                assert req["type"] == "mcp"
+                await ws.send(json.dumps({
+                    "type": "mcp",
+                    "payload": {"jsonrpc": "2.0", "id": req["payload"]["id"], "error": {"message": "bad"}},
+                }))
+                # Even while the client socket has not sent a close frame, server clears hub.connection promptly.
+                async with asyncio.timeout(2):
+                    while hub.connection is not None:
+                        await asyncio.sleep(0.02)
+                assert hub.last_error == "设备能力协商失败；请重新连接并核对固件。"
+    asyncio.run(scenario())

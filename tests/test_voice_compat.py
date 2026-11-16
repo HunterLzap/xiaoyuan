@@ -31,7 +31,15 @@ def _wav_bytes(rate: int = 16000, frames: int = 160) -> bytes:
 def test_end_intent_precision_avoids_false_disconnects():
     assert _is_end_intent("闭嘴") is True
     assert _is_end_intent("塔菲，退下吧。") is True
+    assert _is_end_intent("塔菲退下") is True
+    assert _is_end_intent("太妃，关闭对话") is True
+    assert _is_end_intent("关闭") is True
+    assert _is_end_intent("好了，你先退下吧") is True
+    assert _is_end_intent("进入待机") is True
     assert _is_end_intent("好的，再见") is True
+    assert _is_end_intent("帮我关闭客厅灯") is False
+    assert _is_end_intent("今天几点关闭") is False
+    assert _is_end_intent("你去休息一下吗") is False
     assert _is_end_intent("这个项目什么时候结束") is False
     assert _is_end_intent("你不用管别人怎么说，直接查天气") is False
     assert _is_end_intent("刚才那句停止说话是什么意思") is False

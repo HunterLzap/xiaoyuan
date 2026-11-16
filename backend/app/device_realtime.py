@@ -549,10 +549,12 @@ class DeviceRealtime:
         elif kind == "idle":
             conn.voice_session_id = None
             conn.close_after_chat = True
+            conn.listening = False
             is_end_intent = isinstance(data, dict) and data.get("reason") == "end_intent"
             await self.stop_audio(interrupt=is_end_intent)
             await self._archive_metrics("end_intent" if is_end_intent else "idle")
-            await conn.send({"type": "ui", "state": "sleep"})
+            with suppress(Exception):
+                await conn.send({"type": "ui", "state": "sleep"})
             with suppress(Exception):
                 await conn.send({"type": "tts", "state": "stop"})
             with suppress(Exception):

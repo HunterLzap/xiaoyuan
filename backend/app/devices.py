@@ -376,10 +376,11 @@ class DeviceConnection:
         self.session_id = str(uuid4())
         self.client_abort = False
         self.close_after_chat = False
+        self.negotiate_error = False
         self.client_aec = False
         self.features = {}
-        from config.logger import setup_logging
         from .voice_transport import DeviceSocket
+        from config.logger import setup_logging
         self.logger = setup_logging()
         self.websocket = DeviceSocket(self)
 
@@ -460,21 +461,34 @@ class DeviceConnection:
         raise ProviderError(502, "device_tools_invalid", "设备工具列表分页异常。")
 
     async def negotiate(self):
+        stage = "initialize"
         try:
             await self.initialize()
+            logger.info("device_ready tools=%s server=%s", len(self.tools), self.server_info)
             # Keep the firmware's control channel active using a read-only status query.
             # WebSocket transport pings alone don't update its application-level timeout.
             # 15s is a proactive keepalive interval, not a confirmed EspTcp receive timeout.
             while True:
+                stage = "keepalive"
                 await asyncio.sleep(15)
-                async with self.hub.lock:
-                    if self.hub.connection is not self:
-                        return
-                    if "self.get_device_status" in self.tools:
-                        self.hub.last_status = await self.call("self.get_device_status", {})
-        except (ProviderError, AttributeError, TypeError, KeyError):
-            self.hub.last_error = "设备能力协商失败；请重新连接并核对固件。"
-            await self.ws.close(code=1008)
+                if self.hub.connection is not self:
+                    return
+                if "self.get_device_status" in self.tools:
+                    status = await self.call("self.get_device_status", {})
+                    if self.hub.connection is self:
+                        self.hub.last_status = status
+        except (ProviderError, AttributeError, TypeError, KeyError, OSError, RuntimeError) as error:
+            detail = error.code if isinstance(error, ProviderError) else type(error).__name__
+            logger.warning("device_negotiate_failed stage=%s ready=%s server_info=%s detail=%s",
+                           stage, self.ready, bool(self.server_info), detail)
+            self.negotiate_error = True
+            self.hub.last_error = (
+                "设备心跳超时已断开；按设备按钮可重新建立连接。"
+                if stage == "keepalive"
+                else "设备能力协商失败；请重新连接并核对固件。"
+            )
+            with suppress(Exception):
+                await self.ws.close(code=1008)
 
     async def call(self, name, arguments):
         if name not in self.tools:
@@ -563,6 +577,8 @@ def create_gateway(hub: DeviceHub):
         # A second connection cannot evict or claim the active device.
         async with hub.lock:
             if hub.connection is not None or not hub.authorized(ws.headers.get("device-id", ""), token):
+                logger.warning("device_ws_rejected active=%s authorized=%s",
+                               hub.connection is not None, hub.authorized(device_id, token))
                 await ws.close(code=1008)
                 return
             await ws.accept()
@@ -589,11 +605,22 @@ def create_gateway(hub: DeviceHub):
                                  "channels": 1, "frame_duration": 60},
             }
             await handleHelloMessage(conn, hello)
+            logger.info("device_hello_accepted session_id=%s features=%s", conn.session_id,
+                        sorted(key for key, value in conn.features.items() if value))
             hub.last_connected = hub.now()
             hub.last_error = None
             initialize_task = asyncio.create_task(conn.negotiate())
             while True:
-                packet = await asyncio.wait_for(ws.receive(), CONTROL_IDLE_SECONDS)
+                if initialize_task.done():
+                    break
+                recv_task = asyncio.create_task(asyncio.wait_for(ws.receive(), CONTROL_IDLE_SECONDS))
+                done, _ = await asyncio.wait({recv_task, initialize_task}, return_when=asyncio.FIRST_COMPLETED)
+                if recv_task not in done:
+                    recv_task.cancel()
+                    with suppress(asyncio.CancelledError, WebSocketDisconnect, TimeoutError, RuntimeError):
+                        await recv_task
+                    break
+                packet = recv_task.result()
                 if packet["type"] == "websocket.disconnect":
                     logger.info("device_disconnect_frame code=%s", packet.get("code"))
                     break
@@ -671,7 +698,8 @@ def create_gateway(hub: DeviceHub):
                         elif not realtime_mode:
                             await hub.flush_audio()
         except (WebSocketDisconnect, TimeoutError, json.JSONDecodeError, RuntimeError) as error:
-            hub.last_error = "设备控制连接已结束；按设备按钮可重新建立连接。"
+            if not conn.close_after_chat and not conn.negotiate_error:
+                hub.last_error = "设备控制连接已结束；按设备按钮可重新建立连接。"
             logger.info("device_connection_closed reason=%s frames_received=%s frames_dropped=%s listening=%s",
                         type(error).__name__, conn.frames_received, conn.frames_dropped, conn.listening)
         except ProviderError as error:

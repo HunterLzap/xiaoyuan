@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from contextlib import suppress
 import json
 import logging
 import re
@@ -25,13 +26,16 @@ from .audit_store import redact_value
 
 logger = logging.getLogger(__name__)
 
-_WAKE_PREFIX = re.compile(r"^(?:(?:小?塔?菲|小?菲|taffy)[，,、\s]+)+", re.I)
+_WAKE_PREFIX = re.compile(r"^(?:(?:小?(?:塔|太)[菲妃]|小?菲|taffy)[，,、\s]*)+", re.I)
 _TRAILING_PUNCT = re.compile(r"[。！!？?~～，,、.\s]+$")
-_POLITE_PREFIX = re.compile(r"^(?:好[的啦呀]?|先|请|你|那|行|快|赶紧|先去)[，,、\s]*")
-_POLITE_SUFFIX = re.compile(r"(?:[吧啦呀啊哦嘛]|好了|行吗|好吗)+$")
+_POLITE_PREFIX = re.compile(r"^(?:(?:好[的啦呀了]?|行[的啦呀了]?|先去?|请|你|那|快去?|赶紧|麻烦|可以了?)[，,、\s]*)+")
+_POLITE_SUFFIX = re.compile(r"(?:[吧啦呀啊哦嘛了]|一下|好了|行吗|好吗)+$")
 _EXACT_STOP_COMMANDS = {
-    "闭嘴", "关机", "退下", "闭口", "别说了", "不要说了", "停止说话", "别讲了", "不讲了",
-    "别念了", "停止播报", "停下", "先休息吧", "去休息吧", "你先休息", "退下休息",
+    "闭嘴", "关机", "关闭", "关闭对话", "关闭聊天", "关闭语音", "关闭连接",
+    "退下", "先退下", "退下休息", "闭口", "别说了", "不要说了", "停止说话", "别讲了", "不讲了",
+    "别念了", "停止播报", "停下", "先休息吧", "去休息吧", "你先休息",
+    "退出", "退出对话", "退出聊天", "待机", "进入待机", "去待机", "先待机",
+    "休息", "去休息", "先休息", "休眠", "结束",
 }
 _POLITE_GOODBYE_COMMANDS = {"再见", "拜拜", "不聊了", "不说了", "先这样", "结束对话", "结束聊天"}
 _QUESTION_MARKERS = re.compile(r"[吗？?]|怎么|什么|为什么|哪个|几|意思")
@@ -509,8 +513,15 @@ class RealtimeTurn:
                     if _is_end_intent(self.user):
                         if self.active_response:
                             self.ignore_responses.add(self.active_response)
+                            with suppress(ConnectionClosed, OSError, RuntimeError):
+                                await self.send("response.cancel")
+                        self.pending_tools.clear()
+                        self.pending_audio.clear()
+                        self.reply = ""
+                        self.saved = True
                         await self.audio.close()
-                        await self.send("session.update", session={"turn_detection": None})
+                        with suppress(ConnectionClosed, OSError, RuntimeError):
+                            await self.send("session.update", session={"turn_detection": None})
                         await self.emit("notice", "好的，我先休息了")
                         await self.emit("idle", {"reason": "end_intent"})
                         return
