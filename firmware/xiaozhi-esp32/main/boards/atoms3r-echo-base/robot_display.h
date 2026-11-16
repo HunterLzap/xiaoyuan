@@ -53,6 +53,9 @@ public:
             SetAssistantMode(false);
             return;
         }
+        if (updating_status_bar_) {
+            return;
+        }
         if (strcmp(status, Lang::Strings::STANDBY) == 0) {
             system_alert_ = false;
             resume_state_ = resting_ ? State::Sleep : State::Idle;
@@ -139,7 +142,9 @@ public:
 
     void UpdateStatusBar(bool update_all = false) override {
         if (!IsSetupUICalled()) return;
+        updating_status_bar_ = true;
         SpiLcdDisplay::UpdateStatusBar(update_all);
+        updating_status_bar_ = false;
         bool connected = WifiManager::GetInstance().IsConnected();
         time_t now = time(nullptr);
         struct tm local {};
@@ -167,8 +172,12 @@ public:
             DisplayLockGuard lock(this);
             bool non_empty = content != nullptr && content[0] != '\0';
             system_alert_ = non_empty;
-            if (non_empty || !IsAssistantDeviceState(Application::GetInstance().GetDeviceState())) {
+            auto dev_state = Application::GetInstance().GetDeviceState();
+            if (non_empty || !IsAssistantDeviceState(dev_state)) {
                 SetAssistantMode(false);
+            } else {
+                SetAssistantMode(true);
+                SwitchAnimation(network_connected_ ? resume_state_ : State::Disconnected);
             }
         }
     }
@@ -178,7 +187,8 @@ public:
         if (!IsSetupUICalled() || !notification || notification[0] == '\0') return;
         DisplayLockGuard lock(this);
         auto dev_state = Application::GetInstance().GetDeviceState();
-        if (!IsAssistantDeviceState(dev_state) || dev_state == kDeviceStateIdle) {
+        if (!IsAssistantDeviceState(dev_state)
+            || strcmp(notification, Lang::Strings::ENTERING_WIFI_CONFIG_MODE) == 0) {
             system_alert_ = true;
             SetAssistantMode(false);
         }
@@ -210,6 +220,7 @@ private:
     bool frames_loaded_ = false;
     bool assistant_mode_ = false;
     bool system_alert_ = false;
+    bool updating_status_bar_ = false;
 
     static bool IsAssistantDeviceState(DeviceState dev_state) {
         return dev_state == kDeviceStateIdle
