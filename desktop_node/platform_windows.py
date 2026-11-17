@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -309,6 +310,7 @@ class WindowsDesktopAdapter(DesktopAdapter):
                             subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{target_ref}"], shell=False)
                         else:
                             os.startfile(target_ref)
+                        time.sleep(0.7)
                         return {"ok": True, "opened": target_ref, "requested": clean}
                     aliases = _WIN_APP_ALIASES.get(clean.lower(), ())
                     launch_name = aliases[0] if aliases else clean
@@ -316,6 +318,7 @@ class WindowsDesktopAdapter(DesktopAdapter):
                         os.startfile(launch_name)
                     else:
                         subprocess.Popen(["cmd", "/c", "start", "", launch_name], shell=False)
+                    time.sleep(0.7)
         except OSError as error:
             raise DesktopRpcError("open_failed", f"打开失败：{error}") from None
         return {"ok": True, "opened": clean}

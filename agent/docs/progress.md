@@ -2,7 +2,27 @@
 
 更新：2026-11-17。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
-## 方案 A 桌面体验增强、通用应用解析与全系统异常日志中心（2026-11-17，Mac 本机完成并待推云发布）
+## 全链路执行感知（SSE + 桌面悬浮边框 HUD）与多步连贯操控升级（2026-11-17，继 `69ea876` 后 Mac 本机完成）
+
+- **解决的实际问题**：
+  - 用户反馈“如何知道他在执行”且电脑操作期间需要在本机屏幕边缘与顶部看到正在操作的视觉感知；同时反馈“打开飞书并打开某人的对话框”做到打开飞书即停下。
+- **改动范围**：
+  - **实时 SSE 进度推送（`service.py` / `main.py` / `tool_dialogue.py` / `app.js` / `app.css`）**：`TurnTools` 挂载 `on_progress` 回调并在 `ChatService.turn()` 通过合并队列实时流式吐出 `tool`（`start` / `end`，输入文字自动脱敏为字数）；`POST /chat/stream` 输出 SSE（`session`/`tool`/`text`/`done`/`error`），前端在回答生成期间实时刷新动态状态与呼吸灯工具胶囊。
+  - **跨平台屏幕边框与顶部 HUD（`desktop_node/overlay.py` / `client.py`）**：macOS 按 SHA 按需编译轻量原生 Swift `NSPanel`（`.nonactivatingPanel`、`ignoresMouseEvents = true`、`.canJoinAllSpaces | .fullScreenAuxiliary`、`sharingType = .none`，顶部胶囊避开 MacBook Air 刘海区域）；Windows 使用标准库 `tkinter` + Win32 `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` + `WDA_EXCLUDEFROMCAPTURE`（不抢焦点、鼠标穿透、截屏自动隐藏悬浮层）。`_handle_request` 执行前高亮并显示操作名，空闲 `4.5s` 自动隐藏，同时终端按 `logger.info` 输出 RPC 起止耗时日志（支持 `--no-hud` 禁用）。
+  - **多步桌面连贯上限与前置等待（`tool_dialogue.py` / `tool_gateway.py` / `text_tool_selection.py` / `realtime_text.py` / `realtime.py` / `platform_macos.py` / `platform_windows.py`）**：激活桌面工具时 `turn_limits` 放宽至 `MAX_DESKTOP_TOOL_ROUNDS = 10` / `MAX_DESKTOP_TOOL_CALLS = 20`（普通轮次维持 `4 / 8`），`Turn` 超时下限放宽至 `90–120s`；`TextToolSelection` 覆盖“打开应用/飞书/找人/对话框”预设线索；`open_target` 启动应用后短暂等待 `0.6–0.7s` 让窗口前置；`order_state_text` 在 `approve_desktop_lease` / 确认恢复后提醒模型继续推进完原目标全部桌面步骤。
+- **本机最终代码后实测与验证（Mac Darwin / `.venv` Python 3.12.13）**：
+  - Mac 原生 Swift HUD 编译与进程调用实测：`.venv/bin/python` 调用 `ScreenOverlayHUD` 成功编译 `~/.cache/xiaodan/desktop-hud-b92a66648c4a` 并完成 `show` / `hide` / `close` 退出（`overlay_ok`）。
+  - `node --check backend/app/app.js && node --check backend/app/voice.js`：通过（0 错误）。
+  - `.venv/bin/python -m py_compile desktop_node/*.py`：通过（0 错误）。
+  - `.venv/bin/python scripts/lint_incremental.py`：`ruff=18, pyright=119, baseline=146, new=0`。
+  - `.venv/bin/pytest tests/test_desktop_bridge.py tests/test_gateway_trace.py tests/test_personal_kb_isolation.py tests/test_realtime_failures.py tests/test_voice_compat.py tests/test_devices.py tests/test_voices.py -v`：**49 passed, 0 failed（83.96s）**（新增覆盖 `/chat/stream` SSE 实时步骤推送、6 轮连续 Computer Use 不触发旧 4 轮上限、`TextToolSelection` 应用名匹配及 `_describe_rpc_for_hud` / `_handle_request`）。
+  - `.venv/bin/pytest tests/test_knowledge.py -k "not chat_uses and not retrieval_failure" -v`：**10 passed, 2 deselected（0.91s）**。
+  - `.venv/bin/pytest tests/test_voice_chat.py -k "not voice_routes and not reset_invalidates and not http_disconnect" -v`：**3 passed, 3 deselected（0.65s）**。
+- **尚未验证 / 留待后续确认（不宣称已实机验收）**：
+  - Windows 真机 `tkinter` + Win32 `WS_EX_TRANSPARENT` / `WDA_EXCLUDEFROMCAPTURE` 边框视觉效果与多步真实点击尚未在 Windows 运行验证；
+  - Mac 本机视觉效果在 `desktop_node` 重启接云并从网页实际下发「打开飞书并打开某人对话框」后做现场目视确认。
+
+## 方案 A 桌面体验增强、通用应用解析与全系统异常日志中心（2026-11-17，`69ea876` 已推送）
 
 - **真实基线与现场问题（`82afc7c-20261117-093433`）**：
   - 真实 Mac 节点 `ryandeMacBook-Air.local`（`1470×956`）通过 `wss://ryan406.online/xiaoyuan/desktop/v1/` 接入云端；网页对话实测 `观察电脑屏幕 · 684ms` 正确识别前台 Chrome 窗口，触发 `打开电脑应用/链接` 确认卡片并点击「确认执行」执行闭环。

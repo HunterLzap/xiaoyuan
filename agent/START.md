@@ -11,6 +11,8 @@
    - **Agent 内核与确认租约**：`SideEffectConfirmationStore` 支持 `approval_id` / 300s TTL / `POST /api/approvals/{id}` 交互确认卡片，新增 `approve_desktop_lease`（3 分钟桌面操控免重复弹窗，仅限 `desktop_open` / `desktop_gui_action` / `desktop_set_clipboard`，`desktop_run_command` 与外部 HTTP API 仍强制逐次确认）；工具提示约束未审批不提前口头承诺已完成。
    - **跨平台桌面节点增强（`desktop_node/` + `backend/app/desktop.py`）**：WebSocket 直连禁用代理（`proxy=None`，可选 `--use-system-proxy`）与 30s 应用层心跳；Windows 与 macOS 通用应用名解析（中英文别名表 + macOS `Info.plist`/`zh-Hans.lproj`/`InfoPlist.strings`/Spotlight `mdfind` + Windows 开始菜单 `.lnk`/`.url`/注册表 `App Paths`/UWP `Get-StartApps`）；百炼实时模式下默认使用 `compatible-mode/v1` + `qwen3-vl-plus`（可自定义 `desktop_vision_model`）看图定位。
    - **全系统异常日志中心（`error_log.py` + `执行洞察 → 异常日志`）**：统一收集硬件设备、桌面节点、模型对话/工具失败、FastAPI 4xx/5xx（含 500 堆栈摘要）到 `assistant_state.sqlite3` `system_errors` 表（上限 300 条并自动脱敏 `?key=`/`Bearer`/密钥），新增 `GET/DELETE /api/insights/errors` 与 Web 端「执行洞察 → 异常日志」分页筛选与清空面板。
+   - **全链路实时执行感知（网页 + 桌面终端 + 本机屏幕框）**：新增 `POST /chat/stream` SSE 事件流与前端实时步骤胶囊（`app.js` 显示 `tool` 执行状态、参数摘要与实时流式正文）；`desktop_node/client.py` 控制台打印 RPC 起止耗时日志；新增跨平台点击穿透透明悬浮窗 `desktop_node/overlay.py`（macOS 原生 Swift `NSPanel` 避免刘海遮挡及抢焦点，Windows `tkinter` + `WS_EX_TRANSPARENT|WS_EX_NOACTIVATE` + `WDA_EXCLUDEFROMCAPTURE` 避开截屏），操作期间显示全屏蓝青边框及顶部「小安正在操作电脑」状态胶囊。
+   - **多步桌面连贯执行升级**：激活桌面工具时单轮上限放宽至 `10` 轮 / `20` 次调用、`timeout` 放宽至 `120s+`、`TextToolSelection` 覆盖“打开应用/飞书/找人聊天”自然指令、`open_target` 增加约 `0.7s` 窗口前置等待，授权提示与 `DESKTOP_TOOL_NAMES` 指令明确引导串联 `打开→看屏→搜索/点击→核实` 完整目标。
    - **Agent 优先单用户 UI**：保留 Codex 灰阶主题、「Agent 与档案」「技能与知识」「终端节点（Windows/Mac + AtomS3R）」及语音面板完整功能。
 
 - 保留既有实时主线模型 `qwen3.8-omni-flash-realtime`、塔菲复刻音色与唤醒/待机/卡顿暂缓约定，不擅自更改语音服务或重置历史数据。

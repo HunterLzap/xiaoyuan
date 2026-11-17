@@ -10,6 +10,7 @@ import plistlib
 import re
 import subprocess
 import tempfile
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -339,9 +340,12 @@ class MacOSDesktopAdapter(DesktopAdapter):
             if resolved_bundle:
                 proc2 = subprocess.run(["open", resolved_bundle], capture_output=True, text=True, timeout=10)
                 if proc2.returncode == 0:
+                    time.sleep(0.7)
                     return {"ok": True, "opened": resolved_bundle, "requested": clean}
         if proc.returncode != 0:
             raise DesktopRpcError("open_failed", proc.stderr.strip() or f"打开失败：{clean}")
+        if kind == "app" or not is_url:
+            time.sleep(0.6)
         return {"ok": True, "opened": clean}
 
     def gui_action(

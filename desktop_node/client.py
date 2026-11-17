@@ -10,7 +10,9 @@ import platform
 import re
 import socket
 import sys
+import time
 
+from .overlay import ScreenOverlayHUD
 from .platform_base import DesktopAdapter, DesktopRpcError
 
 logger = logging.getLogger("desktop_node")
@@ -82,6 +84,39 @@ def execute_rpc(
     raise DesktopRpcError("unsupported_action", f"未知操作：{action}")
 
 
+def _describe_rpc_for_hud(action: str, params: dict) -> tuple[str, str]:
+    if action == "screenshot":
+        return ("观察电脑屏幕", "")
+    if action == "open":
+        target = str(params.get("target") or "").strip()
+        return ("打开应用或链接", target[:32])
+    if action == "gui_action":
+        sub = str(params.get("action") or "").strip()
+        if sub in {"click", "double_click", "right_click", "move"}:
+            return ("鼠标点击操作", f"{sub} ({params.get('x')}, {params.get('y')})")
+        if sub == "type_text":
+            count = len(str(params.get("text") or ""))
+            return ("输入文字", f"{count} 字" if count else "")
+        if sub == "hotkey":
+            keys = params.get("keys")
+            combo = "+".join(str(k) for k in keys[:4]) if isinstance(keys, list) else ""
+            return ("触发快捷键", combo)
+        if sub == "scroll":
+            return ("滚动页面", "")
+        return ("界面操控", sub)
+    if action == "clipboard_get":
+        return ("读取剪贴板", "")
+    if action == "clipboard_set":
+        return ("写入剪贴板", f"{len(str(params.get('text') or ''))} 字")
+    if action == "list_dir":
+        return ("浏览目录", "")
+    if action == "read_file":
+        return ("读取文件内容", "")
+    if action == "run_command":
+        return ("执行终端命令", "")
+    return ("处理操作", action)
+
+
 async def _handle_request(
     ws,
     adapter: DesktopAdapter,
@@ -89,17 +124,27 @@ async def _handle_request(
     *,
     allow_shell: bool,
     allow_gui: bool,
+    hud: ScreenOverlayHUD | None = None,
 ) -> None:
     req_id = msg.get("request_id")
     action = str(msg.get("action") or "")
     params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+    label, detail = _describe_rpc_for_hud(action, params)
+    logger.info("[RPC] %s %s", action, detail or "-")
+    if hud is not None:
+        hud.show(label, detail)
+    started = time.perf_counter()
     try:
         result = await asyncio.to_thread(
             execute_rpc, adapter, action, params,
             allow_shell=allow_shell, allow_gui=allow_gui,
         )
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.info("[RPC] %s -> ok (%dms)", action, elapsed_ms)
         await ws.send(json.dumps({"type": "rpc_response", "request_id": req_id, "ok": True, "result": result}, ensure_ascii=False))
     except DesktopRpcError as error:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.warning("[RPC] %s -> error:%s (%dms): %s", action, error.code, elapsed_ms, error.message)
         await ws.send(json.dumps({
             "type": "rpc_response",
             "request_id": req_id,
@@ -107,12 +152,17 @@ async def _handle_request(
             "error": {"code": error.code, "message": error.message},
         }, ensure_ascii=False))
     except Exception as error:
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        logger.warning("[RPC] %s -> exception:%s (%dms)", action, type(error).__name__, elapsed_ms)
         await ws.send(json.dumps({
             "type": "rpc_response",
             "request_id": req_id,
             "ok": False,
             "error": {"code": "desktop_internal_error", "message": f"本地执行异常：{type(error).__name__}"},
         }, ensure_ascii=False))
+    finally:
+        if hud is not None:
+            hud.schedule_hide(4.5)
 
 
 async def _heartbeat_loop(ws) -> None:
@@ -130,6 +180,7 @@ async def run_node(
     allow_shell: bool = True,
     allow_gui: bool = True,
     use_system_proxy: bool = False,
+    show_hud: bool = True,
 ) -> None:
     try:
         import websockets
@@ -137,62 +188,67 @@ async def run_node(
         raise RuntimeError("缺少依赖 websockets：请运行 pip install -r desktop_node/requirements-desktop.txt") from error
 
     adapter = build_adapter()
+    hud = ScreenOverlayHUD(enabled=show_hud)
     hostname = socket.gethostname()
     resolved_id = (node_id or default_node_id(adapter.os_name, hostname)).strip()
     resolved_name = (name or f"{hostname} ({'Mac' if adapter.os_name == 'macos' else 'Windows'})").strip()
     headers = {"Authorization": f"Bearer {token}"}
     backoff = 2.0
-    while True:
-        hb_task: asyncio.Task | None = None
-        try:
-            logger.info("Connecting desktop node [%s / %s] -> %s", resolved_id, adapter.os_name, server)
-            async with websockets.connect(
-                server,
-                additional_headers=headers,
-                proxy=True if use_system_proxy else None,
-                max_size=8 * 1024 * 1024,
-                ping_interval=20,
-                ping_timeout=20,
-            ) as ws:
-                backoff = 2.0
-                screen = await asyncio.to_thread(adapter.screen_size)
-                await ws.send(json.dumps({
-                    "type": "hello",
-                    "node_id": resolved_id,
-                    "name": resolved_name,
-                    "os": adapter.os_name,
-                    "hostname": hostname,
-                    "arch": platform.machine(),
-                    "screen": screen,
-                    "capabilities": adapter.capabilities(allow_shell=allow_shell, allow_gui=allow_gui),
-                }, ensure_ascii=False))
-                hb_task = asyncio.create_task(_heartbeat_loop(ws))
-                while True:
-                    raw = await ws.recv()
-                    msg = json.loads(raw)
-                    if not isinstance(msg, dict):
-                        continue
-                    kind = msg.get("type")
-                    if kind == "welcome":
-                        logger.info("Connected! Node ready: %s (%s)", resolved_name, screen)
-                    elif kind == "rpc_request":
-                        asyncio.create_task(_handle_request(
-                            ws, adapter, msg, allow_shell=allow_shell, allow_gui=allow_gui,
-                        ))
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            logger.warning("Desktop connection ended (%s: %s), reconnecting in %.0fs...",
-                           type(error).__name__, error, backoff)
-            await asyncio.sleep(backoff)
-            backoff = min(backoff * 1.5, 30.0)
-        finally:
-            if hb_task is not None:
-                hb_task.cancel()
-                try:
-                    await hb_task
-                except (asyncio.CancelledError, Exception):
-                    pass
+    try:
+        while True:
+            hb_task: asyncio.Task | None = None
+            try:
+                logger.info("Connecting desktop node [%s / %s] -> %s", resolved_id, adapter.os_name, server)
+                async with websockets.connect(
+                    server,
+                    additional_headers=headers,
+                    proxy=True if use_system_proxy else None,
+                    max_size=8 * 1024 * 1024,
+                    ping_interval=20,
+                    ping_timeout=20,
+                ) as ws:
+                    backoff = 2.0
+                    screen = await asyncio.to_thread(adapter.screen_size)
+                    await ws.send(json.dumps({
+                        "type": "hello",
+                        "node_id": resolved_id,
+                        "name": resolved_name,
+                        "os": adapter.os_name,
+                        "hostname": hostname,
+                        "arch": platform.machine(),
+                        "screen": screen,
+                        "capabilities": adapter.capabilities(allow_shell=allow_shell, allow_gui=allow_gui),
+                    }, ensure_ascii=False))
+                    hb_task = asyncio.create_task(_heartbeat_loop(ws))
+                    while True:
+                        raw = await ws.recv()
+                        msg = json.loads(raw)
+                        if not isinstance(msg, dict):
+                            continue
+                        kind = msg.get("type")
+                        if kind == "welcome":
+                            logger.info("Connected! Node ready: %s (%s)", resolved_name, screen)
+                        elif kind == "rpc_request":
+                            asyncio.create_task(_handle_request(
+                                ws, adapter, msg, allow_shell=allow_shell, allow_gui=allow_gui, hud=hud,
+                            ))
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning("Desktop connection ended (%s: %s), reconnecting in %.0fs...",
+                               type(error).__name__, error, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 1.5, 30.0)
+            finally:
+                hud.hide()
+                if hb_task is not None:
+                    hb_task.cancel()
+                    try:
+                        await hb_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+    finally:
+        hud.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -204,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--name", default=os.environ.get("DESKTOP_NODE_NAME", ""), help="Optional display name")
     parser.add_argument("--no-shell", action="store_true", help="Disable run_command RPC on this machine")
     parser.add_argument("--no-gui", action="store_true", help="Disable mouse/keyboard gui_action RPC on this machine")
+    parser.add_argument("--no-hud", action="store_true", help="Disable screen border and top status pill overlay during operations")
     parser.add_argument("--use-system-proxy", action="store_true", help="Follow OS/env SOCKS/HTTP proxy instead of direct connection")
     args = parser.parse_args(argv)
     if not args.server or not args.token:
@@ -217,6 +274,7 @@ def main(argv: list[str] | None = None) -> int:
             allow_shell=not args.no_shell,
             allow_gui=not args.no_gui,
             use_system_proxy=args.use_system_proxy,
+            show_hud=not args.no_hud,
         ))
     except KeyboardInterrupt:
         return 0

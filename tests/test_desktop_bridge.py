@@ -25,8 +25,9 @@ from backend.app.main import create_app
 from backend.app.prompt_builder import build_system_prompt
 from backend.app.realtime import RealtimeTurn
 from backend.app.settings_store import SettingsStore
+from backend.app.text_tool_selection import TextToolSelection
 from backend.app.tool_gateway import SideEffectConfirmationStore
-from desktop_node.client import default_node_id, execute_rpc
+from desktop_node.client import _describe_rpc_for_hud, _handle_request, default_node_id, execute_rpc
 from desktop_node.platform_base import DesktopAdapter, DesktopRpcError
 from desktop_node.platform_macos import MacOSDesktopAdapter
 from desktop_node.platform_windows import WindowsDesktopAdapter
@@ -646,3 +647,186 @@ def test_windows_app_resolver_shortcuts_and_uwp(tmp_path, monkeypatch):
         ),
     )
     assert adapter._resolve_windows_app("微信") == ("uwp", "Tencent.WeChat_8wekyb3d8bbwe!App")
+
+
+def test_chat_stream_sse_progress_and_multistep_desktop_limit(tmp_path, monkeypatch):
+    # 1. TextToolSelection matches "打开飞书找张三聊天" directly without saying "电脑/桌面".
+    cfg = _base_settings(tmp_path)
+    hub = DesktopHub(path=tmp_path / "desktop_nodes.json", port=8003)
+    app = create_app(
+        cfg,
+        settings_store=SettingsStore(tmp_path / ".env"),
+        provider_factory=lambda c: _ScriptedLLM([
+            # Turn 1: initial open blocked before lease
+            [Completion(reply="", usage=None, finish_reason="tool_calls", tool_calls=[{
+                "id": "c-ask", "type": "function",
+                "function": {"name": "desktop_open", "arguments": '{"target": "飞书"}'},
+            }])],
+            ["请先确认打开飞书。", Completion(reply="请先确认打开飞书。", usage=None, finish_reason="stop")],
+            # Turn 2: after approve_desktop_lease -> 6 consecutive tool rounds (> old limit 4!)
+            [Completion(reply="", usage=None, finish_reason="tool_calls", tool_calls=[{
+                "id": "r1", "type": "function",
+                "function": {"name": "desktop_open", "arguments": '{"target": "飞书"}'},
+            }])],
+            [Completion(reply="", usage=None, finish_reason="tool_calls", tool_calls=[{
+                "id": "r2", "type": "function",
+                "function": {"name": "desktop_inspect_screen", "arguments": '{"question": "飞书是否前置"}'},
+            }])],
+            [Completion(reply="", usage=None, finish_reason="tool_calls", tool_calls=[{
+                "id": "r3", "type": "function",
+                "function": {"name": "desktop_gui_action", "arguments": '{"action": "hotkey", "keys": ["command", "k"]}'},
+            }])],
+            [Completion(reply="", usage=None, finish_reason="tool_calls", tool_calls=[{
+                "id": "r4", "type": "function",
+                "function": {"name": "desktop_gui_action", "arguments": '{"action": "type_text", "text": "张三"}'},
+            }])],
+            [Completion(reply="", usage=None, finish_reason="tool_calls", tool_calls=[{
+                "id": "r5", "type": "function",
+                "function": {"name": "desktop_inspect_screen", "arguments": '{"question": "联系人位置"}'},
+            }])],
+            [Completion(reply="", usage=None, finish_reason="tool_calls", tool_calls=[{
+                "id": "r6", "type": "function",
+                "function": {"name": "desktop_gui_action", "arguments": '{"action": "click", "x": 180, "y": 140}'},
+            }])],
+            ["已打开飞书并切换到张三的对话框。", Completion(reply="已打开飞书并切换到张三的对话框。", usage=None, finish_reason="stop")],
+        ]),
+        desktop_hub=hub,
+    )
+    rpc_calls = []
+
+    class _FakeNode:
+        node_id = "mac-main"
+        name = "My Mac"
+        os_name = "macos"
+        hostname = "mac"
+        arch = "arm64"
+        capabilities = ["screenshot", "open", "gui", "shell"]
+        screen = {"width": 1470, "height": 956}
+        connected_at = "2026-11-17T00:00:00+00:00"
+        last_seen_at = "2026-11-17T00:00:00+00:00"
+        last_screenshot = None
+
+        class _Ws:
+            async def close(self, code=1000):
+                pass
+
+        ws = _Ws()
+
+        def close(self):
+            pass
+
+        def public(self):
+            return {"node_id": self.node_id, "name": self.name, "os": self.os_name, "online": True}
+
+        async def rpc(self, action, params=None, timeout=25.0):
+            rpc_calls.append(action)
+            if action == "screenshot":
+                return {
+                    "image_base64": base64.b64encode(b"fake").decode("ascii"),
+                    "mime_type": "image/jpeg",
+                    "image_width": 1280,
+                    "image_height": 800,
+                    "screen_width": 1470,
+                    "screen_height": 956,
+                    "active_window": {"app": "Lark", "title": "飞书"},
+                }
+            return {"ok": True}
+
+    hub.active["mac-main"] = _FakeNode()  # type: ignore[assignment]
+    monkeypatch.setattr(
+        "backend.app.desktop.DesktopHub._analyze_screenshot",
+        lambda self, **kw: asyncio.sleep(0, result={"vision_analysis": "搜索框在左侧"}),
+    )
+
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        sel = client.put("/api/assistant/selection", json={"selected_tool_ids": ["desktop_control"], "selected_kb_ids": []}, headers=HEADERS)
+        assert sel.status_code == 200
+
+        # Check TextToolSelection preloading on app-launch phrasing without saying "电脑"
+        ctx = app.state.service.tool_context(app.state.service.new_session(), uuid4(), "text", "帮我打开飞书找张三聊天")
+        tts = TextToolSelection(ctx)
+        assert "desktop_open" in tts.active_names()
+        assert "desktop_gui_action" in tts.active_names()
+
+        res1 = client.post("/chat", json={"message": "帮我打开飞书找张三聊天"})
+        assert res1.status_code == 200, res1.text
+        r1 = res1.json()
+        sid = r1["session_id"]
+        pa_id = r1["pending_approval"]["approval_id"]
+        dec = client.post(
+            f"/api/approvals/{pa_id}",
+            json={"decision": "approve_desktop_lease", "session_id": sid},
+            headers=HEADERS,
+        )
+        assert dec.status_code == 200
+
+        # Stream turn 2 over /chat/stream SSE and verify real-time tool events + 6-round completion.
+        with client.stream("POST", "/chat/stream", json={"session_id": sid, "message": "确认执行"}) as stream_res:
+            assert stream_res.status_code == 200
+            raw_sse = "".join(stream_res.iter_text())
+
+        events = []
+        for block in raw_sse.strip().split("\n\n"):
+            ev_name, ev_data = "", ""
+            for line in block.splitlines():
+                if line.startswith("event:"):
+                    ev_name = line[6:].strip()
+                elif line.startswith("data:"):
+                    ev_data = line[5:].strip()
+            if ev_name and ev_data:
+                events.append((ev_name, json.loads(ev_data)))
+
+        tool_events = [item for item in events if item[0] == "tool"]
+        assert any(ev["phase"] == "start" and ev["tool_name"] == "desktop_open" and ev["detail"] == "飞书" for _, ev in tool_events)
+        assert any(ev["phase"] == "end" and ev["tool_name"] == "desktop_gui_action" and ev["status"] == "ok" for _, ev in tool_events)
+        done_payload = [ev for kind, ev in events if kind == "done"][-1]
+        assert "已打开飞书" in done_payload["reply"]
+        assert len(rpc_calls) == 6
+        # Verify masking in progress summary for typed text
+        type_ev = [ev for _, ev in tool_events if ev.get("tool_name") == "desktop_gui_action" and "输入" in ev.get("detail", "")]
+        assert type_ev and "张三" not in type_ev[0]["detail"]
+        assert "2 字" in type_ev[0]["detail"]
+
+
+def test_desktop_node_hud_description_and_handle_request():
+    assert _describe_rpc_for_hud("open", {"target": "飞书"}) == ("打开应用或链接", "飞书")
+    assert _describe_rpc_for_hud("gui_action", {"action": "type_text", "text": "top-secret"}) == ("输入文字", "10 字")
+    assert _describe_rpc_for_hud("gui_action", {"action": "hotkey", "keys": ["command", "k"]}) == ("触发快捷键", "command+k")
+
+    events = []
+
+    class _FakeHud:
+        def show(self, label, detail=""):
+            events.append(("show", label, detail))
+
+        def schedule_hide(self, delay=4.5):
+            events.append(("schedule_hide", delay))
+
+    class _FakeWs:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, text):
+            self.sent.append(json.loads(text))
+
+    class _FakeAdapter:
+        os_name = "macos"
+
+        def screen_size(self):
+            return {"width": 1000, "height": 800}
+
+        def capture_screenshot(self, **kw):
+            return {"image_base64": "x"}
+
+    ws = _FakeWs()
+    asyncio.run(_handle_request(
+        ws,
+        _FakeAdapter(),  # type: ignore[arg-type]
+        {"request_id": "req-hud-1", "action": "screenshot", "params": {}},
+        allow_shell=True,
+        allow_gui=True,
+        hud=_FakeHud(),
+    ))
+    assert events[0] == ("show", "观察电脑屏幕", "")
+    assert events[1][0] == "schedule_hide"
+    assert ws.sent[0]["ok"] is True

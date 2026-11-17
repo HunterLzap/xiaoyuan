@@ -14,9 +14,9 @@ from websockets.exceptions import ConnectionClosed
 from .audio_codec import resample_pcm16_mono
 from .llm import Completion, ProviderError
 from .schemas import TokenUsage
-from .tool_dialogue import (MAX_TOOL_ROUNDS, MUTATING_CONTROL_TOOLS, combine_usage,
+from .tool_dialogue import (MUTATING_CONTROL_TOOLS, combine_usage,
                             control_request_tools, control_history,
-                            control_plan, describe_control)
+                            control_plan, describe_control, turn_limits)
 from .order_confirmation import RealtimeOrderGuard
 from .speech_text import normalize_for_speech, function_call_output_payload
 from .prompt_builder import build_system_prompt
@@ -153,16 +153,18 @@ class RealtimeTurn:
         order_state = self.tool_context.order_state_text()
         if order_state:
             turn_state += "\n" + order_state
+        max_rounds, _ = turn_limits(getattr(self.tool_context, "allowed", None))
         tool_names = ([item.get("function", item)["name"] for item in self._realtime_tool_definitions()]
                       if getattr(self.tool_context, "registry", None)
-                      and self.tool_rounds < MAX_TOOL_ROUNDS and not self.control_continuation else [])
+                      and self.tool_rounds < max_rounds and not self.control_continuation else [])
         return build_system_prompt(self.config, "voice", tool_names, turn_state)
 
     async def refresh_tools(self):
+        max_rounds, _ = turn_limits(getattr(self.tool_context, "allowed", None))
         session_patch: dict = {
             "tools": self._realtime_tool_definitions(nested=self.config.rt_provider == "bailian")
                      if getattr(self.tool_context, "registry", None)
-                     and self.tool_rounds < MAX_TOOL_ROUNDS and not self.control_continuation else [],
+                     and self.tool_rounds < max_rounds and not self.control_continuation else [],
             "instructions": self.tool_instructions(),
         }
         if self._compatible_ga:
@@ -619,7 +621,8 @@ class RealtimeTurn:
                             if not self.continuous or self.input_closed:
                                 return
                             continue
-                        if self.tool_rounds >= MAX_TOOL_ROUNDS:
+                        max_rounds, _ = turn_limits(getattr(self.tool_context, "allowed", None))
+                        if self.tool_rounds >= max_rounds:
                             raise ValueError("tool_limit")
                         self.tool_rounds += 1
                         items = list(self.pending_tools.values())

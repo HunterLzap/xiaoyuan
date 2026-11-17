@@ -2,7 +2,7 @@
 const appPath = window.assistantPaths.path;
 const appFetch = window.assistantPaths.fetch;
 const el = id => document.getElementById(id);
-const state = { loaded:false, configured:false, busy:false, view:"chat", sessions:[], active:null, detail:null, pending:null, failure:null, m5stackEnabled:true, useKnowledge:false, pendingKnowledge:false };
+const state = { loaded:false, configured:false, busy:false, view:"chat", sessions:[], active:null, detail:null, pending:null, pendingSteps:[], pendingText:"", failure:null, m5stackEnabled:true, useKnowledge:false, pendingKnowledge:false };
 const configIds = ["provider", "base_url", "model", "models_protocol"];
 const MANUAL = "__manual__";
 const SESSION_PAGE = 25;
@@ -169,14 +169,14 @@ async function selectSession(id) {
   busy(true);
   try {
     const detail = await request(`/sessions/${id}`);
-    state.active = id; state.detail = detail; state.pending = null; state.failure = null;
+    state.active = id; state.detail = detail; state.pending = null; state.pendingSteps = []; state.pendingText = ""; state.failure = null;
     remember("atoms3r.active", id); el("message").value = ""; fitComposer();
     navigate("chat"); renderMessages();
   } catch (error) { notice(error.message, "error"); } finally { busy(false); }
 }
 function newConversation() {
   if (state.busy) return;
-  state.active = null; state.detail = null; state.pending = null; state.failure = null;
+  state.active = null; state.detail = null; state.pending = null; state.pendingSteps = []; state.pendingText = ""; state.failure = null;
   remember("atoms3r.active", null); el("message").value = ""; fitComposer();
   navigate("chat"); renderMessages(); el("message").focus();
 }
@@ -360,7 +360,8 @@ function renderMessageReferences(article,message) {
         const pill = node("span", `tool-pill tool-pill-${st}`);
         pill.append(node("i", "tool-pill-dot"));
         const label = toolDisplayName(call.tool_name || call.name);
-        pill.append(document.createTextNode(call.elapsed_ms != null ? `${label} · ${call.elapsed_ms}ms` : label));
+        const titled = call.detail ? `${label} · ${call.detail}` : label;
+        pill.append(document.createTextNode(call.elapsed_ms != null ? `${titled} · ${call.elapsed_ms}ms` : titled));
         strip.append(pill);
       }
       const footer = article.querySelector(".message-footer");
@@ -535,7 +536,29 @@ function renderMessages() {
   if (state.pending || state.failure) {
     area.append(messageNode({role:"user", content:state.pending || state.failure.message}));
     if (state.pending) {
-      const pending = node("div", "pending-text"); pending.append(node("span", "pending-dot"), document.createTextNode(state.pendingKnowledge ? "正在查询官方资料并生成回答…" : "正在思考…")); area.append(pending);
+      const box = node("div", "pending-live-box");
+      const activeStep = [...state.pendingSteps].reverse().find(step => step.status === "running");
+      const statusText = activeStep
+        ? `正在${toolDisplayName(activeStep.tool_name)}${activeStep.detail ? `：${activeStep.detail}` : ""}…`
+        : (state.pendingKnowledge ? "正在查询官方资料并生成回答…" : "正在思考…");
+      const pending = node("div", "pending-text");
+      pending.append(node("span", "pending-dot"), document.createTextNode(statusText));
+      box.append(pending);
+      if (state.pendingSteps.length) {
+        const strip = node("div", "tool-pills");
+        for (const step of state.pendingSteps) {
+          const pill = node("span", `tool-pill tool-pill-${step.status || "running"}`);
+          pill.append(node("i", "tool-pill-dot"));
+          const label = toolDisplayName(step.tool_name);
+          const titled = step.detail ? `${label} · ${step.detail}` : label;
+          const suffix = step.status === "running" ? " · 进行中…" : (step.elapsed_ms != null ? ` · ${step.elapsed_ms}ms` : "");
+          pill.append(document.createTextNode(`${titled}${suffix}`));
+          strip.append(pill);
+        }
+        box.append(strip);
+      }
+      if (state.pendingText) box.append(markdown(state.pendingText));
+      area.append(box);
     } else {
       const failure = node("div", "request-error", state.failure.error);
       const retry = node("button", "secondary-button", "重新发送"); retry.addEventListener("click", () => sendMessage(state.failure.message, state.failure.useKnowledge)); failure.append(retry); area.append(failure);
@@ -547,24 +570,104 @@ function fitComposer() {
   const input = el("message"); input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight,180)}px`;
   el("character-count").textContent = input.value.length > 3200 ? `${input.value.length} / 4000` : ""; refreshControls();
 }
+async function streamChatTurn(body, onEvent) {
+  let response;
+  try {
+    response = await appFetch("/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Local-Settings": "1" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error("无法连接本机服务，请确认服务正在运行后重试。");
+  }
+  if (!response.ok) {
+    const errPayload = await response.json().catch(() => ({}));
+    const detail = errPayload?.detail;
+    const msg = (typeof detail === "object" && detail?.message) ? detail.message : (typeof detail === "string" ? detail : `请求失败 (${response.status})`);
+    const err = new Error(msg);
+    if (typeof detail === "object" && detail?.code) err.code = detail.code;
+    throw err;
+  }
+  if (!response.body) return request("/chat", "POST", body);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  let doneData = null;
+  const dispatchBlock = block => {
+    const lines = block.split(/\r?\n/);
+    let eventName = "message";
+    const dataLines = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) eventName = line.slice(6).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+    }
+    if (!dataLines.length) return;
+    let payload = {};
+    try { payload = JSON.parse(dataLines.join("\n")); } catch { return; }
+    if (eventName === "error") {
+      const err = new Error(payload.message || "请求失败");
+      if (payload.code) err.code = payload.code;
+      throw err;
+    }
+    if (eventName === "done") doneData = payload;
+    onEvent(eventName, payload);
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep;
+    while ((sep = buffer.search(/\r?\n\r?\n/)) !== -1) {
+      const match = /\r?\n\r?\n/.exec(buffer);
+      const block = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + (match ? match[0].length : 2));
+      if (block.trim()) dispatchBlock(block);
+    }
+  }
+  if (buffer.trim()) dispatchBlock(buffer);
+  if (!doneData) throw new Error("回答流提前结束，请重试或刷新会话查看是否已保存。");
+  return doneData;
+}
 async function sendMessage(value, useKnowledge = state.useKnowledge) {
   const message = value.trim(); if (state.busy || !state.configured || !message) return;
-  state.pending = message; state.pendingKnowledge = useKnowledge; state.failure = null; el("message").value = ""; fitComposer(); busy(true); notice(); renderMessages();
+  state.pending = message; state.pendingSteps = []; state.pendingText = ""; state.pendingKnowledge = useKnowledge; state.failure = null; el("message").value = ""; fitComposer(); busy(true); notice(); renderMessages();
   const body = {message}; if (state.active) body.session_id = state.active;
   if (useKnowledge) body.use_m5stack = true;
   try {
-    const data = await request("/chat", "POST", body);
+    const data = await streamChatTurn(body, (kind, payload) => {
+      if (kind === "session" && payload.session_id) {
+        state.active = payload.session_id; remember("atoms3r.active", payload.session_id);
+      } else if (kind === "tool") {
+        if (payload.phase === "start") {
+          state.pendingSteps.push({ call_id: payload.call_id, tool_name: payload.tool_name, detail: payload.detail || "", status: "running", elapsed_ms: null });
+        } else if (payload.phase === "end") {
+          const hit = state.pendingSteps.find(s => s.call_id === payload.call_id);
+          if (hit) {
+            hit.status = payload.status || "ok";
+            hit.elapsed_ms = payload.elapsed_ms;
+            if (payload.detail) hit.detail = payload.detail;
+          } else {
+            state.pendingSteps.push({ call_id: payload.call_id, tool_name: payload.tool_name, detail: payload.detail || "", status: payload.status || "ok", elapsed_ms: payload.elapsed_ms });
+          }
+        }
+        renderMessages();
+      } else if (kind === "text") {
+        state.pendingText = payload.full || "";
+        renderMessages();
+      }
+    });
     state.active = data.session_id; remember("atoms3r.active", data.session_id);
     if (!state.detail) state.detail = {session_id:data.session_id, title:message.slice(0,40), messages:[]};
     const now = new Date().toISOString();
     state.detail.messages.push({role:"user",content:message,created_at:now}, {role:"assistant",content:data.reply,created_at:now,model:data.model,provider:data.provider,usage:data.usage,estimated_cost:data.estimated_cost,currency:data.currency,finish_reason:data.finish_reason,knowledge:data.knowledge,sources:data.sources,tool_calls:data.tool_calls,pending_approval:data.pending_approval || null});
-    state.pending = null; state.failure = null; renderMessages();
+    state.pending = null; state.pendingSteps = []; state.pendingText = ""; state.failure = null; renderMessages();
     if (state.view === "chat") { el("view-title").textContent = state.detail.title; document.title = `${state.detail.title} · AtomS3R`; }
     if (data.history_persisted === false) notice("已收到回答，但历史记录未能写入本机；当前对话仅保留在内存。", "error");
     // A sidebar refresh failure must never turn a successful paid call into a retry.
     try { await loadSessions(); } catch { notice("回答已收到；会话列表暂时无法刷新，请刷新页面重试。", "error"); }
   } catch (error) {
-    state.pending = null; state.failure = {message,error:error.message,useKnowledge}; el("message").value = message;
+    state.pending = null; state.pendingSteps = []; state.pendingText = ""; state.failure = {message,error:error.message,useKnowledge}; el("message").value = message;
     if (error.code === "session_not_found") notice("这段会话已不存在，请点击“新对话”再发送。", "error");
     renderMessages(); fitComposer();
   } finally { busy(false); el("message").focus(); }

@@ -873,8 +873,12 @@ body.voice-mode { overflow:hidden; }
 .tool-pills {display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
 .tool-pill {display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border:1px solid var(--border);border-radius:999px;font-size:11.5px;color:var(--muted);background:var(--surface)}
 .tool-pill-dot {width:6px;height:6px;border-radius:50%;background:var(--success);flex-shrink:0}
+.tool-pill-running {border-color:color-mix(in srgb,var(--primary) 55%,var(--border));color:var(--text)}
+.tool-pill-running .tool-pill-dot {background:var(--primary);animation:pillPulse 1s ease-in-out infinite}
+@keyframes pillPulse {0%,100%{opacity:1;transform:scale(1)}50%{opacity:.32;transform:scale(.82)}}
 .tool-pill-blocked .tool-pill-dot {background:#c78d32}
 .tool-pill-error .tool-pill-dot,.tool-pill-cancelled .tool-pill-dot {background:var(--error)}
+.pending-live-box {display:flex;flex-direction:column;gap:8px;max-width:780px}
 
 .approval-card {margin:10px 0;padding:12px 14px;border:1px solid var(--input-border);border-left:3px solid #c78d32;border-radius:9px;background:var(--surface)}
 .approval-card.approval-approved,.approval-card.approval-consumed {border-left-color:var(--success)}

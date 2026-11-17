@@ -14,7 +14,7 @@ import urllib.parse
 from fastapi import FastAPI, Query, Request, Response, WebSocket, WebSocketDisconnect
 from .realtime import RealtimeTurn
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import qwen_voices, voices
@@ -301,6 +301,46 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             raise
         finally:
             app.state.cancel_markers.pop(task, None)
+
+    @app.post("/chat/stream")
+    async def chat_stream(request: ChatRequest):
+        def _sse(event_name: str, payload: dict) -> str:
+            return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+        async def _events():
+            task = asyncio.current_task()
+            marker = {"token": None, "turn_id": None}
+            app.state.cancel_markers[task] = marker
+            try:
+                async with aclosing(app.state.service.turn(request)) as events:
+                    async for kind, payload in events:
+                        if kind in ("session", "tool", "text", "done"):
+                            yield _sse(kind, payload)
+            except ProviderError as error:
+                if error.status >= 400 and error.code not in {"session_not_found", "tool_not_found", "insight_not_found"}:
+                    with suppress(Exception):
+                        app.state.error_log.record(
+                            "system",
+                            error.code,
+                            error.message,
+                            detail={"status": error.status, "path": "/chat/stream"},
+                            secrets=tuple(audit_secrets()),
+                        )
+                yield _sse("error", {"code": error.code, "message": error.message})
+            except asyncio.CancelledError as error:
+                if (task is not None and marker["token"] is not None and error.args == (marker["token"],)
+                        and marker["turn_id"] is not None and task.cancelling() == 1):
+                    yield _sse("error", {"code": "turn_cancelled", "message": "本轮已按请求取消，未生成完整回答。"})
+                else:
+                    raise
+            finally:
+                app.state.cancel_markers.pop(task, None)
+
+        return StreamingResponse(
+            _events(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.get("/", include_in_schema=False)
     async def home():

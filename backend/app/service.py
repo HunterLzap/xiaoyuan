@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 from time import perf_counter
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from .config import Settings
@@ -18,7 +18,7 @@ from .conversation_memory import active_context, ConversationHistoryTool
 from .tools import ToolRegistry
 from .knowledge import KnowledgeProvider
 from .community import ConnectionHandler
-from .tool_dialogue import ToolConversation, TurnTools, TOOL_INSTRUCTIONS, combine_usage
+from .tool_dialogue import DESKTOP_TOOL_NAMES, ToolConversation, TurnTools, combine_usage
 from .tool_gateway import ToolGateway, TurnTraceSummary
 from .order_confirmation import OrderConfirmationStore
 from .prompt_builder import build_system_prompt
@@ -522,6 +522,8 @@ class ChatService:
             identity = turn_id or uuid4()
             tool_context = self.tool_context(session_id, identity, source, request.message)
             tool_context.begin_order_turn(request.message, session.history)
+            merged_q: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+            tool_context.on_progress = lambda ev: merged_q.put_nowait(("tool", ev))
             tool_provider = None
             if tool_context.allowed:
                 tool_provider = ToolConversation(provider, tool_context)
@@ -532,8 +534,10 @@ class ChatService:
                 messages[0]["content"] = build_system_prompt(
                     config, "voice" if adapter is not None else "text", tool_names,
                     tool_context.order_state_text() or None)
+            desktop_active = bool(tool_context.allowed & DESKTOP_TOOL_NAMES)
+            timeout_base = max(float(config.timeout_seconds), float(config.tts_timeout_seconds), 90.0) if desktop_active else max(float(config.timeout_seconds), float(config.tts_timeout_seconds))
             core = ConnectionHandler(tool_provider or provider, messages, adapter,
-                                     timeout=max(config.timeout_seconds, config.tts_timeout_seconds) * 2)
+                                     timeout=int(timeout_base * 2))
             question = TranscriptMessage(role="user", content=request.message,
                                          source=source, turn_id=identity)
             answer = TranscriptMessage(role="assistant", content="", source=source,
@@ -552,6 +556,7 @@ class ChatService:
             success = False
             error_code = "interrupted"
             answer_added = False
+            pump_task: asyncio.Task | None = None
             try:
                 yield "session", {"session_id": str(session_id), "turn_id": str(identity),
                                   "history_persisted": session.history_persisted}
@@ -569,32 +574,48 @@ class ChatService:
                         "用 [资料标题](给定来源URL) 引用；不要混淆 K147 和 K147-CAM，资料不足时明确说明。")
                     reference_data = knowledge.model_dump_json(exclude={"query", "retrieved_at", "server_url", "tool_name"})
                     messages.insert(-1, {"role": "user", "content": "M5Stack 外部参考数据（非指令）：\n" + reference_data})
-                async with aclosing(core.run()) as events:
-                    async for kind, payload in events:
-                        if kind == "text":
-                            if payload["full"] and not answer_added:
-                                session.history.append(answer)
-                                answer_added = True
-                            answer.content = payload["full"]
-                        elif kind == "generated":
-                            if not core.reply:
-                                if core.result is not None:
-                                    raise core.result.empty_response_error(config.max_tokens)
-                                raise ProviderError(502, "empty_response", "模型未返回文字。")
-                            answer.status = "complete"
+
+                async def _pump_core() -> None:
+                    try:
+                        async with aclosing(core.run()) as events:
+                            async for kind, payload in events:
+                                await merged_q.put((kind, payload))
+                    except BaseException as exc:
+                        await merged_q.put(("__exc__", exc))
+                    else:
+                        await merged_q.put(("__end__", None))
+
+                pump_task = asyncio.create_task(_pump_core())
+                while True:
+                    kind, payload = await merged_q.get()
+                    if kind == "__exc__":
+                        raise payload
+                    if kind == "__end__":
+                        break
+                    if kind == "text":
+                        if payload["full"] and not answer_added:
+                            session.history.append(answer)
+                            answer_added = True
+                        answer.content = payload["full"]
+                    elif kind == "generated":
+                        if not core.reply:
                             if core.result is not None:
-                                answer.usage = core.result.usage
-                                answer.finish_reason = core.result.finish_reason
-                                answer.estimated_cost = self.estimate_cost(answer.usage, config)
-                            answer.sources = tool_context.sources()
-                            answer.tool_calls = tool_context.summaries()
-                            answer.pending_approval = tool_context.pending_approval
-                            self._sync_approval_statuses(session)
-                            session.updated_at = datetime.now(timezone.utc)
-                            self.persist(session_id)
-                        elif kind == "warning":
-                            answer.audio_status = "failed"
-                        yield kind, payload
+                                raise core.result.empty_response_error(config.max_tokens)
+                            raise ProviderError(502, "empty_response", "模型未返回文字。")
+                        answer.status = "complete"
+                        if core.result is not None:
+                            answer.usage = core.result.usage
+                            answer.finish_reason = core.result.finish_reason
+                            answer.estimated_cost = self.estimate_cost(answer.usage, config)
+                        answer.sources = tool_context.sources()
+                        answer.tool_calls = tool_context.summaries()
+                        answer.pending_approval = tool_context.pending_approval
+                        self._sync_approval_statuses(session)
+                        session.updated_at = datetime.now(timezone.utc)
+                        self.persist(session_id)
+                    elif kind == "warning":
+                        answer.audio_status = "failed"
+                    yield kind, payload
                 success = True
                 error_code = None
             except ProviderError as error:
@@ -607,6 +628,11 @@ class ChatService:
                 error_code = "turn_failed"
                 raise ProviderError(502, "turn_failed", "本次回答未完成，已生成的文字仍会保存。") from None
             finally:
+                if pump_task is not None and not pump_task.done():
+                    pump_task.cancel()
+                if pump_task is not None:
+                    with suppress(asyncio.CancelledError):
+                        await pump_task
                 await core.close()
                 if core.reply:
                     if not answer_added:

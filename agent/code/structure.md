@@ -37,7 +37,7 @@
 | `ack_audio.py` / `community.py` / `speech_bridge.py` | 历史应答音、已有社区代码桥、本地worker；不是新主线依赖 |
 | `app.html` / `app.js` / `app.css` / `paths.js` | Agent 优先管理后台、确认卡片/执行胶囊、电脑节点控制台、执行洞察（含异常日志）与子路径支持 |
 | `voice.js` / `voice-capture.js` | 网页音频采集、真实状态与播放 |
-| `desktop_node/` (`client.py` / `platform_windows.py` / `platform_macos.py`) | Windows 与 macOS 跨平台桌面节点客户端（位于项目根 `desktop_node/`） |
+| `desktop_node/` (`client.py` / `overlay.py` / `platform_windows.py` / `platform_macos.py`) | Windows 与 macOS 跨平台桌面节点客户端及全屏点击穿透边框/顶部状态条（位于项目根 `desktop_node/`） |
 
 上述后端文件除首行外均位于 `backend/app/`。细节按实际代码核对，不因共享模块断言所有渠道都已通过。
 

@@ -224,6 +224,10 @@ class SideEffectConfirmationStore:
             return None
         return {"tool_name": state.denied_tool}
 
+    def has_desktop_lease(self, session_id: UUID) -> bool:
+        state = self._sessions.get(session_id)
+        return state is not None and monotonic() < state.desktop_lease_until
+
     def approval_status(self, approval_id: str) -> str | None:
         self._prune_approvals()
         action = self._approvals.get(approval_id)

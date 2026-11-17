@@ -27,8 +27,12 @@ class RealtimeTextProvider:
         endpoint = address + "?" + urlencode({"model": settings.rt_model})
         request_pending = False
         round_results = results if results is not None else []
+        from .tool_dialogue import DESKTOP_TOOL_NAMES, combine_usage, turn_limits
+        allowed = getattr(tool_context, "allowed", set()) or set()
+        max_rounds, _ = turn_limits(allowed)
+        timeout_budget = max(float(settings.timeout_seconds), 120.0) if (allowed & DESKTOP_TOOL_NAMES) else float(settings.timeout_seconds)
         try:
-            async with asyncio.timeout(settings.timeout_seconds):
+            async with asyncio.timeout(timeout_budget):
                 async with DirectConnect(
                     endpoint, proxy=None, close_timeout=2, max_size=4 * 1024 * 1024,
                     additional_headers={"Authorization": "Bearer " + settings.rt_api_key.get_secret_value()},
@@ -89,7 +93,6 @@ class RealtimeTextProvider:
                             if response.get("status") != "completed":
                                 raise ValueError()
                             from dataclasses import replace
-                            from .tool_dialogue import combine_usage, MAX_TOOL_ROUNDS
                             usage = response.get("usage") or {}
                             for item in response.get("output", []):
                                 if item.get("type") == "function_call":
@@ -103,7 +106,7 @@ class RealtimeTextProvider:
                                 return
                             if tool_context is None or selection is None:
                                 raise ProviderError(502, "tool_not_configured", "模型请求了未配置的工具。")
-                            if round_index >= MAX_TOOL_ROUNDS:
+                            if round_index >= max_rounds:
                                 raise ProviderError(502, "tool_limit", "本轮工具调用已达上限，未继续执行。")
                             loading_only = True
                             active_before = selection.active_names()
@@ -117,9 +120,9 @@ class RealtimeTextProvider:
                             function_calls = {}
                             if not loading_only:
                                 round_index += 1
-                            if round_index == MAX_TOOL_ROUNDS or selection.active_names() != active_before:
+                            if round_index == max_rounds or selection.active_names() != active_before:
                                 await send("session.update", session=(
-                                    {"tools": []} if round_index == MAX_TOOL_ROUNDS else selected_config()))
+                                    {"tools": []} if round_index == max_rounds else selected_config()))
                                 while True:
                                     update = json.loads(await socket.recv())
                                     if update.get("type") == "error":

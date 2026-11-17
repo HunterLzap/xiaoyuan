@@ -3,7 +3,8 @@ import json
 import logging
 import re
 import sqlite3
-from contextlib import aclosing
+from collections.abc import Callable
+from contextlib import aclosing, suppress
 from dataclasses import replace
 from time import perf_counter
 from urllib.parse import quote
@@ -132,11 +133,49 @@ def build_tool_instructions(tool_names=None, channel="text", compact=False):
             "执行 desktop_gui_action 前，先调用 desktop_inspect_screen 获取当前分辨率与画面判断目标坐标。"
             "设置剪贴板、打开应用/网址、点击/输入/快捷键、执行终端命令均有副作用：发起调用前不要先输出“这就帮你打开/正在打开”之类的承诺句，直接调用工具；"
             "如工具返回 confirmation_required，必须清晰复述拟执行工具、目标电脑与核心参数，请用户口头/打字确认或点击界面确认卡片后再执行，未真实成功前不得声称已完成。"
+            "多步电脑任务（如“打开某应用并打开某人的对话框/搜索某内容”）在已有授权或 3 分钟桌面免问期间，必须主动连续完成全部步骤，不要只打开应用就停下："
+            "打开应用后接着调用 desktop_inspect_screen 确认界面前置，再用 desktop_gui_action（如点击搜索框或 hotkey 搜索、输入名称、回车并再次截屏核实列表并点击目标）完成最后一步，最后截屏确认画面无误后再向用户答复。"
         )
     return "".join(parts)
 MAX_TOOL_CALLS = 8
 MAX_TOOL_ROUNDS = 4
+MAX_DESKTOP_TOOL_CALLS = 20
+MAX_DESKTOP_TOOL_ROUNDS = 10
 TOOL_LOADING_NAME = "_load_task_tools"
+
+
+def turn_limits(allowed: set[str] | None) -> tuple[int, int]:
+    if allowed and (allowed & DESKTOP_TOOL_NAMES):
+        return (MAX_DESKTOP_TOOL_ROUNDS, MAX_DESKTOP_TOOL_CALLS)
+    return (MAX_TOOL_ROUNDS, MAX_TOOL_CALLS)
+
+
+def _progress_detail(name: str, args: dict) -> str:
+    if name == "desktop_open":
+        return str(args.get("target") or "")[:40]
+    if name == "desktop_inspect_screen":
+        return str(args.get("question") or "")[:40]
+    if name == "desktop_gui_action":
+        sub = str(args.get("action") or "").strip()
+        if sub in {"click", "double_click", "right_click", "move"}:
+            return f"{sub} ({args.get('x')}, {args.get('y')})"
+        if sub == "hotkey":
+            keys = args.get("keys")
+            return "+".join(str(k) for k in keys[:4]) if isinstance(keys, list) else "hotkey"
+        if sub == "type_text":
+            count = len(str(args.get("text") or ""))
+            return f"输入 {count} 字" if count else "输入文字"
+        return sub
+    if name in {"desktop_list_dir", "desktop_read_file"}:
+        raw = str(args.get("path") or "").rstrip("/\\")
+        return raw.rsplit("/", 1)[-1].rsplit("\\", 1)[-1][:36] if raw else ""
+    if name == "desktop_set_clipboard":
+        return f"{len(str(args.get('text') or ''))} 字"
+    if name == "get_weather":
+        return str(args.get("city") or args.get("location") or "")[:30]
+    if name in {"search_personal_knowledge", "search_m5stack"}:
+        return str(args.get("query") or "")[:36]
+    return ""
 CONTROL_TOOLS = {"set_device_volume", "set_speech_rate", "set_speech_pitch", "get_device_status"}
 MUTATING_CONTROL_TOOLS = CONTROL_TOOLS - {"get_device_status"}
 # 需要先向用户确认编号、确认后才允许查询的订单类工具（不为其他工具扩张此机制）。
@@ -429,6 +468,7 @@ class TurnTools:
         self.calls, self.snapshots, self.parse_errors = [], [], []
         self.outputs = {}
         self.pending_approval: dict | None = None
+        self.on_progress: Callable[[dict], None] | None = None
         self.started = perf_counter()
         self.finished = False
         allowed_defs = (
@@ -505,11 +545,16 @@ class TurnTools:
                          + "；不得再使用这些编号，请让用户重新提供完整订单号。")
         if self.tool_gateway is not None:
             confirmed_tool = self.tool_gateway.confirmations.confirmed_action(self.session_id, self.turn_id)
+            lease_active = self.tool_gateway.confirmations.has_desktop_lease(self.session_id)
             if confirmed_tool:
                 parts.append(
                     f"本轮用户已明确确认执行工具 {confirmed_tool['tool_name']}（参数：{confirmed_tool['summary']}）；"
-                    "请使用一致参数立即调用该工具完成操作，并根据真实返回结果作答。"
+                    "请使用一致参数立即调用该工具完成操作，若原请求还包含打开界面、找人或点击等后续电脑步骤，请继续推进完成全部目标后再答复。"
                 )
+            elif lease_active and (self.allowed & DESKTOP_TOOL_NAMES):
+                parts.append("桌面操控免问租约已激活，本轮可直接连续调用打开/GUI/剪贴板工具完成多步操作。")
+            if confirmed_tool and lease_active:
+                parts.append("桌面操控 3 分钟免问租约已同时生效：执行完上述确认工具后，如原请求还有点击、搜索、输入等后续步骤，请立即连续调用后续工具完成，不要在中途停下。")
             denied_tool = self.tool_gateway.confirmations.denied_action(self.session_id, self.turn_id)
             if denied_tool:
                 parts.append(
@@ -522,13 +567,16 @@ class TurnTools:
         if call_id in self.outputs:
             return self.outputs[call_id]
         call = {"call_id": call_id, "tool_name": name, "request": None, "response": None,
-                "status": "error", "error_code": None, "sent_to_model": False, "http_status": None}
+                "status": "error", "error_code": None, "sent_to_model": False, "http_status": None, "detail": ""}
         self.calls.append(call)
         trace = {}
         started = perf_counter()
         result = None
+        emit_progress = self.on_progress is not None and name != TOOL_LOADING_NAME
+        progress_started = False
         try:
-            if sum(item["tool_name"] != TOOL_LOADING_NAME for item in self.calls) > MAX_TOOL_CALLS:
+            _, max_calls = turn_limits(self.allowed)
+            if sum(item["tool_name"] != TOOL_LOADING_NAME for item in self.calls) > max_calls:
                 raise ProviderError(422, "tool_limit", "本轮工具调用已达上限，未继续执行。")
             if name not in self.allowed:
                 raise ProviderError(403, "tool_not_allowed", "工具未启用或不允许自动执行。")
@@ -538,6 +586,16 @@ class TurnTools:
             if not isinstance(args, dict):
                 raise ProviderError(422, "tool_arguments", "模型工具参数必须是 JSON 对象。")
             call["request"] = {"arguments": args}
+            call["detail"] = _progress_detail(name, args)
+            if emit_progress and self.on_progress is not None:
+                progress_started = True
+                with suppress(Exception):
+                    self.on_progress({
+                        "phase": "start",
+                        "call_id": call_id,
+                        "tool_name": name,
+                        "detail": call["detail"],
+                    })
             self.authorize_control(name, args)
             order_parameter = ORDER_CONFIRMATION_PARAMETERS.get(name)
             if order_parameter:
@@ -656,6 +714,17 @@ class TurnTools:
             response = call["response"]
             if isinstance(response, dict) and type(response.get("status")) is int:
                 call["http_status"] = response["status"]
+            if progress_started and self.on_progress is not None:
+                with suppress(Exception):
+                    self.on_progress({
+                        "phase": "end",
+                        "call_id": call_id,
+                        "tool_name": name,
+                        "status": call["status"],
+                        "elapsed_ms": call["elapsed_ms"],
+                        "error_code": call.get("error_code"),
+                        "detail": call.get("detail") or "",
+                    })
         if call["response"] is None:
             call["response"] = output
         output = redact_value(output, self.secrets)
@@ -698,7 +767,7 @@ class TurnTools:
     def summaries(self):
         summaries = []
         for call in self.calls:
-            item = {key: call.get(key) for key in ("call_id", "tool_name", "status", "error_code", "elapsed_ms", "sent_to_model")}
+            item = {key: call.get(key) for key in ("call_id", "tool_name", "status", "error_code", "elapsed_ms", "sent_to_model", "detail")}
             if call["tool_name"] in CONTROL_TOOLS:
                 item["request"] = call.get("request")
                 item["response"] = call.get("response")
@@ -809,11 +878,12 @@ class ToolConversation:
             if extra and messages and messages[0].get("role") == "system":
                 messages[0] = {**messages[0], "content": (messages[0].get("content") or "") + extra}
         pending = list(self.context.outputs)
-        for round_index in range(MAX_TOOL_ROUNDS + 1):
+        max_rounds, _ = turn_limits(self.context.allowed)
+        for round_index in range(max_rounds + 1):
             definitions = selection.definitions(nested=True) if selection is not None else self.context.definitions(nested=True)
             text, result = "", None
             try:
-                async with aclosing(self.provider.complete_stream(messages, tools=definitions if round_index < MAX_TOOL_ROUNDS else [])) as stream:
+                async with aclosing(self.provider.complete_stream(messages, tools=definitions if round_index < max_rounds else [])) as stream:
                     async for item in stream:
                         self.context.mark_sent(pending)
                         if isinstance(item, Completion):
@@ -830,7 +900,7 @@ class ToolConversation:
             if not result.tool_calls:
                 yield replace(result, usage=combine_usage(self.results))
                 return
-            if round_index == MAX_TOOL_ROUNDS:
+            if round_index == max_rounds:
                 raise ProviderError(502, "tool_limit", "模型仍请求工具，本轮已达上限；未继续执行。")
             messages.append({"role": "assistant", "content": text or None, "tool_calls": result.tool_calls})
             pending = []
