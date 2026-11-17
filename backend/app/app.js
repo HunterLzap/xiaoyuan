@@ -10,7 +10,7 @@ let sessionHasMore = false, sessionLoading = false, sessionError = "", sessionOf
 let sessionLoadId = 0, sessionController = null, sessionSearchTimer = null;
 const capabilityState = { tools:[], documents:[], total:0, offset:0, loading:false, busy:false, queryId:0, supportedFileTypes:[".txt",".md",".markdown",".docx"], selectedCapability:null, libraries:[], selectionSupported:false, selectedTools:[], selectedKbs:[], activeLibraryId:null, toolsLoaded:false, librariesLoaded:false, librariesError:false, selectionFetched:false, selectionError:false, selectionSaving:false };
 const INSIGHT_PAGE = 25;
-const insightState = {kb:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},tools:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},traces:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null}};
+const insightState = {kb:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},tools:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},traces:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},errors:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null}};
 let insightDeleteState = null;
 let savedFingerprint = "";
 let savedConfig = null, savedTtsConfig = null, modelsFetched = false, speechModels = [];
@@ -291,6 +291,7 @@ const APPROVAL_STATUS_TEXT = {
   expired: "已超时",
   superseded: "已被后续操作取代",
 };
+const DESKTOP_LEASE_TOOLS = new Set(["desktop_open", "desktop_gui_action", "desktop_set_clipboard"]);
 function renderApprovalCard(article, message) {
   article.querySelector(".approval-card")?.remove();
   const pa = message.pending_approval;
@@ -305,9 +306,15 @@ function renderApprovalCard(article, message) {
   if (status === "pending" && pa.approval_id) {
     const actions = node("div", "approval-actions");
     const approveBtn = node("button", "primary-button", "确认执行"); approveBtn.type = "button";
+    const leaseBtn = DESKTOP_LEASE_TOOLS.has(pa.tool_name) ? node("button", "secondary-button", "确认并免问电脑操控 (3 分钟)") : null;
+    if (leaseBtn) leaseBtn.type = "button";
     const denyBtn = node("button", "secondary-button", "取消执行"); denyBtn.type = "button";
+    const setBusy = flag => {
+      approveBtn.disabled = flag; denyBtn.disabled = flag;
+      if (leaseBtn) leaseBtn.disabled = flag;
+    };
     const submitDecision = async decision => {
-      approveBtn.disabled = true; denyBtn.disabled = true;
+      setBusy(true);
       try {
         const res = await request(`/api/approvals/${encodeURIComponent(pa.approval_id)}`, "POST", {
           decision,
@@ -315,7 +322,7 @@ function renderApprovalCard(article, message) {
         });
         pa.status = res.status;
         renderApprovalCard(article, message);
-        if (decision === "approve") await sendMessage("确认执行");
+        if (decision === "approve" || decision === "approve_desktop_lease") await sendMessage("确认执行");
         else notice("已取消该操作。");
       } catch (error) {
         notice(error.message, "error");
@@ -323,13 +330,16 @@ function renderApprovalCard(article, message) {
           pa.status = error.code === "approval_expired" ? "expired" : "denied";
           renderApprovalCard(article, message);
         } else {
-          approveBtn.disabled = false; denyBtn.disabled = false;
+          setBusy(false);
         }
       }
     };
     approveBtn.addEventListener("click", () => submitDecision("approve"));
+    if (leaseBtn) leaseBtn.addEventListener("click", () => submitDecision("approve_desktop_lease"));
     denyBtn.addEventListener("click", () => submitDecision("deny"));
-    actions.append(approveBtn, denyBtn);
+    actions.append(approveBtn);
+    if (leaseBtn) actions.append(leaseBtn);
+    actions.append(denyBtn);
     card.append(actions);
   }
   article.append(card);
@@ -1609,9 +1619,31 @@ function desktopToolCard(tool) {
     });
   });
   toggleLabel.append(toggle, toggleText); header.append(toggleLabel);
+  const details = node("details", "weather-city-config"), summary = node("summary", "", "看图视觉模型 · 可选（Computer Use）");
+  const row = node("label", "weather-city-row"), visionInput = node("input");
+  visionInput.id = "desktop_vision_model"; visionInput.maxLength = 200;
+  visionInput.value = savedConfig?.desktop_vision_model || "";
+  visionInput.placeholder = "留空默认：百炼实时自动用 qwen3-vl-plus，否则用主模型";
+  const saveVisionModel = async () => {
+    const value = visionInput.value.trim();
+    if (value === (savedConfig?.desktop_vision_model || "")) return;
+    visionInput.disabled = true;
+    try {
+      const data = await request("/api/settings/capabilities", "PUT", {desktop_vision_model: value});
+      if (data && data.text) { savedConfig = data.text; savedTtsConfig = data.tts; }
+      capabilityNotice(value ? `屏幕视觉模型已设为：${value}` : "已恢复默认屏幕视觉模型。");
+    } catch (error) {
+      visionInput.value = savedConfig?.desktop_vision_model || "";
+      capabilityNotice(error.message, true);
+    } finally { visionInput.disabled = false; }
+  };
+  visionInput.addEventListener("change", saveVisionModel);
+  visionInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); saveVisionModel(); } });
+  row.append(visionInput); details.append(summary, row);
   card.append(
     header,
     node("p", "small-note", tool.description || "跨平台连接个人 Windows / macOS 电脑，支持截屏观察（Computer Use）、读取文件/剪贴板，并在你确认后点击界面、打开应用或执行命令。"),
+    details,
   );
   const actions = node("div", "capability-item-actions");
   const goDevices = capabilityButton("连接或查看电脑节点 →", () => navigate("devices"));
@@ -2576,13 +2608,17 @@ function insightControls(kind) {
   const panel = insightState[kind];
   el(`insights-${kind}-prev`).disabled = panel.loading || panel.offset === 0;
   el(`insights-${kind}-next`).disabled = panel.loading || panel.offset + INSIGHT_PAGE >= panel.total;
-  el("insights-refresh").disabled = insightState.kb.loading || insightState.tools.loading || insightState.traces.loading;
+  el("insights-refresh").disabled = insightState.kb.loading || insightState.tools.loading || insightState.traces.loading || insightState.errors.loading;
   el(`insights-${kind}`).setAttribute("aria-busy",String(panel.loading));
   const clearBtn = el(`insights-${kind}-clear`);
   if (clearBtn) {
-    let filtersMatch = false;
-    try {filtersMatch = JSON.stringify(panel.filters) === JSON.stringify(insightFilterValues(kind));} catch {}
-    clearBtn.disabled = panel.loading || panel.total === 0 || !filtersMatch || Object.keys(panel.filters).length === 0;
+    if (kind === "errors") {
+      clearBtn.disabled = panel.loading || panel.total === 0;
+    } else {
+      let filtersMatch = false;
+      try {filtersMatch = JSON.stringify(panel.filters) === JSON.stringify(insightFilterValues(kind));} catch {}
+      clearBtn.disabled = panel.loading || panel.total === 0 || !filtersMatch || Object.keys(panel.filters).length === 0;
+    }
   }
 }
 function insightTime(value) {
@@ -2604,19 +2640,38 @@ function renderInsightRecords(kind, data) {
   const area = el(`insights-${kind}`), panel = insightState[kind]; area.replaceChildren();
   el(`insights-${kind}-meta`).textContent = `共 ${data.total} 条`;
   el(`insights-${kind}-page`).textContent = data.items.length ? `${panel.offset + 1}–${panel.offset + data.items.length} 条` : "";
-  if (!data.items.length) {area.append(node("p","insight-empty",panel.offset ? "本页已无记录，请返回上一页或刷新。" : insightFiltersActive(kind) ? "没有匹配的记录，试试调整搜索或筛选条件。" : "尚无记录。实际问答或调用后可在这里查看。")); return;}
+  if (kind === "errors") {
+    const labelEl = el("insights-tab-errors-label");
+    if (labelEl) labelEl.textContent = data.total > 0 ? `异常日志 (${data.total})` : "异常日志";
+  }
+  if (!data.items.length) {area.append(node("p","insight-empty",panel.offset ? "本页已无记录，请返回上一页或刷新。" : insightFiltersActive(kind) ? "没有匹配的记录，试试调整搜索或筛选条件。" : kind === "errors" ? "暂无异常报错记录。" : "尚无记录。实际问答或调用后可在这里查看。")); return;}
   const statusLabels = {complete:"成功",ok:"成功",empty:"未命中",error:"失败",unavailable:"不可用",not_requested:"未调用",cancelled:"已取消",failed:"执行失败",interrupted:"已打断"};
   const sourceLabels = {text:"文字",voice:"网页语音",device:"硬件设备"};
+  const errSourceLabels = {device:"语音硬件",desktop:"桌面节点",model:"模型与语音",tool:"工具调用",system:"服务端"};
   const table = node("table","insight-table"), head = node("thead"), hr = node("tr"), body = node("tbody");
-  const columns = kind === "kb"
-    ? ["问题","回答类型","得到的答案","时间","操作"]
-    : kind === "tools"
-      ? ["工具","状态","请求摘要","耗时","时间","操作"]
-      : ["渠道/模式","模型 / ASR / TTS","问题","状态","耗时","时间","操作"];
+  const columns = kind === "errors"
+    ? ["模块","错误码","报错内容与上下文","时间"]
+    : kind === "kb"
+      ? ["问题","回答类型","得到的答案","时间","操作"]
+      : kind === "tools"
+        ? ["工具","状态","请求摘要","耗时","时间","操作"]
+        : ["渠道/模式","模型 / ASR / TTS","问题","状态","耗时","时间","操作"];
   for (const label of columns) {const th = node("th","",label); th.scope = "col"; hr.append(th);}
   head.append(hr); table.append(head,body);
   for (const item of data.items) {
     const tr = node("tr","insight-row"), time = node("time","small-note",insightTime(item.ts));
+    if (kind === "errors") {
+      const msgCell = node("td", "insight-text-cell");
+      msgCell.append(node("div", "", item.message || item.code));
+      if (item.detail) {
+        const det = node("details", "");
+        det.append(node("summary", "small-note", "上下文详情"), node("pre", "insight-json", insightJson(item.detail)));
+        msgCell.append(det);
+      }
+      tr.append(insightTableTag(errSourceLabels[item.source] || item.source || "系统", "type"), insightTableCell(item.code || "error"), msgCell, insightTableNode(time));
+      body.append(tr);
+      continue;
+    }
     const detail = node("div","insight-row-actions");
     const itemId = kind === "traces" ? item.trace_id : item.id;
     const view = capabilityButton("详情",() => openInsightDetail(kind, itemId));
@@ -2764,6 +2819,11 @@ el("insights-detail-back").addEventListener("click",() => {hideInsightTooltip();
 function insightFilterValues(kind) {
   const values = {}, q = el(`insights-${kind}-q`).value.trim();
   if (q) values.q = q;
+  if (kind === "errors") {
+    const source = el("insights-errors-source").value;
+    if (source) values.source = source;
+    return values;
+  }
   if (kind === "kb") {const type = el("insights-kb-type").value; if (type) values.answer_type = type;}
   else if (kind === "tools") {const status = el("insights-tools-status").value; if (status) values.status = status; const name = el("insights-tools-name").value.trim(); if (name) values.tool_name = name;}
   else {const source = el("insights-traces-source").value; if (source) values.source = source; const status = el("insights-traces-status").value; if (status) values.status = status;}
@@ -2796,17 +2856,17 @@ async function loadInsightRecords(kind, offset = 0) {
   } finally {if (id === panel.requestId) {panel.loading = false; panel.controller = null; insightControls(kind);}}
 }
 async function loadInsights() {
-  insightNotice(); await Promise.allSettled([loadInsightRecords("kb"),loadInsightRecords("tools"),loadInsightRecords("traces")]);
+  insightNotice(); await Promise.allSettled([loadInsightRecords("kb"),loadInsightRecords("tools"),loadInsightRecords("traces"),loadInsightRecords("errors")]);
 }
-for (const kind of ["kb","tools","traces"]) {
+for (const kind of ["kb","tools","traces","errors"]) {
   el(`insights-${kind}-prev`).addEventListener("click",() => loadInsightRecords(kind,Math.max(0,insightState[kind].offset - INSIGHT_PAGE)));
   el(`insights-${kind}-next`).addEventListener("click",() => loadInsightRecords(kind,insightState[kind].offset + INSIGHT_PAGE));
 }
 el("insights-refresh").addEventListener("click",loadInsights);
 let insightActiveTab = "kb", insightTipTimer = null;
 function showInsightTab(tab) {
-  insightActiveTab = ["kb","tools","traces"].includes(tab) ? tab : "kb";
-  for (const key of ["kb","tools","traces"]) {
+  insightActiveTab = ["kb","tools","traces","errors"].includes(tab) ? tab : "kb";
+  for (const key of ["kb","tools","traces","errors"]) {
     const active = insightActiveTab === key;
     el(`insights-panel-${key}`).hidden = !active;
     el(`insights-tab-${key}`).setAttribute("aria-selected",String(active));
@@ -2843,13 +2903,14 @@ function insightTipSource(target) {return target instanceof Element ? target.clo
 el("insights-tab-kb").addEventListener("click",() => showInsightTab("kb"));
 el("insights-tab-tools").addEventListener("click",() => showInsightTab("tools"));
 el("insights-tab-traces").addEventListener("click",() => showInsightTab("traces"));
+el("insights-tab-errors").addEventListener("click",() => showInsightTab("errors"));
 el("insights-view").addEventListener("keydown",event => {
   if (!event.target.classList || !event.target.classList.contains("insight-tab")) return;
   if (!["ArrowLeft","ArrowRight","Home","End"].includes(event.key)) return;
   event.preventDefault();
-  const order = ["kb","tools","traces"];
+  const order = ["kb","tools","traces","errors"];
   const idx = order.indexOf(insightActiveTab);
-  const next = event.key === "Home" ? "kb" : event.key === "End" ? "traces"
+  const next = event.key === "Home" ? "kb" : event.key === "End" ? "errors"
     : order[(idx + (event.key === "ArrowLeft" ? order.length - 1 : 1)) % order.length];
   showInsightTab(next); el(`insights-tab-${next}`).focus();
 });
@@ -2862,19 +2923,32 @@ window.addEventListener("resize",hideInsightTooltip);
 document.addEventListener("scroll",event => {const tip = document.getElementById("insight-tooltip"); if (!tip?.contains(event.target)) hideInsightTooltip();},true);
 document.addEventListener("keydown",event => {const tip = document.getElementById("insight-tooltip"); if (event.key === "Escape" && tip && !tip.hidden) {hideInsightTooltip(); event.preventDefault(); event.stopPropagation();}},true);
 showInsightTab("kb");
-for (const kind of ["kb","tools","traces"]) {
+for (const kind of ["kb","tools","traces","errors"]) {
   const panel = insightState[kind], search = el(`insights-${kind}-q`);
   const schedule = event => {if (event.isComposing) return; clearTimeout(panel.searchTimer); panel.searchTimer = setTimeout(() => loadInsightRecords(kind,0),300); insightControls(kind);};
   const controls = kind === "kb"
     ? ["insights-kb-type","insights-kb-since","insights-kb-until"]
     : kind === "tools"
       ? ["insights-tools-status","insights-tools-name","insights-tools-since","insights-tools-until"]
-      : ["insights-traces-source","insights-traces-status","insights-traces-since","insights-traces-until"];
+      : kind === "traces"
+        ? ["insights-traces-source","insights-traces-status","insights-traces-since","insights-traces-until"]
+        : ["insights-errors-source"];
   search.addEventListener("input",schedule); search.addEventListener("compositionend",schedule);
   search.addEventListener("keydown",event => {if (event.key === "Enter" && !event.isComposing) {event.preventDefault(); loadInsightRecords(kind,0);}});
   for (const id of controls) el(id).addEventListener(id.endsWith("-name") ? "input" : "change",id.endsWith("-name") ? schedule : () => loadInsightRecords(kind,0));
   el(`insights-${kind}-reset`).addEventListener("click",() => {search.value = ""; for (const id of controls) el(id).value = ""; loadInsightRecords(kind,0);});
-  el(`insights-${kind}-clear`)?.addEventListener("click",() => openInsightDelete(kind));
+  if (kind === "errors") {
+    el("insights-errors-clear")?.addEventListener("click", async () => {
+      if (!confirm("清空所有已记录的系统异常日志？")) return;
+      try {
+        await request("/api/insights/errors", "DELETE");
+        await loadInsightRecords("errors", 0);
+        insightNotice("异常日志已清空。");
+      } catch (error) { insightNotice(error.message, true); }
+    });
+  } else {
+    el(`insights-${kind}-clear`)?.addEventListener("click",() => openInsightDelete(kind));
+  }
 }
 async function openInsightDelete(kind, item = null) {
   hideInsightTooltip();

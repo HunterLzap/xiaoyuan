@@ -632,6 +632,12 @@ class DeviceRealtime:
                 await conn.send({"type": "ui", "state": "listening"})
         elif kind=="error":
             self.hub.last_error = data
+            if hasattr(self.hub, "record_error"):
+                self.hub.record_error(
+                    "device_voice_error",
+                    str(data or "设备实时语音报错"),
+                    detail={"turn_id": self.metrics_turn_id, "session_id": self.metrics_session_id},
+                )
             if self._is_control_failure(data):
                 # Control turn blocked: realtime.py already dropped the fake-success audio.
                 # Show the truthful reason on screen and reset playback resources; spoken

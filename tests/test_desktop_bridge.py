@@ -19,6 +19,7 @@ from backend.app.desktop_tools import (
     DesktopReadFileTool,
 )
 from backend.app.devices import DeviceHub, create_gateway
+from backend.app.error_log import ErrorLogStore
 from backend.app.llm import Completion, ProviderError
 from backend.app.main import create_app
 from backend.app.prompt_builder import build_system_prompt
@@ -471,12 +472,177 @@ def test_windows_and_macos_adapter_logic_with_os_mocks(monkeypatch):
     assert mac.gui_action("hotkey", keys=["cmd", "c"])["ok"] is True
     assert any(isinstance(e, list) and e[0] == "key" and e[1] == 8 for e in mac_events)
 
-    # Confirm SideEffectConfirmationStore expires old pending actions safely.
+    # Confirm SideEffectConfirmationStore expires old pending actions and scopes desktop lease safely.
     store = SideEffectConfirmationStore(ttl_seconds=5.0)
-    sid, t1, t2 = uuid4(), uuid4(), uuid4()
+    sid, t1, t2, t3 = uuid4(), uuid4(), uuid4(), uuid4()
     assert store.authorize(sid, t1, "desktop_open", {"target": "Safari"}) == "ask"
     pending = store.latest_for_turn(sid, t1)
     assert pending is not None and pending["status"] == "pending"
     assert store.decide(pending["approval_id"], "deny", session_id=sid)["status"] == "denied"
     store.begin_turn(sid, t2, "好")
     assert store.confirmed_action(sid, t2) is None
+
+    # Granting desktop lease unlocks subsequent interactive desktop GUI actions but NEVER desktop_run_command.
+    assert store.authorize(sid, t2, "desktop_open", {"target": "飞书"}) == "ask"
+    p_open = store.latest_for_turn(sid, t2)
+    assert p_open is not None
+    assert store.decide(p_open["approval_id"], "approve_desktop_lease", session_id=sid)["status"] == "approved"
+    store.begin_turn(sid, t3, "确认执行")
+    assert store.authorize(sid, t3, "desktop_gui_action", {"action": "click", "x": 10, "y": 20}) == "execute"
+    assert store.authorize(sid, t3, "desktop_set_clipboard", {"text": "abc"}) == "execute"
+    assert store.authorize(sid, t3, "desktop_run_command", {"command": "whoami"}) == "ask"
+    p_cmd = store.latest_for_turn(sid, t3)
+    assert p_cmd is not None
+    with pytest.raises(ProviderError) as lease_err:
+        store.decide(p_cmd["approval_id"], "approve_desktop_lease", session_id=sid)
+    assert lease_err.value.code == "lease_not_allowed"
+
+
+def test_realtime_bailian_vision_fallback_and_app_alias(tmp_path, monkeypatch):
+    # 1. Localized macOS app alias resolves /Applications/Lark.app when present.
+    app_dir = tmp_path / "Applications"
+    app_dir.mkdir()
+    lark = app_dir / "Lark.app"
+    lark.mkdir()
+    monkeypatch.setattr("desktop_node.platform_macos.Path.home", lambda: tmp_path / "home")
+    orig_path = MacOSDesktopAdapter._resolve_app_bundle
+
+    def _patched_resolve(self, target):
+        if target == "飞书":
+            for cand in ("Lark", "Feishu"):
+                p = app_dir / f"{cand}.app"
+                if p.exists():
+                    return str(p)
+        return orig_path(self, target)
+
+    monkeypatch.setattr(MacOSDesktopAdapter, "_resolve_app_bundle", _patched_resolve)
+    launched = []
+
+    def _fake_run(cmd, **kwargs):
+        launched.append(cmd)
+        if cmd == ["open", "-a", "飞书"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="Unable to find application named '飞书'")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("desktop_node.platform_macos.subprocess.run", _fake_run)
+    res = MacOSDesktopAdapter().open_target("飞书", kind="app")
+    assert res["ok"] is True
+    assert res["opened"].endswith("Lark.app")
+    assert launched[-1] == ["open", str(lark)]
+
+    # 2. Realtime mode uses Bailian compatible-mode + qwen3-vl-plus fallback when text model is blank.
+    rt_settings = Settings(
+        _env_file=None,
+        voice_mode="realtime",
+        rt_provider="bailian",
+        rt_workspace="ws-test",
+        rt_api_key="rt-secret",
+        model="",
+    )
+    hub = DesktopHub(path=tmp_path / "desktop_nodes.json", settings_getter=lambda: rt_settings)
+    captured_requests = []
+
+    class _FakeHttpClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            captured_requests.append((url, headers, json))
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: {"choices": [{"message": {"content": "屏幕左上角看到飞书搜索框"}}]},
+            )
+
+    monkeypatch.setattr("backend.app.desktop.httpx.AsyncClient", _FakeHttpClient)
+    vision_out = asyncio.run(hub._analyze_screenshot(
+        b64=base64.b64encode(b"img").decode("ascii"),
+        mime="image/jpeg",
+        question="飞书搜索框在哪",
+        img_w=1280,
+        img_h=800,
+        scr_w=1470,
+        scr_h=956,
+        os_name="macos",
+    ))
+    assert "飞书搜索框" in vision_out["vision_analysis"]
+    assert captured_requests[0][0] == "https://ws-test.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"
+    assert captured_requests[0][2]["model"] == "qwen3-vl-plus"
+
+
+def test_error_log_store_redaction_and_routes(tmp_path):
+    db_path = tmp_path / "assistant_state.sqlite3"
+    store = ErrorLogStore(path=db_path, max_rows=55)
+    for idx in range(60):
+        store.record("model", f"err_{idx}", f"sample error {idx}")
+    listed = store.list(limit=100)
+    assert listed["total"] == 55
+
+    store.record(
+        "device",
+        "device_realtime_error",
+        "connect failed https://host/v1?key=topsecret_val Header: Bearer abcdef123456 with my-raw-secret",
+        detail={"token": "hidden_tok", "url": "wss://host/ws?token=tok_xyz"},
+        secrets=("my-raw-secret",),
+    )
+    reopened = ErrorLogStore(path=db_path, max_rows=55)
+    dev_rows = reopened.list(source="device")
+    assert dev_rows["total"] == 1
+    row = dev_rows["items"][0]
+    assert "topsecret_val" not in row["message"]
+    assert "abcdef123456" not in row["message"]
+    assert "my-raw-secret" not in row["message"]
+    assert row["detail"]["token"] == "[已隐藏]"
+    assert "tok_xyz" not in row["detail"]["url"]
+
+    cfg = _base_settings(tmp_path)
+    app = create_app(
+        cfg,
+        settings_store=SettingsStore(tmp_path / ".env"),
+        provider_factory=lambda c: _ScriptedLLM([]),
+    )
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        app.state.error_log.record("desktop", "desktop_rpc_timeout", "mac rpc timed out")
+        res = client.get("/api/insights/errors", params={"source": "desktop", "q": "timed out"})
+        assert res.status_code == 200
+        payload = res.json()
+        assert payload["total"] == 1
+        assert payload["items"][0]["code"] == "desktop_rpc_timeout"
+
+        cleared = client.delete("/api/insights/errors", headers=HEADERS)
+        assert cleared.status_code == 200
+        assert cleared.json()["deleted"] >= 1
+        assert client.get("/api/insights/errors").json()["total"] == 0
+
+
+def test_windows_app_resolver_shortcuts_and_uwp(tmp_path, monkeypatch):
+    monkeypatch.setattr("desktop_node.platform_windows.Path.home", lambda: tmp_path / "home")
+    prog_data = tmp_path / "ProgramData"
+    start_programs = prog_data / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+    start_programs.mkdir(parents=True)
+    feishu_lnk = start_programs / "Feishu.lnk"
+    feishu_lnk.write_text("", encoding="utf-8")
+
+    monkeypatch.setenv("ProgramData", str(prog_data))
+    monkeypatch.delenv("AppData", raising=False)
+    monkeypatch.delenv("PUBLIC", raising=False)
+
+    adapter = WindowsDesktopAdapter.__new__(WindowsDesktopAdapter)
+    assert adapter._resolve_windows_app("飞书") == ("file", str(feishu_lnk))
+
+    # Remove shortcuts and test UWP Get-StartApps JSON fallback.
+    feishu_lnk.unlink()
+    monkeypatch.setattr(
+        "desktop_node.platform_windows.subprocess.run",
+        lambda *a, **kw: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps([{"Name": "WeChat", "AppID": "Tencent.WeChat_8wekyb3d8bbwe!App"}]),
+            stderr="",
+        ),
+    )
+    assert adapter._resolve_windows_app("微信") == ("uwp", "Tencent.WeChat_8wekyb3d8bbwe!App")

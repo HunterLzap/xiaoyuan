@@ -73,8 +73,8 @@ def build_tool_instructions(tool_names=None, channel="text", compact=False):
             parts.append("控制成功须有本轮工具成功与设备校验依据，口头成功不算。")
         if names & DESKTOP_TOOL_NAMES:
             parts.append(
-                "\n电脑操控：仅操作已连接电脑节点(desktop_list_nodes)；GUI操作前先desktop_inspect_screen看屏幕尺寸与位置；"
-                "写/打开/点击/输入/命令受确认保护，未确认不声称已执行。"
+                "\n电脑操控：仅操作已连接电脑节点(desktop_list_nodes)；GUI操作前先desktop_inspect_screen看屏幕与坐标；"
+                "写/打开/点击/输入/命令受确认保护：发起调用前禁止先输出“这就帮你打开/正在打开”，必须直接调用工具并在返回confirmation_required后再问用户确认。"
             )
         return "".join(parts)
     parts = [TOOL_INSTRUCTIONS]
@@ -130,8 +130,8 @@ def build_tool_instructions(tool_names=None, channel="text", compact=False):
             "\n电脑操控与 Computer Use 规则：只能操作已在线的 Windows / Mac 个人电脑节点（可用 desktop_list_nodes 查询节点及平台）。"
             "读取屏幕、剪贴板、目录与文件可直接调用；"
             "执行 desktop_gui_action 前，先调用 desktop_inspect_screen 获取当前分辨率与画面判断目标坐标。"
-            "设置剪贴板、打开应用/网址、点击/输入/快捷键、执行终端命令均有副作用：如工具返回 confirmation_required，"
-            "必须清晰复述拟执行工具、目标电脑与核心参数，请用户口头/打字确认或点击界面确认卡片后再执行，未真实成功前不得声称已完成。"
+            "设置剪贴板、打开应用/网址、点击/输入/快捷键、执行终端命令均有副作用：发起调用前不要先输出“这就帮你打开/正在打开”之类的承诺句，直接调用工具；"
+            "如工具返回 confirmation_required，必须清晰复述拟执行工具、目标电脑与核心参数，请用户口头/打字确认或点击界面确认卡片后再执行，未真实成功前不得声称已完成。"
         )
     return "".join(parts)
 MAX_TOOL_CALLS = 8

@@ -115,6 +115,12 @@ async def _handle_request(
         }, ensure_ascii=False))
 
 
+async def _heartbeat_loop(ws) -> None:
+    while True:
+        await asyncio.sleep(30.0)
+        await ws.send(json.dumps({"type": "ping"}))
+
+
 async def run_node(
     *,
     server: str,
@@ -123,6 +129,7 @@ async def run_node(
     name: str | None = None,
     allow_shell: bool = True,
     allow_gui: bool = True,
+    use_system_proxy: bool = False,
 ) -> None:
     try:
         import websockets
@@ -136,11 +143,13 @@ async def run_node(
     headers = {"Authorization": f"Bearer {token}"}
     backoff = 2.0
     while True:
+        hb_task: asyncio.Task | None = None
         try:
             logger.info("Connecting desktop node [%s / %s] -> %s", resolved_id, adapter.os_name, server)
             async with websockets.connect(
                 server,
                 additional_headers=headers,
+                proxy=True if use_system_proxy else None,
                 max_size=8 * 1024 * 1024,
                 ping_interval=20,
                 ping_timeout=20,
@@ -157,8 +166,9 @@ async def run_node(
                     "screen": screen,
                     "capabilities": adapter.capabilities(allow_shell=allow_shell, allow_gui=allow_gui),
                 }, ensure_ascii=False))
+                hb_task = asyncio.create_task(_heartbeat_loop(ws))
                 while True:
-                    raw = await asyncio.wait_for(ws.recv(), timeout=60.0)
+                    raw = await ws.recv()
                     msg = json.loads(raw)
                     if not isinstance(msg, dict):
                         continue
@@ -176,6 +186,13 @@ async def run_node(
                            type(error).__name__, error, backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 1.5, 30.0)
+        finally:
+            if hb_task is not None:
+                hb_task.cancel()
+                try:
+                    await hb_task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -187,6 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--name", default=os.environ.get("DESKTOP_NODE_NAME", ""), help="Optional display name")
     parser.add_argument("--no-shell", action="store_true", help="Disable run_command RPC on this machine")
     parser.add_argument("--no-gui", action="store_true", help="Disable mouse/keyboard gui_action RPC on this machine")
+    parser.add_argument("--use-system-proxy", action="store_true", help="Follow OS/env SOCKS/HTTP proxy instead of direct connection")
     args = parser.parse_args(argv)
     if not args.server or not args.token:
         parser.error("必须通过 --server 和 --token（或环境变量 DESKTOP_SERVER_URL / DESKTOP_GATEWAY_TOKEN）提供服务地址与令牌。")
@@ -198,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
             name=args.name or None,
             allow_shell=not args.no_shell,
             allow_gui=not args.no_gui,
+            use_system_proxy=args.use_system_proxy,
         ))
     except KeyboardInterrupt:
         return 0

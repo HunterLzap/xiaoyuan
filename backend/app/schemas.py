@@ -211,7 +211,7 @@ class InsightClearFilters(BaseModel):
 
 class ApprovalDecisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    decision: Literal["approve", "deny"]
+    decision: Literal["approve", "deny", "approve_desktop_lease"]
     session_id: UUID | None = None
 
 

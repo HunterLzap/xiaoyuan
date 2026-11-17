@@ -104,6 +104,10 @@ class _SessionConfirmationState:
     confirmed_summary: str = ""
     denied_for_turn: UUID | None = None
     denied_tool: str = ""
+    desktop_lease_until: float = 0.0
+
+
+DESKTOP_LEASE_TOOLS = frozenset({"desktop_open", "desktop_gui_action", "desktop_set_clipboard"})
 
 
 class SideEffectConfirmationStore:
@@ -178,6 +182,8 @@ class SideEffectConfirmationStore:
             return "execute"
         if state.denied_for_turn == turn_id and state.denied_tool == tool_name:
             return "denied"
+        if tool_name in DESKTOP_LEASE_TOOLS and monotonic() < state.desktop_lease_until:
+            return "execute"
         if state.pending is not None and state.pending.status == "pending":
             state.pending.status = "superseded"
         preview = _preview_arguments(arguments, secrets)
@@ -242,13 +248,20 @@ class SideEffectConfirmationStore:
         state = self._sessions.setdefault(action.session_id, _SessionConfirmationState())
         if decision == "deny":
             action.status = "denied"
+            state.desktop_lease_until = 0.0
             if state.pending is action:
                 state.pending = None
         elif decision == "approve":
             action.status = "approved"
             state.pending = action
+        elif decision == "approve_desktop_lease":
+            if action.tool_name not in DESKTOP_LEASE_TOOLS:
+                raise ProviderError(422, "lease_not_allowed", "该操作风险较高，只允许逐次确认，不支持连续托管。")
+            action.status = "approved"
+            state.pending = action
+            state.desktop_lease_until = monotonic() + 180.0
         else:
-            raise ProviderError(422, "invalid_decision", "仅支持 approve 或 deny。")
+            raise ProviderError(422, "invalid_decision", "仅支持 approve、approve_desktop_lease 或 deny。")
         return action.to_public()
 
     def clear_session(self, session_id: UUID) -> None:

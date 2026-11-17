@@ -6,6 +6,7 @@ import ctypes
 import ctypes.util
 import os
 from pathlib import Path
+import plistlib
 import re
 import subprocess
 import tempfile
@@ -39,6 +40,38 @@ _MAC_MODIFIERS: dict[str, int] = {
     "command": 1 << 20,
     "super": 1 << 20,
     "win": 1 << 20,
+}
+
+_MAC_APP_ALIASES: dict[str, tuple[str, ...]] = {
+    "飞书": ("Lark", "Feishu"),
+    "feishu": ("Lark", "Feishu"),
+    "lark": ("Lark", "Feishu"),
+    "微信": ("WeChat",),
+    "wechat": ("WeChat",),
+    "企业微信": ("企业微信", "WeCom", "WXWork"),
+    "钉钉": ("DingTalk",),
+    "腾讯会议": ("TencentMeeting", "VooV Meeting"),
+    "剪映": ("VideoFusion-macOS", "CapCut"),
+    "谷歌浏览器": ("Google Chrome", "Chrome"),
+    "chrome": ("Google Chrome",),
+    "火狐": ("Firefox",),
+    "edge": ("Microsoft Edge",),
+    "浏览器": ("Safari", "Google Chrome"),
+    "终端": ("Terminal", "iTerm"),
+    "备忘录": ("Notes",),
+    "记事本": ("TextEdit", "Notes"),
+    "计算器": ("Calculator",),
+    "访达": ("Finder",),
+    "音乐": ("Music", "QQMusic", "NeteaseMusic"),
+    "网易云音乐": ("NeteaseMusic",),
+    "qq音乐": ("QQMusic",),
+    "qq": ("QQ",),
+    "wps": ("wpsoffice", "WPS Office"),
+    "vscode": ("Visual Studio Code",),
+    "百度网盘": ("BaiduNetdisk_mac", "BaiduNetdisk"),
+    "阿里云盘": ("aDrive",),
+    "系统设置": ("System Settings", "System Preferences"),
+    "活动监视器": ("Activity Monitor",),
 }
 
 _kCGHIDEventTap = 0
@@ -182,6 +215,104 @@ class MacOSDesktopAdapter(DesktopAdapter):
             raise DesktopRpcError("clipboard_failed", proc.stderr.strip() or "写入剪贴板失败。")
         return {"ok": True, "length": len(text)}
 
+    @staticmethod
+    def _bundle_names(bundle: Path) -> set[str]:
+        names = {bundle.stem.lower()}
+        info_plist = bundle / "Contents" / "Info.plist"
+        if info_plist.exists():
+            try:
+                data = plistlib.loads(info_plist.read_bytes())
+                for key in ("CFBundleDisplayName", "CFBundleName", "CFBundleExecutable"):
+                    val = data.get(key)
+                    if isinstance(val, str) and val.strip():
+                        names.add(val.strip().lower())
+            except Exception:
+                pass
+        resources = bundle / "Contents" / "Resources"
+        for lproj in ("zh-Hans.lproj", "zh_CN.lproj", "Base.lproj"):
+            sp = resources / lproj / "InfoPlist.strings"
+            if not sp.exists():
+                continue
+            try:
+                raw = sp.read_bytes()
+                try:
+                    data = plistlib.loads(raw)
+                    for key in ("CFBundleDisplayName", "CFBundleName"):
+                        val = data.get(key)
+                        if isinstance(val, str) and val.strip():
+                            names.add(val.strip().lower())
+                    continue
+                except Exception:
+                    pass
+                text = raw.decode("utf-16", errors="ignore") if b"\x00" in raw[:64] else raw.decode("utf-8", errors="ignore")
+                for m in re.finditer(r'CFBundle(?:Display)?Name\s*"?\s*=\s*"([^"]+)"', text):
+                    names.add(m.group(1).strip().lower())
+            except OSError:
+                pass
+        return names
+
+    def _scan_app_bundles(self) -> list[Path]:
+        roots = [Path("/Applications"), Path.home() / "Applications", Path("/System/Applications")]
+        bundles: list[Path] = []
+        for root in roots:
+            if not root.exists():
+                continue
+            try:
+                for p in root.iterdir():
+                    if p.suffix.lower() == ".app":
+                        bundles.append(p)
+                    elif p.is_dir() and not p.name.startswith("."):
+                        try:
+                            for sub in p.iterdir():
+                                if sub.suffix.lower() == ".app":
+                                    bundles.append(sub)
+                        except OSError:
+                            pass
+            except OSError:
+                pass
+        return bundles
+
+    def _resolve_app_bundle(self, target: str) -> str | None:
+        clean = (target or "").strip()
+        lowered = clean.lower()
+        candidates: list[str] = [clean]
+        for key, vals in _MAC_APP_ALIASES.items():
+            if lowered == key.lower() or key.lower() in lowered:
+                candidates.extend(vals)
+        seen: list[str] = []
+        for item in candidates:
+            if item and item not in seen:
+                seen.append(item)
+        bundles = self._scan_app_bundles()
+        bundle_index = [(b, self._bundle_names(b)) for b in bundles]
+        for cand in seen:
+            cl = cand.lower()
+            for bundle, names in bundle_index:
+                if cl in names:
+                    return str(bundle)
+        for cand in seen:
+            safe_q = re.sub(r"[\'\"\\\n\r*]", "", cand).strip()
+            if not safe_q:
+                continue
+            try:
+                proc = subprocess.run(
+                    ["mdfind", f"kMDItemContentType == 'com.apple.application-bundle' && (kMDItemDisplayName == '*{safe_q}*'cd || kMDItemFSName == '*{safe_q}*'cd)"],
+                    capture_output=True, text=True, timeout=4,
+                )
+                if proc.returncode == 0:
+                    for line in proc.stdout.splitlines():
+                        p = line.strip()
+                        if p.endswith(".app") and Path(p).exists():
+                            return p
+            except (OSError, subprocess.SubprocessError):
+                pass
+        for cand in seen:
+            cl = cand.lower()
+            for bundle, names in bundle_index:
+                if any(cl in n for n in names):
+                    return str(bundle)
+        return None
+
     def open_target(self, target: str, kind: str = "auto") -> dict[str, Any]:
         clean = (target or "").strip()
         if not clean:
@@ -203,6 +334,12 @@ class MacOSDesktopAdapter(DesktopAdapter):
             candidate = Path(clean).expanduser()
             cmd = ["open", str(candidate)] if candidate.exists() else ["open", "-a", clean]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if proc.returncode != 0 and (kind == "app" or (kind == "auto" and not is_url and not clean.startswith(("~", "/")))):
+            resolved_bundle = self._resolve_app_bundle(clean)
+            if resolved_bundle:
+                proc2 = subprocess.run(["open", resolved_bundle], capture_output=True, text=True, timeout=10)
+                if proc2.returncode == 0:
+                    return {"ok": True, "opened": resolved_bundle, "requested": clean}
         if proc.returncode != 0:
             raise DesktopRpcError("open_failed", proc.stderr.strip() or f"打开失败：{clean}")
         return {"ok": True, "opened": clean}

@@ -1,5 +1,6 @@
 """Small, authenticated Xiaozhi device bridge. No audio inference or firmware writes."""
 import asyncio
+from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime, timezone
 from ipaddress import ip_address
@@ -104,6 +105,7 @@ class DeviceHub:
         # The conversation loop is attached by the admin app, which owns the model and
         # TTS providers; the gateway can run without it (recognition only).
         self.voice = None
+        self.error_logger: Callable[..., None] | None = None
         self.pipeline_asr = DevicePipelineASR(lambda: self.voice.service.settings if self.voice is not None else Settings.model_construct())
         self.lock = asyncio.Lock()
         if path.exists():
@@ -117,6 +119,12 @@ class DeviceHub:
     @staticmethod
     def now():
         return datetime.now(timezone.utc).isoformat()
+
+    def record_error(self, code: str, message: str, *, detail: dict | None = None) -> None:
+        cb = self.error_logger
+        if cb is not None:
+            with suppress(Exception):
+                cb("device", code, message, detail=detail)
 
     def persist(self, setup, preferences):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -487,6 +495,7 @@ class DeviceConnection:
                 if stage == "keepalive"
                 else "设备能力协商失败；请重新连接并核对固件。"
             )
+            self.hub.record_error(f"device_{stage}_failed", self.hub.last_error, detail={"detail": detail})
             with suppress(Exception):
                 await self.ws.close(code=1008)
 
@@ -540,6 +549,8 @@ def create_gateway(hub: DeviceHub, desktop_hub=None):
     @app.post("/xiaozhi/ota/")
     async def bootstrap(request: Request):
         if not await hub.bootstrap_authorized(request.headers.get("device-id", ""), request.query_params.get("key")):
+            hub.record_error("ota_unauthorized", "设备 OTA 请求未通过鉴权（device-id 或 key 不匹配）",
+                             detail={"device_id": request.headers.get("device-id", "")[:32]})
             return JSONResponse(status_code=403, content={"error": "device_not_authorized"})
         # Read only the reported firmware version so the reply never announces an upgrade;
         # boot metadata is not stored, forwarded or otherwise acted on.
@@ -574,6 +585,8 @@ def create_gateway(hub: DeviceHub, desktop_hub=None):
                 or not hub.authorized(device_id, token)
                 or version != "1"):
             hub.last_error = hub.describe_rejection(origin, device_id, token, version)
+            hub.record_error("device_ws_rejected", hub.last_error,
+                             detail={"device_id": device_id[:32], "version": version, "has_origin": origin is not None})
             await ws.close(code=1008)
             return
         # A second connection cannot evict or claim the active device.
@@ -581,6 +594,8 @@ def create_gateway(hub: DeviceHub, desktop_hub=None):
             if hub.connection is not None or not hub.authorized(ws.headers.get("device-id", ""), token):
                 logger.warning("device_ws_rejected active=%s authorized=%s",
                                hub.connection is not None, hub.authorized(device_id, token))
+                hub.record_error("device_ws_rejected", "设备 WebSocket 重复连接或鉴权未通过",
+                                 detail={"active": hub.connection is not None, "device_id": device_id[:32]})
                 await ws.close(code=1008)
                 return
             await ws.accept()
@@ -706,6 +721,7 @@ def create_gateway(hub: DeviceHub, desktop_hub=None):
                         type(error).__name__, conn.frames_received, conn.frames_dropped, conn.listening)
         except ProviderError as error:
             hub.last_error = error.message
+            hub.record_error(error.code, error.message)
         finally:
             if realtime:
                 with suppress(Exception):

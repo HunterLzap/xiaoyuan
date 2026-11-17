@@ -35,6 +35,7 @@ from .tools import (build_tool_registry, tool_catalog, ExternalToolStore, BUILTI
 from .api_requests import (DebugRequest, confirm_request, merge_request, send_request,
                            request_dump, secret_values)
 from .audit_store import AuditStore, FilterRequired, CountMismatch
+from .error_log import ErrorLogStore
 from .embeddings import build_embedder, EmbeddingError, to_blob
 from .history_store import HistoryStore
 from .service import ChatService
@@ -134,6 +135,13 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         )
         app.state.desktop.settings_getter = lambda: app.state.service.settings
         app.state.desktop.lan_host_getter = lambda: (app.state.devices.setup.lan_host if app.state.devices.setup else "")
+        app.state.error_log = ErrorLogStore(state_db_path)
+        def log_system_error(source: str, code: str, message: str, *, detail=None, secrets=()):
+            merged_secrets = tuple(secrets) if secrets else tuple(audit_secrets())
+            app.state.error_log.record(source, code, message, detail=detail, secrets=merged_secrets)
+        app.state.service.error_logger = log_system_error
+        app.state.devices.error_logger = log_system_error
+        app.state.desktop.error_logger = log_system_error
         refresh_tools()
         # Pay the TTS client's CA-load cost at startup instead of on the first turn.
         shared_client(config.tts_timeout_seconds)
@@ -228,8 +236,31 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
 
     @app.exception_handler(ProviderError)
     async def provider_error_handler(request, error: ProviderError):
+        err_log = getattr(app.state, "error_log", None)
+        if err_log is not None and error.status >= 400 and error.code not in {"session_not_found", "tool_not_found", "insight_not_found"}:
+            src = ("desktop" if error.code.startswith("desktop_")
+                   else "device" if error.code.startswith(("device_", "ota_"))
+                   else "tool" if error.code.startswith(("tool_", "approval_", "order_"))
+                   else "model" if error.status in (502, 503, 504) else "system")
+            err_log.record(src, error.code, error.message,
+                           detail={"status": error.status, "path": request.url.path}, secrets=audit_secrets())
         return JSONResponse(status_code=error.status, content={
             "detail": {"code": error.code, "message": error.message},
+        })
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request, error: Exception):
+        err_log = getattr(app.state, "error_log", None)
+        if err_log is not None:
+            err_log.record(
+                "system",
+                f"unhandled_{type(error).__name__}",
+                f"服务端未捕获异常：{type(error).__name__}: {str(error)[:300]}",
+                detail={"path": request.url.path, "method": request.method},
+                secrets=audit_secrets(),
+            )
+        return JSONResponse(status_code=500, content={
+            "detail": {"code": "internal_server_error", "message": "服务内部处理异常，详情已记录到「执行洞察 → 异常日志」。"},
         })
 
     @app.get("/health")
@@ -791,7 +822,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         fields = {"search_m5stack": "m5stack_enabled", "search_personal_knowledge": "personal_kb_enabled",
                   "get_weather": "weather_enabled", "desktop_control": "desktop_enabled"}
         if name in fields:
-            update = CapabilitySettingsUpdate(**{fields[name]: body.enabled})
+            update = CapabilitySettingsUpdate.model_validate({fields[name]: body.enabled})
             await save_grouped_settings(update)
         else:
             async with app.state.operation_lock:
@@ -1203,6 +1234,22 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         if not await asyncio.to_thread(app.state.audit.delete_trace, trace_id):
             raise ProviderError(404, "insight_not_found", "追踪记录不存在。")
         return Response(status_code=204)
+
+    @app.get("/api/insights/errors")
+    async def insights_errors(limit: int = Query(default=50, ge=1, le=200),
+                              offset: int = Query(default=0, ge=0),
+                              source: str = Query(default="", max_length=32),
+                              q: str = Query(default="", max_length=200)):
+        err_log = getattr(app.state, "error_log", None)
+        if err_log is None:
+            return {"items": [], "total": 0}
+        return await asyncio.to_thread(err_log.list, limit, offset, source=source, q=q)
+
+    @app.delete("/api/insights/errors")
+    async def clear_insights_errors():
+        err_log = getattr(app.state, "error_log", None)
+        deleted = await asyncio.to_thread(err_log.clear) if err_log is not None else 0
+        return {"deleted": deleted}
 
     @app.get("/api/insights/parsing")
     async def insights_parsing(limit: int = Query(default=50, ge=1, le=200),

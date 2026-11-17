@@ -27,6 +27,34 @@ for _c in "abcdefghijklmnopqrstuvwxyz0123456789":
     _VK_MAP[_c] = ord(_c.upper())
 
 _MODIFIERS = {"ctrl", "control", "shift", "alt", "option", "win", "super", "cmd", "command"}
+_WIN_APP_ALIASES: dict[str, tuple[str, ...]] = {
+    "飞书": ("Feishu", "Lark", "飞书"),
+    "feishu": ("Feishu", "Lark", "飞书"),
+    "lark": ("Lark", "Feishu"),
+    "微信": ("WeChat", "Weixin", "微信"),
+    "wechat": ("WeChat", "Weixin"),
+    "企业微信": ("WXWork", "WeCom", "企业微信"),
+    "钉钉": ("DingTalk", "钉钉"),
+    "腾讯会议": ("wemeetapp", "Tencent Meeting", "腾讯会议"),
+    "谷歌浏览器": ("chrome", "Google Chrome"),
+    "chrome": ("chrome", "Google Chrome"),
+    "浏览器": ("msedge", "chrome", "Microsoft Edge"),
+    "edge": ("msedge", "Microsoft Edge"),
+    "记事本": ("notepad", "Notepad"),
+    "计算器": ("calc", "Calculator", "计算器"),
+    "画图": ("mspaint", "Paint", "画图"),
+    "截图": ("SnippingTool", "ScreenSketch", "截图工具"),
+    "终端": ("wt", "WindowsTerminal", "powershell", "cmd"),
+    "资源管理器": ("explorer",),
+    "设置": ("ms-settings:", "Settings"),
+    "剪映": ("JianyingPro", "CapCut", "剪映专业版"),
+    "wps": ("wps", "WPS Office"),
+    "qq": ("QQ",),
+    "网易云音乐": ("cloudmusic", "网易云音乐"),
+    "qq音乐": ("QQMusic", "QQ音乐"),
+    "vscode": ("Code", "Visual Studio Code"),
+    "百度网盘": ("BaiduNetdisk", "百度网盘"),
+}
 _INPUT_KEYBOARD = 1
 _KEYEVENTF_KEYUP = 0x0002
 _KEYEVENTF_UNICODE = 0x0004
@@ -177,6 +205,82 @@ class WindowsDesktopAdapter(DesktopAdapter):
             raise DesktopRpcError("clipboard_failed", proc.stderr.strip() or "写入剪贴板失败。")
         return {"ok": True, "length": len(text)}
 
+    def _resolve_windows_app(self, target: str) -> tuple[str, str] | None:
+        clean = (target or "").strip()
+        lowered = clean.lower()
+        candidates: list[str] = [clean]
+        for key, vals in _WIN_APP_ALIASES.items():
+            if lowered == key.lower() or key.lower() in lowered:
+                candidates.extend(vals)
+        roots: list[Path] = [Path.home() / "Desktop"]
+        for env_key, sub in (
+            ("ProgramData", Path("Microsoft") / "Windows" / "Start Menu" / "Programs"),
+            ("AppData", Path("Microsoft") / "Windows" / "Start Menu" / "Programs"),
+            ("PUBLIC", Path("Desktop")),
+        ):
+            val = os.environ.get(env_key, "").strip()
+            if val:
+                roots.append(Path(val) / sub)
+        shortcuts: list[Path] = []
+        for root in roots:
+            if root and root.exists():
+                for ext in ("*.lnk", "*.url"):
+                    shortcuts.extend(p for p in root.rglob(ext))
+        for cand in candidates:
+            cl = cand.lower()
+            for sc in shortcuts:
+                if sc.stem.lower() == cl:
+                    return ("file", str(sc))
+        for cand in candidates:
+            cl = cand.lower()
+            for sc in shortcuts:
+                if cl in sc.stem.lower():
+                    return ("file", str(sc))
+        try:
+            import winreg
+            for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+                sub = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"
+                try:
+                    with winreg.OpenKey(hive, sub) as key_handle:
+                        idx = 0
+                        while True:
+                            try:
+                                name = winreg.EnumKey(key_handle, idx)
+                                idx += 1
+                            except OSError:
+                                break
+                            stem = Path(name).stem.lower()
+                            if any(c.lower() == stem or c.lower() in stem for c in candidates):
+                                with winreg.OpenKey(key_handle, name) as exe_key:
+                                    exe_path, _ = winreg.QueryValueEx(exe_key, "")
+                                    if isinstance(exe_path, str) and exe_path.strip():
+                                        return ("file", exe_path.strip().strip('"'))
+                except OSError:
+                    continue
+        except ImportError:
+            pass
+        try:
+            ps = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-StartApps | ConvertTo-Json -Compress"
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=6,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                apps = json.loads(proc.stdout.strip())
+                if isinstance(apps, dict):
+                    apps = [apps]
+                if isinstance(apps, list):
+                    for cand in candidates:
+                        cl = cand.lower()
+                        for app in apps:
+                            app_name = str(app.get("Name") or "").strip().lower()
+                            app_id = str(app.get("AppID") or "").strip()
+                            if app_id and (app_name == cl or cl in app_name):
+                                return ("uwp", app_id)
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+            pass
+        return None
+
     def open_target(self, target: str, kind: str = "auto") -> dict[str, Any]:
         clean = (target or "").strip()
         if not clean:
@@ -198,7 +302,20 @@ class WindowsDesktopAdapter(DesktopAdapter):
                 if candidate.exists():
                     os.startfile(str(candidate))
                 else:
-                    subprocess.Popen(["cmd", "/c", "start", "", clean], shell=False)
+                    found = self._resolve_windows_app(clean)
+                    if found is not None:
+                        mode, target_ref = found
+                        if mode == "uwp":
+                            subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{target_ref}"], shell=False)
+                        else:
+                            os.startfile(target_ref)
+                        return {"ok": True, "opened": target_ref, "requested": clean}
+                    aliases = _WIN_APP_ALIASES.get(clean.lower(), ())
+                    launch_name = aliases[0] if aliases else clean
+                    if launch_name.endswith(":"):
+                        os.startfile(launch_name)
+                    else:
+                        subprocess.Popen(["cmd", "/c", "start", "", launch_name], shell=False)
         except OSError as error:
             raise DesktopRpcError("open_failed", f"打开失败：{error}") from None
         return {"ok": True, "opened": clean}

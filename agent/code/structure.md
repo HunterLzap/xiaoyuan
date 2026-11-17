@@ -1,6 +1,6 @@
 # 代码与运行位置地图
 
-更新：2026-11-15。此处描述模块职责，不代表磁盘代码已被运行进程加载；版本与暂停事项见 [START](../START.md)。
+更新：2026-11-17。此处描述模块职责，不代表磁盘代码已被运行进程加载；版本与暂停事项见 [START](../START.md)。
 
 ## 三处环境
 
@@ -30,12 +30,12 @@
 | `weather.py` / `knowledge.py` / `api_requests.py` | 天气、M5官方只读资料、自定义HTTP API |
 | `personal_kb.py` / `embeddings.py` / `audit_store.py` | 多库原文/FTS/向量/按库过滤与洞察快照 |
 | `order_confirmation.py` | 特定订单编号确认，不等于通用外部写操作确认平台 |
-| `service.py` / `history_store.py` / `schemas.py` | 会话/持久历史、Token明细结构与聚合 |
+| `service.py` / `history_store.py` / `schemas.py` / `error_log.py` | 会话/持久历史、Token明细结构与聚合、SQLite 脱敏系统异常日志（`system_errors`） |
 | `config.py` / `settings_store.py` | 配置读取、单助手选择、原子保存与私有凭据 |
 | `audio_fx.py` / `audio_metrics.py` | 原语速/音调后处理与被动PCM/网关计量；不长期保存音频 |
 | `qwen_voices.py` / `voices.py` / `tts.py` | 百炼/分模型音色元数据及显式TTS适配，不混接实时主线 |
 | `ack_audio.py` / `community.py` / `speech_bridge.py` | 历史应答音、已有社区代码桥、本地worker；不是新主线依赖 |
-| `app.html` / `app.js` / `app.css` / `paths.js` | Agent 优先管理后台、确认卡片/执行胶囊、电脑节点控制台与子路径支持 |
+| `app.html` / `app.js` / `app.css` / `paths.js` | Agent 优先管理后台、确认卡片/执行胶囊、电脑节点控制台、执行洞察（含异常日志）与子路径支持 |
 | `voice.js` / `voice-capture.js` | 网页音频采集、真实状态与播放 |
 | `desktop_node/` (`client.py` / `platform_windows.py` / `platform_macos.py`) | Windows 与 macOS 跨平台桌面节点客户端（位于项目根 `desktop_node/`） |
 

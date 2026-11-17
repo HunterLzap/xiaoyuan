@@ -36,6 +36,7 @@ class CapabilitySettingsUpdate(BaseModel):
     weather_enabled: bool = True
     embedding_enabled: bool | None = None
     desktop_enabled: bool | None = None
+    desktop_vision_model: str | None = Field(default=None, max_length=200)
 
 
 class TTSSettingsUpdate(BaseModel):
@@ -172,6 +173,7 @@ def public_settings(settings: Settings) -> dict:
         "weather_enabled": settings.weather_enabled,
         "weather_default_city": settings.weather_default_city,
         "desktop_enabled": settings.desktop_enabled,
+        "desktop_vision_model": settings.desktop_vision_model,
         "selected_tool_ids": settings.selected_tool_ids if settings.selected_tool_ids is not None else [],
         "selected_kb_ids": settings.selected_kb_ids if settings.selected_kb_ids is not None else [],
         "active_model": settings.active_model,
@@ -229,7 +231,7 @@ class SettingsStore:
                 if getattr(update, extra, None) is None:
                     updates.pop(extra, None)
         if isinstance(update, CapabilitySettingsUpdate):
-            for extra in ("embedding_enabled", "desktop_enabled"):
+            for extra in ("embedding_enabled", "desktop_enabled", "desktop_vision_model"):
                 if getattr(update, extra, None) is None:
                     updates.pop(extra, None)
         if isinstance(update, ConnectionsUpdate):
@@ -281,7 +283,7 @@ class SettingsStore:
                 if getattr(update, extra, None) is None:
                     managed.discard(extra)
         if isinstance(update, CapabilitySettingsUpdate):
-            for extra in ("embedding_enabled", "desktop_enabled"):
+            for extra in ("embedding_enabled", "desktop_enabled", "desktop_vision_model"):
                 if getattr(update, extra, None) is None:
                     managed.discard(extra)
         if isinstance(update, (ConnectionsUpdate, CapabilitySettingsUpdate, AssistantUpdate, AssistantSelectionUpdate)):

@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     )
     agent_profile: str = Field(default="", max_length=2000)
     desktop_enabled: bool = False
+    desktop_vision_model: str = Field(default="", max_length=200)
     input_price_per_million: Decimal | None = Field(default=None, ge=0)
     output_price_per_million: Decimal | None = Field(default=None, ge=0)
     currency: str = "CNY"

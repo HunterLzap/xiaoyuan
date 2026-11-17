@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -109,9 +110,16 @@ class DesktopNodeConnection:
             })
             result = await asyncio.wait_for(future, timeout=max(2.0, min(float(timeout), 45.0)))
         except TimeoutError:
-            raise ProviderError(504, "desktop_rpc_timeout", f"电脑节点 {self.name} 执行 {action} 超时。") from None
+            msg = f"电脑节点 {self.name} 执行 {action} 超时。"
+            self.hub.record_error("desktop_rpc_timeout", msg, detail={"node_id": self.node_id, "action": action})
+            raise ProviderError(504, "desktop_rpc_timeout", msg) from None
         except (WebSocketDisconnect, ConnectionError, RuntimeError):
-            raise ProviderError(502, "desktop_disconnected", f"电脑节点 {self.name} 连接已断开。") from None
+            msg = f"电脑节点 {self.name} 连接已断开。"
+            self.hub.record_error("desktop_disconnected", msg, detail={"node_id": self.node_id, "action": action})
+            raise ProviderError(502, "desktop_disconnected", msg) from None
+        except ProviderError as error:
+            self.hub.record_error(error.code, error.message, detail={"node_id": self.node_id, "action": action})
+            raise
         finally:
             self.pending.pop(req_id, None)
         self.last_seen_at = _utc_now()
@@ -178,7 +186,14 @@ class DesktopHub:
         self.saved_nodes: dict[str, dict] = {}
         self.active: dict[str, DesktopNodeConnection] = {}
         self.last_error: str | None = None
+        self.error_logger: Callable[..., None] | None = None
         self._load()
+
+    def record_error(self, code: str, message: str, *, detail: dict | None = None) -> None:
+        cb = self.error_logger
+        if cb is not None:
+            with suppress(Exception):
+                cb("desktop", code, message, detail=detail)
 
     def _load(self) -> None:
         if self.path.exists():
@@ -410,13 +425,25 @@ class DesktopHub:
         img_w: int, img_h: int, scr_w: int, scr_h: int, os_name: str,
     ) -> dict:
         settings: Settings | None = self.settings_getter() if self.settings_getter is not None else None
-        if settings is None or settings.missing_config:
-            return {"vision_analysis": None, "vision_note": "未配置支持视觉的模型接口，已返回窗口信息与截图尺寸。"}
-        base_url = settings.base_url.rstrip("/")
-        api_key = settings.api_key.get_secret_value().strip()
-        model = settings.model.strip()
+        if settings is None:
+            return {"vision_analysis": None, "vision_note": "未加载模型设置，已返回窗口信息与截图尺寸。"}
+        configured_model = (getattr(settings, "desktop_vision_model", "") or "").strip()
+        if (getattr(settings, "rt_provider", "") == "bailian"
+                and settings.rt_api_key.get_secret_value().strip()
+                and (settings.voice_mode == "realtime" or not settings.model.strip() or configured_model.startswith("qwen"))):
+            ws_id = (settings.rt_workspace or "").strip()
+            base_url = (
+                f"https://{ws_id}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+                if ws_id else "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            )
+            api_key = settings.rt_api_key.get_secret_value().strip()
+            model = configured_model or "qwen3-vl-plus"
+        else:
+            base_url = settings.base_url.rstrip("/")
+            api_key = settings.api_key.get_secret_value().strip()
+            model = configured_model or settings.model.strip()
         if not base_url or not api_key or not model:
-            return {"vision_analysis": None, "vision_note": "缺少主模型配置，已返回窗口信息与截图尺寸。"}
+            return {"vision_analysis": None, "vision_note": "未配置支持视觉的模型接口，已返回窗口信息与截图尺寸。"}
         prompt = (
             f"这是 {os_name} 电脑当前屏幕截图（图像尺寸 {img_w}x{img_h}，逻辑屏幕 {scr_w}x{scr_h}）。\n"
             f"用户/代理观察问题：{question}\n"
@@ -446,16 +473,20 @@ class DesktopHub:
                     json=payload,
                 )
             if resp.status_code >= 400:
+                err_msg = f"当前模型({model})视觉看图返回 HTTP {resp.status_code}，可能不支持图片输入。"
+                self.record_error("desktop_vision_http_error", err_msg, detail={"model": model, "status": resp.status_code})
                 return {
                     "vision_analysis": None,
-                    "vision_error": f"当前模型({model})视觉看图返回 HTTP {resp.status_code}，可能不支持图片输入。",
+                    "vision_error": err_msg,
                 }
             data = resp.json()
             choice = (data.get("choices") or [{}])[0]
             content = ((choice.get("message") or {}).get("content")) or ""
             return {"vision_analysis": str(content).strip()}
         except (httpx.HTTPError, ValueError, KeyError, IndexError) as error:
-            return {"vision_analysis": None, "vision_error": f"屏幕视觉解析请求失败：{type(error).__name__}"}
+            err_msg = f"屏幕视觉解析请求失败：{type(error).__name__}"
+            self.record_error("desktop_vision_error", err_msg, detail={"model": model})
+            return {"vision_analysis": None, "vision_error": err_msg}
 
     def convert_coordinates(
         self, conn: DesktopNodeConnection, x: int | None, y: int | None, coord_space: str = "image",
@@ -481,6 +512,7 @@ class DesktopHub:
             token = auth[7:].strip() if auth.startswith("Bearer ") else ws.headers.get("x-desktop-token", "").strip()
             if not self.authorized(token):
                 self.last_error = "桌面节点鉴权失败，请检查 Token。"
+                self.record_error("desktop_auth_failed", self.last_error)
                 await ws.close(code=1008)
                 return
             await ws.accept()

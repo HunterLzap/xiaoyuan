@@ -1,23 +1,36 @@
 # 当前进度与证据
 
-更新：2026-11-16。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
+更新：2026-11-17。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
-## 个人 Agent 底座重构、Agent 优先 UI 与跨平台 Windows/Mac 桌面操控（2026-11-16，Mac 本机开发与自动化验证）
+## 方案 A 桌面体验增强、通用应用解析与全系统异常日志中心（2026-11-17，Mac 本机完成并待推云发布）
+
+- **真实基线与现场问题（`82afc7c-20261117-093433`）**：
+  - 真实 Mac 节点 `ryandeMacBook-Air.local`（`1470×956`）通过 `wss://ryan406.online/xiaoyuan/desktop/v1/` 接入云端；网页对话实测 `观察电脑屏幕 · 684ms` 正确识别前台 Chrome 窗口，触发 `打开电脑应用/链接` 确认卡片并点击「确认执行」执行闭环。
+  - 暴露问题与用户新需求：① Mac 开启系统 SOCKS 代理时 `websockets` 报错缺少 `python-socks` 及 60s 空闲超时重连；② `open -a 飞书` 因本地包名为 `Lark.app` 未命中；③ 百炼实时模式下未自动回退 `qwen3-vl-plus` 视觉模型看图定位；④ 连续操控每次均需确认，且模型偶发提前口头承诺「这就帮你打开」；⑤ 硬件语音机器人切换至 Mac 端热区/或云端重启断开时屏幕显示「出错了」，系统尚缺统一可查的报错日志面板；⑥ 希望除飞书外扩展通用中英文应用解析。
+- **本轮新增与修复范围**：
+  - `desktop_node/client.py`：默认 `proxy=None` 直连（可选 `--use-system-proxy`）、增加 30s 应用层 `ping` 心跳、移除 60s `wait_for` 空闲断连。
+  - `desktop_node/platform_macos.py` & `platform_windows.py`：通用应用名解析：中英文常见软件别名表 + macOS `.app` `Info.plist`/`zh-Hans.lproj`/`zh_CN.lproj`/`Base.lproj/InfoPlist.strings` 本地化显示名 + Spotlight `mdfind`；Windows 开始菜单/桌面 `.lnk`/`.url` + 注册表 `App Paths` + UWP `Get-StartApps` (`shell:AppsFolder\<AppID>`)。Mac 本机实读真实 `/Applications` 与 `/System/Applications` 验证命中：`飞书 -> /Applications/Lark.app`、`微信 -> /Applications/WeChat.app`、`腾讯会议 -> /Applications/TencentMeeting.app`、`剪映 -> /Applications/VideoFusion-macOS.app`、`WPS -> /Applications/wpsoffice.app`、`谷歌浏览器 -> /Applications/Google Chrome.app`、`计算器 -> /System/Applications/Calculator.app`、`Antigravity -> /Applications/Antigravity.app`。
+  - `backend/app/desktop.py`、`config.py`、`settings_store.py`、`voice_profiles.py`：百炼实时模式下未单设视觉模型时默认使用 `compatible-mode/v1` + `qwen3-vl-plus`（`desktop_vision_model` 可在「技能与知识 → 个人电脑操控」选填覆盖）。
+  - `tool_gateway.py`、`tool_dialogue.py`、`schemas.py`、`app.html`、`app.js`：`approve_desktop_lease` 支持「确认并免问电脑操控 (3 分钟)」（180s 租约，仅覆盖 `desktop_open`、`desktop_gui_action`、`desktop_set_clipboard`；`desktop_run_command` 与外部 HTTP API 仍强制逐次确认）；工具指令禁止未审批/未收到成功结果前口头声称已完成。
+  - `backend/app/error_log.py`、`devices.py`、`device_realtime.py`、`voice_transport.py`、`service.py`、`main.py`、`app.html`、`app.js`：新增 `ErrorLogStore`（写入 `assistant_state.sqlite3` `system_errors` 表，上限 300 条，自动脱敏 `?key=`/`Bearer`/密钥），捕获硬件设备（OTA 403、WS 建连/保活/断连、语音桥告警与异常）、桌面节点（鉴权、超时、断连、视觉模型 HTTP 错误）、模型/工具执行失败与 FastAPI 4xx/500 异常；新增 `GET/DELETE /api/insights/errors` 及「执行洞察 → 异常日志」分页筛选与清空面板。
+- **本机最终代码后完整自动化验证（Mac Darwin / `.venv` Python 3.12.13）**：
+  - `node --check backend/app/app.js && node --check backend/app/voice.js`：通过（0 错误）。
+  - `.venv/bin/python -m py_compile desktop_node/*.py`：通过（0 错误）。
+  - `.venv/bin/python scripts/lint_incremental.py`：`ruff=19, pyright=120, baseline=146, new=0`。
+  - `.venv/bin/pytest tests/test_desktop_bridge.py tests/test_gateway_trace.py tests/test_personal_kb_isolation.py tests/test_realtime_failures.py tests/test_voice_compat.py tests/test_devices.py tests/test_voices.py -v`：**47 passed, 0 failed（83.05s）**。覆盖桌面桥梁/WSL、Windows `.lnk` 与 UWP mock、Mac `Lark.app` 别名与百炼 `qwen3-vl-plus` 视觉回退 mock、`approve_desktop_lease` 作用域隔离、`ErrorLogStore` SQLite 持久化/上限裁剪/密钥脱敏与 `GET/DELETE /api/insights/errors`，以及既有网关、个人多库、实时失败、语音兼容、真实 socket 设备与音效测试。
+  - `.venv/bin/pytest tests/test_knowledge.py -k "not chat_uses and not retrieval_failure" -v`：**10 passed, 2 deselected（0.81s）**。
+  - `.venv/bin/pytest tests/test_voice_chat.py -k "not voice_routes and not reset_invalidates and not http_disconnect" -v`：**3 passed, 3 deselected（0.54s）**。
+- **尚未验证 / 留待后续确认（不宣称已实机验收）**：
+  - Mac 本机未安装 `playwright`，尚未运行 `node tests/voice_browser.cjs` 浏览器 DOM 回归及人工点击新版「执行洞察 → 异常日志」页面。
+  - 云端 `47.112.16.195` 尚未拉取本次提交，Windows 端真实开始菜单/UWP/`SendInput` 点按、Mac 端真实开启 `飞书` / 百炼 `qwen3-vl-plus` 看图多轮操控及真机设备报错上云采集，待推云后由云端发布并重连节点实测确认。
+
+## 个人 Agent 底座重构、Agent 优先 UI 与跨平台 Windows/Mac 桌面操控（2026-11-16，历史基线记录）
 
 - **改动范围**：
   - Agent 内核与确认门禁：`tool_gateway.py` 升级 `SideEffectConfirmationStore`（签发 `approval_id`、300s TTL、脱敏参数预览、`pending_approval` 持久化到 `ChatResponse`/`TranscriptMessage`），`main.py` 新增 `POST /api/approvals/{approval_id}`；`config.py` / `settings_store.py` / `voice_profiles.py` / `prompt_builder.py` 新增 `agent_profile` 并注入全渠道系统提示；`realtime.py` 暴露受确认保护的写与桌面工具。
   - Agent 优先单用户 UI：`app.html` / `app.js` / `app.css` 移除「助手配置」内冗余双重勾选框和第二个保存按钮，改为「Agent 与档案」「技能与知识」（开启单开关自动同步 `/api/assistant/selection`，知识库行内挂载与新建默认挂载）「终端节点（Windows/Mac + AtomS3R）」，对话中呈现工具胶囊及交互式确认卡片，保留 Codex 灰阶主题。
   - 跨平台桌面桥梁与 Computer Use：`backend/app/desktop.py`（`/desktop/v1/` WebSocket、Token 持久化与轮换、断线重连防僵尸锁、屏幕视觉解析与坐标自适应换算）、`backend/app/desktop_tools.py`（9 个读写/GUI/命令工具与敏感路径 `.env`/`.ssh`/私钥硬拦截）、`desktop_node/`（Windows `ctypes`/PowerShell/.NET 与 macOS `CoreGraphics`/`screencapture`/`sips`/`pbpaste` 零重型依赖双端客户端）、`deploy/assistant.caddy` 新增 `/desktop/v1` 代理、`backend/run_devices.py` 提高网关 WebSocket `ws_max_size=8*1024*1024`（`/xiaozhi/v1/` 维持 `12000` 字节/包上限）。
-- **本机已运行通过的验证（Mac Darwin / `.venv` Python 3.12.13）**：
-  - `node --check backend/app/app.js backend/app/voice.js`：通过（0 错误）。
-  - `.venv/bin/python -m py_compile desktop_node/*.py`：`desktop_node/` 全部模块语法编译通过。
-  - `.venv/bin/python scripts/lint_incremental.py`：`ruff=19, pyright=120, baseline=146, new=0`（全部新增与改动文件零新增告警）。
-  - `.venv/bin/pytest tests/test_desktop_bridge.py tests/test_gateway_trace.py tests/test_personal_kb_isolation.py tests/test_realtime_failures.py tests/test_voice_compat.py tests/test_devices.py -v`：**36 passed, 0 failed（82.86s）**。覆盖：`/desktop/v1/` 真实 WebSocket 鉴权/重连顶替、桌面截屏与 DPI/Retina 坐标缩放映射、`desktop_read_file` 敏感路径拦截、`POST /api/approvals/{id}` + SQLite 状态流转（`pending -> approved -> consumed` / `denied`）、`agent_profile` 持久化与提示注入、`RealtimeTurn` 工具定义暴露、Windows/macOS 适配器逻辑（使用 `unittest`/monkeypatch 模拟系统 GUI/进程调用）。
-  - `.venv/bin/pytest tests/test_voices.py tests/test_knowledge.py -k "not chat_uses and not retrieval_failure" -v`：**18 passed, 2 deselected**；`.venv/bin/pytest tests/test_voice_chat.py -k "not voice_routes and not reset_invalidates and not http_disconnect" -v`：**3 passed, 3 deselected**。
-- **尚未验证 / 留待后续确认（不宣称已实机验收）**：
-  - Mac 本机未安装 `playwright`，尚未运行 `node tests/voice_browser.cjs` 浏览器 DOM 回归及人工点按新版设置页/确认卡片页面实操。
-  - Windows 与 macOS 实机桌面端 `python -m desktop_node` 真实截屏（含 macOS 录屏/辅助功能授权弹窗、Windows 真实高分屏点按）及多轮 LLM 真实视觉看图定位尚未实跑。
-  - 改动尚在本机工作树，**未 commit/push，云端 `47.112.16.195` 仍运行上轮 `5ccb283-20261116-223239`**。
+- **已验证并提交为 `82afc7c`（随后在云端部署 `82afc7c-20261117-093433`）**：该基线在提交前通过 JS/py_compile/`lint_incremental`（`new=0`）及当时 `36 + 18 + 3` 项 pytest。
 
 ## Git开发快照与新电脑接手（2026-11-15）
 

@@ -1,28 +1,29 @@
 # 当前工作入口
 
-更新：2026-11-16。本文只写当前快照；历史过程与原始证据在 [progress](docs/progress.md)。
+更新：2026-11-17。本文只写当前快照；历史过程与原始证据在 [progress](docs/progress.md)。
 
 ## 当前任务与暂停事项
 
-已完成**个人 Agent 核心底座重构、Agent 优先单用户 UI 重构，以及 Windows / macOS 跨平台桌面控制与 Computer Use 桥梁**代码实现与本机自动化验证：
+已完成**个人 Agent 核心底座重构、Agent 优先单用户 UI 重构、Windows/macOS 跨平台桌面控制方案 A 体验增强、全系统脱敏异常日志中心（`异常日志`）**开发与 Mac 本机自动化验证：
 
-1. **硬件闭环状态（上轮已完成并实机通过）**：云端 `5ccb283-20261116-223239` 与 COM3 固件 `5ccb283` 已解决待机跳回原版小黄脸、WS 重连 403 僵尸锁定及“退下/关闭”直接待机问题，用户现场实测确认通过。
-2. **本轮新实现范围（待提交、部署与双端真机体验确认）**：
-   - **Agent 内核升级**：`SideEffectConfirmationStore` 升级为带 `approval_id` / TTL / 参数预览 / `POST /api/approvals/{id}` 持久化确认卡片；`agent_profile` 个人工作档案写入 SQLite 并注入全渠道系统提示；`RealtimeTurn` 同步安全暴露写/电脑操控工具。
-   - **Agent 优先单用户 UI 重构**：移除原「助手配置」中冗余的双层能力/知识库勾选框与第二保存按钮，统一为「Agent 与档案」「技能与知识」（开启即自动同步授权，支持知识库行内挂载与新建即用）「终端节点（Windows/Mac + AtomS3R）」，对话消息内置工具执行胶囊与交互确认卡片，保留 Codex 灰阶主题与全部语音面板功能。
-   - **跨平台桌面节点与 Computer Use（`desktop_node/` + `backend/app/desktop.py` + `desktop_tools.py`）**：WebSocket `/desktop/v1/` 双系统长连接网关与断线顶替重连，支持截屏+视觉模型看图定位、剪贴板、非敏感目录/文件读取、打开应用/网址、自适应分辨率鼠标键盘（Win32 `ctypes`/PowerShell 与 macOS `CoreGraphics`/`screencapture`/`sips` 零重型依赖原生实现）及确认后执行终端命令。
+1. **硬件闭环与云端基线**：云端当前在线 `82afc7c-20261117-093433`（上轮 `82afc7c` 与 `5ccb283` 固件已验证硬件对话、待机动画与 Mac `desktop_node` 首次上线、`观察电脑屏幕 · 684ms` 及 `desktop_open` 卡片确认闭环）。
+2. **本轮打包范围（方案 A + 通用应用解析 + 异常日志，待推送与云端更新）**：
+   - **Agent 内核与确认租约**：`SideEffectConfirmationStore` 支持 `approval_id` / 300s TTL / `POST /api/approvals/{id}` 交互确认卡片，新增 `approve_desktop_lease`（3 分钟桌面操控免重复弹窗，仅限 `desktop_open` / `desktop_gui_action` / `desktop_set_clipboard`，`desktop_run_command` 与外部 HTTP API 仍强制逐次确认）；工具提示约束未审批不提前口头承诺已完成。
+   - **跨平台桌面节点增强（`desktop_node/` + `backend/app/desktop.py`）**：WebSocket 直连禁用代理（`proxy=None`，可选 `--use-system-proxy`）与 30s 应用层心跳；Windows 与 macOS 通用应用名解析（中英文别名表 + macOS `Info.plist`/`zh-Hans.lproj`/`InfoPlist.strings`/Spotlight `mdfind` + Windows 开始菜单 `.lnk`/`.url`/注册表 `App Paths`/UWP `Get-StartApps`）；百炼实时模式下默认使用 `compatible-mode/v1` + `qwen3-vl-plus`（可自定义 `desktop_vision_model`）看图定位。
+   - **全系统异常日志中心（`error_log.py` + `执行洞察 → 异常日志`）**：统一收集硬件设备、桌面节点、模型对话/工具失败、FastAPI 4xx/5xx（含 500 堆栈摘要）到 `assistant_state.sqlite3` `system_errors` 表（上限 300 条并自动脱敏 `?key=`/`Bearer`/密钥），新增 `GET/DELETE /api/insights/errors` 与 Web 端「执行洞察 → 异常日志」分页筛选与清空面板。
+   - **Agent 优先单用户 UI**：保留 Codex 灰阶主题、「Agent 与档案」「技能与知识」「终端节点（Windows/Mac + AtomS3R）」及语音面板完整功能。
 
 - 保留既有实时主线模型 `qwen3.8-omni-flash-realtime`、塔菲复刻音色与唤醒/待机/卡顿暂缓约定，不擅自更改语音服务或重置历史数据。
-- **尚未交付确认事项**：本机改动尚待 Mac 提交推送 → 云端 `/opt/xiaodan/current/deploy/release_from_git.sh` 发布 → Windows/Mac 实机运行 `python -m desktop_node` 验证。
+- **待用户后续操作**：将本次提交推送远端后，在云端执行 `/opt/xiaodan/current/deploy/release_from_git.sh` 发布，并在 Mac/Windows 桌面节点 `git pull` 重启后实测打开应用/屏幕操控与硬件报错捕获。
 
 ## 版本与位置
 
 | 对象 | 最后确认事实 | 接手注意 |
 | --- | --- | --- |
-| 稳定基线 | 截图远端 HEAD `bd639a9`，包含 `ead6381` 语音修复 | 是恢复与发布的追溯点，不等于开发工作树 HEAD 内容 |
-| Windows 运行副本 | `E:\xiaodan`；旧进程 PID17156 于11月15日15:58:28启动，8000/8003 | 这是最后采样值，不是永久 PID；磁盘有后续修改，不能据文件推断进程已加载 |
-| Git 开发快照 | 原电脑在 `E:\xiaodan\.cache\repo-export`；新电脑为当前clone目录 | Git保留云端适配/工具优化源码及新动画/UI/TCP实验；不是在线稳定包，不能整体部署或重编译刷入 |
-| 云端在线版本 | `/opt/xiaodan/current` → `/opt/xiaodan/releases/5ccb283-20261116-223239`；网页 `https://ryan406.online/xiaoyuan/` | 已通过上轮固件+网关实测；**本轮 Mac 新功能尚未部署到云端** |
+| 稳定基线 | 历史基线 `bd639a9` / 固件与网关 `5ccb283` / 桌面首版 `82afc7c` | 追溯点；本轮提交在 `82afc7c` 之后推进 |
+| Windows 运行副本 | 夜间 Windows 端通过 Gitee `git pull` 同步测试（保留本地 `.env`/`data/`） | 原 `E:\xiaodan` PID17156 为历史参考，不代表实时在线 |
+| Git 开发快照 | 三端协同：Mac `main` → `git push origin main` 双推 Gitee + GitHub | 本地凭据与私钥不入库 |
+| 云端在线版本 | `/opt/xiaodan/current` → `/opt/xiaodan/releases/82afc7c-20261117-093433`（`https://ryan406.online/xiaoyuan/`） | Caddy 已配置 `/xiaoyuan/desktop/v1`；**本轮方案 A 与异常日志待发布上线** |
 | 云端运行数据 | `/opt/xiaodan/shared` | `.env`、data、logs、缓存独立于 release；回滚代码不回滚数据库 |
 | 设备 | AtomS3R + Echo Base，固件按 `5ccb283` (`2,777,232B` app-flash，COM3) 与对应 `generated_assets.bin` | 上轮真机对话+待机动画+“退下/关闭”直接待机已实测通过；本次未改动固件 |
 

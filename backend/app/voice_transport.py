@@ -122,6 +122,8 @@ class DeviceVoice:
                             controller.add_audio(packet)
                     elif kind == "warning":
                         self.hub.last_error = payload["message"]
+                        if hasattr(self.hub, "record_error"):
+                            self.hub.record_error("device_voice_warning", payload["message"])
                     elif kind == "done":
                         completed = True
             for packet in codec.encode(b"", True):
@@ -131,9 +133,13 @@ class DeviceVoice:
                 await connection.send({"type": "tts", "state": "stop"})
         except ProviderError as error:
             self.hub.last_error = error.message
+            if hasattr(self.hub, "record_error"):
+                self.hub.record_error(error.code, error.message)
             logger.warning("device_voice_failed code=%s", error.code)
         except (OSError, ValueError, RuntimeError) as error:
             self.hub.last_error = "设备语音回合未完成。"
+            if hasattr(self.hub, "record_error"):
+                self.hub.record_error("device_voice_failed", f"设备语音异常：{type(error).__name__}")
             logger.warning("device_voice_failed error=%s", type(error).__name__)
         finally:
             controller.stop_sending()

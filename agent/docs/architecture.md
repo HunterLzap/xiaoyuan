@@ -1,6 +1,6 @@
 # 单硬件语音助手架构
 
-更新：2026-11-16。本文说明当前设计和明确标注的未接入方案；运行版本、现场范围见 [START](../START.md)，历史探查见 [progress](progress.md)。
+更新：2026-11-17。本文说明当前设计和明确标注的未接入方案；运行版本、现场范围见 [START](../START.md)，历史探查见 [progress](progress.md)。
 
 ## 1. 当前结构
 
@@ -20,7 +20,7 @@ ToolRegistry / TurnTools
      ├─ 只读：列出节点、截屏与视觉观察(Computer Use)、剪贴板/目录/非敏感文件读取
      └─ 受确认保护：写剪贴板、打开应用/链接、GUI鼠标键盘(自适应分辨率)、终端命令
                  ↓
-服务端私有配置、SQLite历史/资料/向量/洞察、desktop_nodes.json
+服务端私有配置、SQLite历史/资料/向量/洞察与异常日志(system_errors)、desktop_nodes.json
 ```
 
 FastAPI、原生HTML/CSS/JavaScript、SQLite；只有一个助手。实时主线为百炼 `qwen3.8-omni-flash-realtime`，直接生成塔菲复刻音色；保留既有语速/音调后处理。DeepSeek/MiMo仅为显式分模型路径，不作为实时语音的隐式替代。没有每轮必走的分类/规划/总结模型。
@@ -52,7 +52,7 @@ FastAPI、原生HTML/CSS/JavaScript、SQLite；只有一个助手。实时主线
 
 工具加载不消耗业务8次/4轮额度，但模型续答次数和Token必须如实计入。未知问题可能多一次加载响应，不能承诺任何请求都更省或更快。定义裁剪不是执行保证，不能为了省Token将正常调用、复合指令和“那明天呢”挡掉。
 
-写操作与电脑控制均走统一确认闭环：服务端 `SideEffectConfirmationStore` 为每项 `write`/`paid` 调用签发绑定 `(approval_id, session_id, turn_id, args_digest)` 的有限期（300s）待确认凭证，并返回 `pending_approval` 结构随消息持久化；网页端可在消息下方卡片一键「确认执行 / 取消执行」（`POST /api/approvals/{id}`），语音及纯文字渠道也可直接在下一轮回复“确认/取消”。读取 `.env`、`.ssh`、私钥、Keychains 等路径由网关工具与本地 `desktop_node` 双重拦截；`desktop_gui_action` 默认依据最近一次截图尺寸与目标电脑逻辑分辨率自动换算坐标，兼容 Retina 与 Windows DPI 缩放。
+写操作与电脑控制均走统一确认闭环：服务端 `SideEffectConfirmationStore` 为每项 `write`/`paid` 调用签发绑定 `(approval_id, session_id, turn_id, args_digest)` 的有限期（300s）待确认凭证，并返回 `pending_approval` 结构随消息持久化；网页端可在消息下方卡片一键「确认执行 / 确认并免问电脑操控 (3 分钟) / 取消执行」（`POST /api/approvals/{id}`，3 分钟免问租约 `approve_desktop_lease` 仅限 `desktop_open`、`desktop_gui_action` 与 `desktop_set_clipboard`，不涵盖 `desktop_run_command` 与外部 HTTP API），语音及纯文字渠道也可直接在下一轮回复“确认/取消”。读取 `.env`、`.ssh`、私钥、Keychains 等路径由网关工具与本地 `desktop_node` 双重拦截；`desktop_gui_action` 默认依据最近一次截图尺寸与目标电脑逻辑分辨率自动换算坐标，兼容 Retina 与 Windows DPI 缩放。系统各链条关键错误通过 `ErrorLogStore` 脱敏写入 `assistant_state.sqlite3`（最近 300 条），通过 `GET/DELETE /api/insights/errors` 暴露。
 
 > 注：跨平台桌面节点与确认卡片机制已在源码实现并通过自动化测试与 Mock 联调；云端发布更新及 Windows/macOS 真机连续对话操控待部署与现场试跑确认。
 

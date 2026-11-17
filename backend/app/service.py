@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+from collections.abc import Callable
 from contextlib import aclosing, suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -54,6 +55,7 @@ class ChatService:
         self.retired_providers: dict[int, ChatProvider] = {}
         self.tools = None
         self.audit = None
+        self.error_logger: Callable[..., None] | None = None
         self.tool_secrets = None
         self.audit_tasks = set()
         # 订单编号跨轮确认状态：按会话隔离，避免旧候选串到新会话。
@@ -67,6 +69,29 @@ class ChatService:
         return task
 
     def queue_turn_trace(self, summary: TurnTraceSummary, secrets=()):
+        if self.error_logger is not None:
+            with suppress(Exception):
+                if summary.error_code:
+                    self.error_logger(
+                        "model",
+                        summary.error_code,
+                        f"回合未完整完成（{summary.error_code}）",
+                        detail={"source": summary.source, "model": summary.model,
+                                "session_id": summary.session_id, "turn_id": summary.trace_id},
+                        secrets=secrets,
+                    )
+                for call in summary.tool_calls or ():
+                    if call.get("status") == "error":
+                        tname = call.get("tool_name") or "tool"
+                        err = call.get("error_code") or "tool_failed"
+                        self.error_logger(
+                            "tool",
+                            str(err),
+                            f"工具 {tname} 执行失败：{err}",
+                            detail={"tool_name": tname, "session_id": summary.session_id,
+                                    "elapsed_ms": call.get("elapsed_ms")},
+                            secrets=secrets,
+                        )
         audit = self.audit
         if audit is None:
             return None
