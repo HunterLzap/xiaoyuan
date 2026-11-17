@@ -1342,3 +1342,126 @@ def test_unified_connections_saves_desktop_models(tmp_path):
         assert fetched["desktop_vision_model"] == "qwen3-vl-plus"
         page = client.get("/").text
         assert "model-overview-panel" in page and "desktop-model-panel" in page
+        assert 'id="stop-turn"' in page and "desktop-model-summary" not in page
+
+
+def test_gui_action_normalization_error_detail_and_circuit_breaker(tmp_path):
+    from backend.app.llm import Completion
+    from backend.app.schemas import ChatRequest
+    from backend.app.service import ChatService
+    from backend.app.tool_dialogue import _normalize_tool_arguments
+    from backend.app.tools import ToolRegistry, ToolSpec
+
+    # 1. Null optional fields, float coords, type/content aliases, coordinate pairs all normalize cleanly
+    n1 = _normalize_tool_arguments("desktop_gui_action", {
+        "action": "click_and_type",
+        "element_index": 0.0,
+        "text": "你好",
+        "x": None,
+        "y": None,
+        "coord_space": None,
+        "submit": "false",
+        "keys": None,
+        "scroll_y": None,
+        "node_id": None,
+        "button": "left",
+    })
+    assert n1 == {"action": "click_and_type", "element_index": 0, "text": "你好", "submit": False}
+
+    n2 = _normalize_tool_arguments("desktop_gui_action", {
+        "action": "type",
+        "content": "你好",
+        "coordinate": [864.4, 838.6],
+    })
+    assert n2 == {"action": "type_text", "text": "你好", "x": 864, "y": 839}
+
+    # 2. SchemaValidationError surfaces exact field detail & circuit breaker halts after 3 error rounds
+    class _BrokenTool:
+        spec = ToolSpec(
+            "desktop_bad_demo",
+            "demo",
+            {"type": "object", "properties": {"count": {"type": "integer"}}, "required": ["count"], "additionalProperties": False},
+            permission="read",
+        )
+
+        async def run(self, arguments, *, trace=None):
+            return {"ok": True}
+
+    calls_seen = []
+
+    class _AlwaysWrongProvider:
+        async def complete_stream(self, messages, tools=None):
+            calls_seen.append((len(calls_seen), len(tools or [])))
+            if tools:
+                yield Completion(
+                    reply=None, usage=None, finish_reason="tool_calls",
+                    tool_calls=[{"id": f"e{len(calls_seen)}", "type": "function", "function": {"name": "desktop_bad_demo", "arguments": '{"count":"bad"}'}}],
+                )
+                return
+            # Expect final forced summary turn with tools=[] and circuit breaker notice
+            assert any("连续 3 轮工具调用出错" in str(m.get("content") or "") for m in messages)
+            yield "参数有误已停止尝试。"
+            yield Completion(reply="参数有误已停止尝试。", usage=None, finish_reason="stop")
+
+        async def close(self):
+            return None
+
+    cfg = _base_settings(tmp_path).model_copy(update={"desktop_planner_model": "gpt-4o"})
+    svc = ChatService(cfg, _AlwaysWrongProvider())
+    svc.tools = ToolRegistry([_BrokenTool()])
+
+    async def _run():
+        res = await svc.chat(ChatRequest(message="执行演示"))
+        assert "停止尝试" in res.reply
+        # Confirm SchemaValidationError detail reached the model directly
+        with pytest.raises(Exception) as exc_info:
+            await svc.tools.call("desktop_bad_demo", {"count": "bad"}, confirmed=True)
+        assert "count" in str(exc_info.value)
+
+    asyncio.run(_run())
+    # Must stop after 3 failing tool rounds + 1 forced summary turn = 4 LLM calls total (NOT 17!)
+    assert [n_tools for _, n_tools in calls_seen] == [1, 1, 1, 0]
+
+
+def test_chat_cancel_and_text_stop_intent(tmp_path):
+    cfg = _base_settings(tmp_path)
+    started_evt = asyncio.Event()
+    cancelled_evt = asyncio.Event()
+
+    class _HangingProvider:
+        async def complete_stream(self, messages, tools=None):
+            started_evt.set()
+            try:
+                await asyncio.sleep(10)
+                yield "done"
+                yield Completion(reply="done", usage=None, finish_reason="stop")
+            except asyncio.CancelledError:
+                cancelled_evt.set()
+                raise
+
+        async def close(self):
+            return None
+
+    from backend.app.llm import Completion
+    app = create_app(cfg, settings_store=SettingsStore(tmp_path / ".env"), provider_factory=lambda _c: _HangingProvider())
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        sid = str(app.state.service.new_session())
+
+        async def _drive_cancel():
+            import httpx
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as ac:
+                chat_task = asyncio.create_task(ac.post("/chat", json={"message": "一直跑", "session_id": sid}))
+                await asyncio.wait_for(started_evt.wait(), timeout=2.0)
+                stop_res = await ac.post("/chat", json={"message": "停止", "session_id": sid})
+                assert stop_res.status_code == 200
+                assert stop_res.json()["reply"] == "已停止当前操作。"
+                first_res = await asyncio.wait_for(chat_task, timeout=2.0)
+                assert first_res.status_code in (409, 200)
+                assert cancelled_evt.is_set()
+
+        asyncio.run(_drive_cancel())
+
+        # Direct /chat/cancel endpoint on explicit unknown/idle session stays safe and well-typed
+        res = client.post("/chat/cancel", json={"session_id": sid}, headers=HEADERS)
+        assert res.status_code == 200 and res.json()["ok"] is True

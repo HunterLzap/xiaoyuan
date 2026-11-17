@@ -43,6 +43,12 @@ class VoiceStopRequest(BaseModel):
     turn_id: UUID
 
 
+class ChatCancelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    session_id: UUID
+    turn_id: UUID | None = None
+
+
 class VoicePlaybackRequest(VoiceStopRequest):
     state: Literal["played", "interrupted", "failed"]
 

@@ -2,6 +2,22 @@
 
 更新时间：2026-11-17。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
+## 飞书 `0ms` 连续报错根治、停止控制与设置界面去噪（2026-11-17）
+
+- **真实排查发现（来自 `2fc629d` 上云实测截图）**：
+  - `qwen3.5-plus` 实测打开飞书（`1515ms`）与看屏定位 Friday 对话框（`1600ms`）均一次命中；但随后连续 14 次 `desktop_gui_action` 全部在 **`0ms`** 失败且耗尽 16 轮 / 109k Token，无处可按停止；设置页 `.api-panel .settings-row` 左列仅有 `92px`，导致长段说明小字竖向换行成狭窄长条。
+  - **根因**：① `qwen3.5-plus` 向 `desktop_gui_action` 传入了大量带 `null` 值的可选参数（如 `x: null, y: null, node_id: null`）、浮点坐标及 `action="type"` 等别名，触发 `Draft202012Validator` `0ms` 拒收，且原异常仅回传笼统“工具参数不符合接口定义”，模型盲猜重试 14 轮；② 网页文字聊天运行期间禁用输入框、缺取消接口与停止按钮；③ 设置表单塞入冗余说明 `<p>` 与 `92px` 过窄列。
+- **本轮改动**：
+  - **参数归一化 + 字段级报错 + 3 轮熔断**：`backend/app/tool_dialogue.py` 新增 `_normalize_tool_arguments`（全局剔除 `None` 可选键，兼容 `type`/`paste`/`tap`/`key_press`/`coordinate`/`point`/`content`/`button` 与浮点/字符串整数换算），`backend/app/tools.py` 在 `SchemaValidationError` 时回传具体出错字段路径与校验信息，`ToolConversation` 在连续 3 轮工具全错后自动熔断收尾，避免死循环烧 Token。
+  - **网页端与服务端随时停止**：`backend/app/schemas.py` & `main.py` 新增 `ChatCancelRequest`、`POST /chat/cancel` 及活跃任务下的 `_STOP_INTENT_RE` 拦截；`app.html`、`app.css`、`app.js` 新增发送区 `#stop-turn` 与进度条 `.pending-stop-button`（基于 `AbortController` + `/chat/cancel`），运行期间保持输入框可用，直接输入“停止/停下/别动/取消”亦可立即中断。
+  - **UI 极简去噪与列宽对齐**：将 `.settings-page .api-panel .settings-row` 标签列拓宽为 `108px`，移除 `#desktop-model-panel`、个人档案、声音调节用量口径、电脑节点说明与技能卡片中的多行小字描述与多余角标，「纯视觉备用」收纳至「更多模型选项」折叠栏。
+- **本机最终代码后验证（Mac Darwin / `.venv` Python 3.12.13）**：
+  - `node --check backend/app/app.js && node --check backend/app/voice.js`、`.venv/bin/python -m py_compile desktop_node/*.py`：通过。
+  - `.venv/bin/python scripts/lint_incremental.py`：`ruff=18, pyright=119, baseline=146, new=0`。
+  - `tests/test_desktop_bridge.py`（18，含新增 `null`/浮点/`type` 归一化、字段报错 + 3 轮熔断测试、`/chat/cancel` + `"停止"` 打断活跃回合测试）+ `test_personal_kb_isolation.py` + `test_realtime_failures.py` + `test_voice_compat.py` + `test_voices.py`：**45 passed（3.58s）**。
+  - `tests/test_gateway_trace.py`（单独跑 **3 passed（0.66s）**；首次与 `test_knowledge.py` 连跑时 `test_unified_traces_and_sqlite_business_state` 偶发既有的 `audit_tasks` 跨事件循环竞态）；`tests/test_knowledge.py -k "not chat_uses and not retrieval_failure"` **10 passed, 2 deselected（0.62s）**；`tests/test_voice_chat.py` 子集 **3 passed, 3 deselected（0.52s）**；`tests/test_settings_workflow.py` 分组设置子集 **7 passed, 4 deselected（0.79s）**。
+- **尚未验证**：推云部署本版后在真实浏览器目视确认新 UI 排版、点击停止按钮，以及 `qwen3.5-plus` 真机飞书打字闭环。
+
 ## 多模态直连 Computer Use（SoM 标号方框 + 统一模型中心，2026-11-17）
 
 - **解决的问题与方案**：针对“看图二传盲跑”准确率低、耗时翻倍，以及语音/文字/电脑模型配置分散的问题，完成两项核心升级与统一模型配置：

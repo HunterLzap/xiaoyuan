@@ -7,7 +7,8 @@ const configIds = ["provider", "base_url", "model", "models_protocol"];
 const MANUAL = "__manual__";
 const SESSION_PAGE = 25;
 let sessionHasMore = false, sessionLoading = false, sessionError = "", sessionOffset = 0;
-let sessionLoadId = 0, sessionController = null, sessionSearchTimer = null;
+let sessionLoadId = 0, sessionController = null, sessionSearchTimer = null, activeTurn = null;
+const STOP_INTENT_RE = /^(?:停|停下|停下来|停止|停止操作|别动|别动了|别操作了|取消|取消操作|住手|stop|cancel)[！!。.？?]*$/i;
 const capabilityState = { tools:[], documents:[], total:0, offset:0, loading:false, busy:false, queryId:0, supportedFileTypes:[".txt",".md",".markdown",".docx"], selectedCapability:null, libraries:[], selectionSupported:false, selectedTools:[], selectedKbs:[], activeLibraryId:null, toolsLoaded:false, librariesLoaded:false, librariesError:false, selectionFetched:false, selectionError:false, selectionSaving:false };
 const INSIGHT_PAGE = 25;
 const insightState = {kb:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},tools:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},traces:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},errors:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null}};
@@ -69,8 +70,12 @@ function refreshControls() {
   el("config-fields").disabled = state.busy || ttsBusy || !state.loaded;
   for (const id of ["save", "test", "fetch-models"]) el(id).disabled = state.busy || ttsBusy || !state.loaded;
   el("new-session").disabled = state.busy;
+  el("send").hidden = state.busy;
   el("send").disabled = state.busy || !state.configured || !el("message").value.trim();
-  el("message").disabled = state.busy;
+  el("stop-turn").hidden = !state.busy;
+  el("stop-turn").disabled = !state.busy || Boolean(activeTurn?.stopping);
+  el("message").disabled = false;
+  el("message").placeholder = state.busy ? "运行中，可点右侧停止或输入“停止”…" : "发消息…";
   el("voice-toggle").disabled = state.busy;
   el("use-knowledge").disabled = state.busy || !state.m5stackEnabled;
   el("use-knowledge").setAttribute("aria-pressed", String(state.useKnowledge));
@@ -550,6 +555,11 @@ function renderMessages() {
         : (state.pendingKnowledge ? "正在查询官方资料并生成回答…" : "正在思考…");
       const pending = node("div", "pending-text");
       pending.append(node("span", "pending-dot"), document.createTextNode(statusText));
+      const inlineStop = node("button", "pending-stop-button", activeTurn?.stopping ? "正在停止…" : "停止");
+      inlineStop.type = "button";
+      inlineStop.disabled = Boolean(activeTurn?.stopping);
+      inlineStop.addEventListener("click", () => stopActiveTurn());
+      pending.append(inlineStop);
       box.append(pending);
       if (state.pendingSteps.length) {
         const strip = node("div", "tool-pills");
@@ -577,15 +587,17 @@ function fitComposer() {
   const input = el("message"); input.style.height = "auto"; input.style.height = `${Math.min(input.scrollHeight,180)}px`;
   el("character-count").textContent = input.value.length > 3200 ? `${input.value.length} / 4000` : ""; refreshControls();
 }
-async function streamChatTurn(body, onEvent) {
+async function streamChatTurn(body, onEvent, signal) {
   let response;
   try {
     response = await appFetch("/chat/stream", {
       method: "POST",
+      signal,
       headers: { "Content-Type": "application/json", "X-Local-Settings": "1" },
       body: JSON.stringify(body),
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
     throw new Error("无法连接本机服务，请确认服务正在运行后重试。");
   }
   if (!response.ok) {
@@ -636,15 +648,47 @@ async function streamChatTurn(body, onEvent) {
   if (!doneData) throw new Error("回答流提前结束，请重试或刷新会话查看是否已保存。");
   return doneData;
 }
+async function stopActiveTurn() {
+  if (!state.busy || !activeTurn || activeTurn.stopping) return;
+  activeTurn.stopping = true;
+  refreshControls();
+  renderMessages();
+  const sid = activeTurn.sessionId || state.active;
+  const tid = activeTurn.turnId || null;
+  if (sid) {
+    appFetch("/chat/cancel", {
+      method: "POST",
+      keepalive: true,
+      headers: { "Content-Type": "application/json", "X-Local-Settings": "1" },
+      body: JSON.stringify(tid ? { session_id: sid, turn_id: tid } : { session_id: sid }),
+    }).catch(() => {});
+  }
+  activeTurn.controller.abort();
+}
 async function sendMessage(value, useKnowledge = state.useKnowledge) {
-  const message = value.trim(); if (state.busy || !state.configured || !message) return;
+  const message = value.trim();
+  if (!message) return;
+  if (state.busy) {
+    if (STOP_INTENT_RE.test(message)) {
+      el("message").value = ""; fitComposer();
+      await stopActiveTurn();
+    }
+    return;
+  }
+  if (!state.configured) return;
+  const controller = new AbortController();
+  activeTurn = { controller, sessionId: state.active, turnId: null, stopping: false };
   state.pending = message; state.pendingSteps = []; state.pendingText = ""; state.pendingKnowledge = useKnowledge; state.failure = null; el("message").value = ""; fitComposer(); busy(true); notice(); renderMessages();
   const body = {message}; if (state.active) body.session_id = state.active;
   if (useKnowledge) body.use_m5stack = true;
   try {
     const data = await streamChatTurn(body, (kind, payload) => {
-      if (kind === "session" && payload.session_id) {
-        state.active = payload.session_id; remember("atoms3r.active", payload.session_id);
+      if (kind === "session") {
+        if (payload.session_id) {
+          state.active = payload.session_id; remember("atoms3r.active", payload.session_id);
+          if (activeTurn) activeTurn.sessionId = payload.session_id;
+        }
+        if (payload.turn_id && activeTurn) activeTurn.turnId = payload.turn_id;
       } else if (kind === "tool") {
         if (payload.phase === "start") {
           state.pendingSteps.push({ call_id: payload.call_id, tool_name: payload.tool_name, detail: payload.detail || "", status: "running", elapsed_ms: null });
@@ -663,7 +707,7 @@ async function sendMessage(value, useKnowledge = state.useKnowledge) {
         state.pendingText = payload.full || "";
         renderMessages();
       }
-    });
+    }, controller.signal);
     state.active = data.session_id; remember("atoms3r.active", data.session_id);
     if (!state.detail) state.detail = {session_id:data.session_id, title:message.slice(0,40), messages:[]};
     const now = new Date().toISOString();
@@ -674,10 +718,18 @@ async function sendMessage(value, useKnowledge = state.useKnowledge) {
     // A sidebar refresh failure must never turn a successful paid call into a retry.
     try { await loadSessions(); } catch { notice("回答已收到；会话列表暂时无法刷新，请刷新页面重试。", "error"); }
   } catch (error) {
-    state.pending = null; state.pendingSteps = []; state.pendingText = ""; state.failure = {message,error:error.message,useKnowledge}; el("message").value = message;
-    if (error.code === "session_not_found") notice("这段会话已不存在，请点击“新对话”再发送。", "error");
-    renderMessages(); fitComposer();
-  } finally { busy(false); el("message").focus(); }
+    const userStopped = Boolean(activeTurn?.stopping) || error?.name === "AbortError" || error?.code === "turn_cancelled";
+    state.pending = null; state.pendingSteps = []; state.pendingText = "";
+    if (userStopped) {
+      state.failure = null;
+      if (state.active) { try { state.detail = await request(`/sessions/${state.active}`); } catch {} }
+      renderMessages(); fitComposer(); notice("已停止当前操作。");
+    } else {
+      state.failure = {message,error:error.message,useKnowledge}; el("message").value = message;
+      if (error.code === "session_not_found") notice("这段会话已不存在，请点击“新对话”再发送。", "error");
+      renderMessages(); fitComposer();
+    }
+  } finally { activeTurn = null; busy(false); el("message").focus(); }
 }
 function configPayload() {
   const draft = connectionPayload();
@@ -766,17 +818,11 @@ function resolveDesktopModelState() {
 function updateModelOverview() {
   const st = resolveDesktopModelState();
   const chatModel = st.rtMode ? (el("rt_model").value.trim() || "qwen3.8-omni-flash-realtime") : (st.textModel || "未配置");
-  const chatProvider = st.rtMode ? (el("rt_provider").value === "bailian" ? "阿里云百炼实时语音/对话" : "自定义 Omni 实时接口") : `${el("provider").value.trim() || "文字服务"} · 分模型`;
+  const chatProvider = st.rtMode ? (el("rt_provider").value === "bailian" ? "阿里云百炼" : "自定义实时") : (el("provider").value.trim() || "文字服务");
   el("overview-chat-model").textContent = chatModel;
   el("overview-chat-meta").textContent = chatProvider;
-  el("overview-desktop-model").textContent = st.effectiveModel ? `${st.effectiveModel}${st.direct ? " · 直连看图" : " · 两步转发"}` : "尚未配置可用模型";
-  el("overview-desktop-meta").textContent = st.effectiveModel ? `${st.routeNote} · 含 SoM 编号框` : "请先配置百炼 API Key 或文字模型服务";
-  el("desktop-model-mode-tag").textContent = st.direct ? "原生看图 + SoM 方框" : (st.effectiveModel ? "纯文字 + 视觉两步" : "未就绪");
-  el("desktop-model-summary").textContent = !st.effectiveModel
-    ? "请先配置阿里云百炼 API Key（或分模型文字服务），电脑操控即可自动启用。"
-    : st.direct
-      ? `当前生效：${st.effectiveModel}（${st.routeNote}）—— 模型直接读取带 [0][1] 标号方框的截图并执行点击/输入，已跳过多余看图转发（省时省费）。`
-      : `当前生效：${st.effectiveModel}（${st.routeNote}）+ 辅助视觉 ${st.vision} 两步看图；建议主控选择 qwen3.5-plus（¥0.8/¥4.8）或 qwen3.5-flash（¥0.2/¥2.0）一步直连。`;
+  el("overview-desktop-model").textContent = st.effectiveModel || "未配置";
+  el("overview-desktop-meta").textContent = st.effectiveModel ? st.routeNote.replace("自动推荐 · ", "") : "请先配置服务密钥";
 }
 function selectedSpeechModel() {
   const picked = el("tts_model").value;
@@ -1485,6 +1531,7 @@ el("sidebar-overlay").addEventListener("click", closeSidebar);
 el("message").addEventListener("input", fitComposer);
 el("message").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(el("message").value); } });
 el("chat-form").addEventListener("submit", event => { event.preventDefault(); sendMessage(el("message").value); });
+el("stop-turn").addEventListener("click", () => { stopActiveTurn(); });
 document.querySelectorAll("[data-prompt]").forEach(button => button.addEventListener("click", () => { el("message").value = button.dataset.prompt; fitComposer(); el("message").focus(); }));
 for (const id of ["model-button", "configure-link"]) el(id).addEventListener("click", () => navigate("connections"));
 el("desktop-planner-preset").addEventListener("change", () => {
@@ -1794,7 +1841,7 @@ function desktopToolCard(tool) {
   const active = isSkillActive(tool);
   const card = node("div", "capability-item"), header = node("div", "capability-item-header");
   const titleWrap = node("div", "capability-item-title");
-  titleWrap.append(node("h3", "", "个人电脑操控（Windows / Mac）"), node("span", "capability-state-tag", "看屏与键鼠需确认"));
+  titleWrap.append(node("h3", "", "个人电脑操控（Windows / Mac）"));
   header.append(titleWrap);
   const toggleLabel = node("label", "checkbox-control"), toggle = node("input");
   toggle.type = "checkbox"; toggle.checked = active;
@@ -1804,29 +1851,21 @@ function desktopToolCard(tool) {
     capabilityAction(async () => {
       await setSkillEnabled(tool, enabled);
       if (savedConfig) savedConfig.desktop_enabled = enabled;
-      capabilityNotice(enabled ? "已开启个人电脑操控技能；请在「终端节点」连接 Mac 或 Windows。" : "已停用个人电脑操控技能。");
+      capabilityNotice(enabled ? "已开启个人电脑操控；请在「终端节点」连接电脑。" : "已停用个人电脑操控。");
     });
   });
   toggleLabel.append(toggle, toggleText); header.append(toggleLabel);
   const st = resolveDesktopModelState();
-  const modelNote = node(
-    "p",
-    "small-note",
-    st.effectiveModel
-      ? `当前操控模型：${st.effectiveModel}（${st.direct ? "原生多模态直连 + SoM方框" : "两步转发看图"} · ${st.routeNote}）`
-      : "当前操控模型：自动按「模型与连接」凭据分配（有百炼 Key 时默认 qwen3.5-plus）。"
-  );
   card.append(
     header,
-    node("p", "small-note", tool.description || "跨平台连接个人 Windows / macOS 电脑，支持截屏观察（Computer Use）、读取文件/剪贴板，并在你确认后点击界面、打开应用或执行命令。"),
-    modelNote,
+    node("p", "small-note", `当前主控模型：${st.effectiveModel || "未配置"}`),
   );
   const actions = node("div", "capability-item-actions");
-  const goModels = capabilityButton("在「模型与连接」配置模型 →", () => {
+  const goModels = capabilityButton("模型配置 →", () => {
     navigate("connections");
     requestAnimationFrame(() => el("desktop-planner-preset")?.focus());
   });
-  const goDevices = capabilityButton("连接或查看电脑节点 →", () => navigate("devices"));
+  const goDevices = capabilityButton("管理终端节点 →", () => navigate("devices"));
   actions.append(goModels, goDevices);
   card.append(actions);
   return card;

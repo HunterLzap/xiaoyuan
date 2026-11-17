@@ -2,10 +2,11 @@ import asyncio
 import base64
 from contextlib import asynccontextmanager, aclosing, suppress
 import json
+import os
+import re
+import secrets
 import time
 from ipaddress import ip_address
-import os
-import secrets
 from pathlib import Path
 from typing import Callable
 from uuid import UUID
@@ -27,7 +28,7 @@ from .schemas import (ApprovalDecisionRequest, ChatRequest, ChatResponse, Knowle
                       PersonalKnowledgeSearchRequest, PersonalKnowledgeRename, InsightCorrectAnswer,
                       InsightClearFilters, LibraryCreate, LibraryRename)
 from .schemas import (QwenVoicePreview, VoicePlaybackRequest, VoiceRequest,
-                      VoiceSessionRequest, VoiceStopRequest)
+                      VoiceSessionRequest, VoiceStopRequest, ChatCancelRequest)
 from .knowledge import KnowledgeProvider, M5StackKnowledge, M5STACK_URL
 from .personal_kb import PersonalKnowledgeBase, KnowledgeError, MAX_FILE_BYTES
 from .tools import (build_tool_registry, tool_catalog, ExternalToolStore, BUILTIN_NAMES,
@@ -298,8 +299,42 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
 
     mount_desktop_admin_routes(app, lambda: app.state.desktop)
 
+    _STOP_INTENT_RE = re.compile(
+        r"^(?:停|停下|停下来|停止|停止操作|别动|别动了|别操作了|取消|取消操作|住手|stop|cancel)[！!。.？?]*$",
+        re.IGNORECASE,
+    )
+
+    async def _maybe_stop_by_text(request: ChatRequest) -> dict | None:
+        if request.session_id is None or not _STOP_INTENT_RE.match((request.message or "").strip()):
+            return None
+        session = app.state.service.get_session(request.session_id)
+        task = session.active_task
+        if task is None or task.done():
+            return None
+        await stop_active_turn(request.session_id)
+        return {
+            "session_id": str(request.session_id),
+            "reply": "已停止当前操作。",
+            "model": app.state.service.settings.active_model,
+            "provider": app.state.service.settings.active_provider,
+            "usage": None,
+            "estimated_cost": None,
+            "currency": app.state.service.settings.currency,
+            "finish_reason": "stop",
+            "session_usage": session.usage.model_copy().model_dump(mode="json"),
+            "history_persisted": True,
+        }
+
+    @app.post("/chat/cancel")
+    async def chat_cancel(body: ChatCancelRequest):
+        stopped = await stop_active_turn(body.session_id, body.turn_id)
+        return {"ok": True, "stopped": stopped}
+
     @app.post("/chat", response_model=ChatResponse)
     async def chat(request: ChatRequest):
+        stopped_reply = await _maybe_stop_by_text(request)
+        if stopped_reply is not None:
+            return stopped_reply
         task = asyncio.current_task()
         marker = {"token": None, "turn_id": None}
         app.state.cancel_markers[task] = marker
@@ -319,6 +354,19 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     async def chat_stream(request: ChatRequest):
         def _sse(event_name: str, payload: dict) -> str:
             return f"event: {event_name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+        stopped_reply = await _maybe_stop_by_text(request)
+        if stopped_reply is not None:
+            async def _stopped_events():
+                yield _sse("session", {"session_id": stopped_reply["session_id"], "turn_id": "", "history_persisted": True})
+                yield _sse("text", {"delta": stopped_reply["reply"], "full": stopped_reply["reply"]})
+                yield _sse("done", stopped_reply)
+
+            return StreamingResponse(
+                _stopped_events(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
         async def _events():
             task = asyncio.current_task()

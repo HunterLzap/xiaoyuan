@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import sqlite3
-from collections.abc import Callable
+from collections.abc import AsyncGenerator, Callable
 from contextlib import aclosing, suppress
 from dataclasses import replace
 from time import perf_counter
@@ -468,6 +468,100 @@ def control_history(history):
     return json.dumps(results[-4:], ensure_ascii=False)
 
 
+def _coerce_int(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return round(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        try:
+            return round(float(stripped))
+        except ValueError:
+            return value
+    return value
+
+
+def _normalize_tool_arguments(name: str, raw_args: dict) -> dict:
+    """Strip nulls and coerce common LLM argument quirks before schema validation."""
+    args = {k: v for k, v in raw_args.items() if v is not None}
+    if name != "desktop_gui_action":
+        return args
+
+    action_aliases = {
+        "type": "type_text",
+        "input": "type_text",
+        "enter_text": "type_text",
+        "write": "type_text",
+        "paste": "paste_text",
+        "tap": "click",
+        "left_click": "click",
+        "click_element": "click",
+        "key_press": "hotkey",
+        "press_key": "hotkey",
+        "press": "hotkey",
+        "key": "hotkey",
+        "shortcut": "hotkey",
+        "mouse_move": "move",
+        "hover": "move",
+        "wheel": "scroll",
+    }
+    raw_action = args.get("action")
+    if isinstance(raw_action, str):
+        keyed = raw_action.strip().lower()
+        args["action"] = action_aliases.get(keyed, raw_action.strip())
+
+    for drop_key in ("button", "clicks", "duration", "interval", "delay"):
+        args.pop(drop_key, None)
+
+    for coord_key in ("coordinate", "point", "pos", "coords"):
+        if coord_key in args:
+            coords = args.pop(coord_key)
+            if isinstance(coords, (list, tuple)) and "x" not in args and "y" not in args:
+                if len(coords) == 2:
+                    args["x"], args["y"] = coords[0], coords[1]
+                elif len(coords) == 4:
+                    args["x"] = (float(coords[0]) + float(coords[2])) / 2.0
+                    args["y"] = (float(coords[1]) + float(coords[3])) / 2.0
+
+    for idx_key in ("index", "target_index"):
+        if idx_key in args and "element_index" not in args:
+            args["element_index"] = args.pop(idx_key)
+        else:
+            args.pop(idx_key, None)
+
+    for int_key in ("element_index", "x", "y", "scroll_y"):
+        if int_key in args:
+            args[int_key] = _coerce_int(args[int_key])
+
+    if "text" not in args:
+        for text_key in ("content", "value", "input_text"):
+            if text_key in args and isinstance(args[text_key], str):
+                args["text"] = args.pop(text_key)
+                break
+
+    if isinstance(args.get("submit"), str):
+        s_val = args["submit"].strip().lower()
+        if s_val in {"true", "1", "yes"}:
+            args["submit"] = True
+        elif s_val in {"false", "0", "no"}:
+            args["submit"] = False
+
+    if "key" in args and not args.get("keys"):
+        raw_key = args.pop("key")
+        if isinstance(raw_key, str):
+            args["keys"] = [p.strip() for p in raw_key.split("+") if p.strip()] if (len(raw_key) > 1 and "+" in raw_key) else [raw_key]
+        else:
+            args["keys"] = list(raw_key or [])
+    elif isinstance(args.get("keys"), str):
+        raw_keys = args["keys"]
+        args["keys"] = [p.strip() for p in raw_keys.split("+") if p.strip()] if (len(raw_keys) > 1 and "+" in raw_keys) else [raw_keys]
+
+    return args
+
+
 class TurnTools:
     def __init__(self, registry, audit, secrets, session_id, turn_id, source, question="",
                  current_registry=None, order_store: OrderConfirmationStore | None = None,
@@ -604,17 +698,10 @@ class TurnTools:
                 raise ProviderError(403, "tool_not_allowed", "工具未启用或不允许自动执行。")
             if not isinstance(arguments, str) or len(arguments) > 16000:
                 raise ProviderError(422, "tool_arguments", "模型工具参数格式无效或过大。")
-            args = json.loads(arguments or "{}")
-            if not isinstance(args, dict):
+            raw_args = json.loads(arguments or "{}")
+            if not isinstance(raw_args, dict):
                 raise ProviderError(422, "tool_arguments", "模型工具参数必须是 JSON 对象。")
-            if name == "desktop_gui_action":
-                if args.get("action") in ("key_press", "press_key", "press"):
-                    args["action"] = "hotkey"
-                if "key" in args and not args.get("keys"):
-                    raw_key = args.pop("key")
-                    args["keys"] = [raw_key] if isinstance(raw_key, str) else list(raw_key or [])
-                elif isinstance(args.get("keys"), str):
-                    args["keys"] = [args["keys"]]
+            args = _normalize_tool_arguments(name, raw_args)
             call["request"] = {"arguments": args}
             call["detail"] = _progress_detail(name, args)
             if emit_progress and self.on_progress is not None:
@@ -966,7 +1053,7 @@ class ToolConversation:
         result.reply = _strip_dsml(reply)
         return result
 
-    async def complete_stream(self, messages):
+    async def complete_stream(self, messages) -> AsyncGenerator[str | Completion, None]:
         if getattr(self.provider, "native_tool_continuation", False):
             async with aclosing(self.provider.complete_stream(messages, tool_context=self.context,
                                                               results=self.results)) as stream:
@@ -983,20 +1070,23 @@ class ToolConversation:
                 messages[0] = {**messages[0], "content": (messages[0].get("content") or "") + extra}
         pending = list(self.context.outputs)
         max_rounds, _ = turn_limits(self.context.allowed)
+        consecutive_error_rounds = 0
+        stop_early_notice: str | None = None
         for round_index in range(max_rounds + 1):
             definitions = selection.definitions(nested=True) if selection is not None else self.context.definitions(nested=True)
             req_messages = messages
-            if round_index == max_rounds:
+            is_final_forced = (round_index == max_rounds) or (stop_early_notice is not None)
+            if is_final_forced:
                 req_messages = [
                     *messages,
                     {
                         "role": "user",
-                        "content": "（系统提示：本轮工具调用次数已达上限，当前不提供任何工具。禁止输出 DSML / XML 工具标签，请直接用简洁中文向用户汇报已完成和未完成的步骤。）",
+                        "content": stop_early_notice or "（系统提示：本轮工具调用次数已达上限，当前不提供任何工具。禁止输出 DSML / XML 工具标签，请直接用简洁中文向用户汇报已完成和未完成的步骤。）",
                     },
                 ]
             text, result = "", None
             try:
-                async with aclosing(self.provider.complete_stream(req_messages, tools=definitions if round_index < max_rounds else [])) as stream:
+                async with aclosing(self.provider.complete_stream(req_messages, tools=[] if is_final_forced else definitions)) as stream:
                     async for item in stream:
                         self.context.mark_sent(pending)
                         if isinstance(item, Completion):
@@ -1011,20 +1101,31 @@ class ToolConversation:
                 self.results.append(result)
             if result.finish_reason == "tool_calls" and not result.tool_calls:
                 raise ProviderError(502, "invalid_tool_call", "模型返回工具结束标记但缺少调用参数。")
-            if not result.tool_calls:
+            if not result.tool_calls or is_final_forced:
+                if result.tool_calls and round_index == max_rounds:
+                    raise ProviderError(502, "tool_limit", "模型仍请求工具，本轮已达上限；未继续执行。")
                 yield replace(result, usage=combine_usage(self.results))
                 return
-            if round_index == max_rounds:
-                raise ProviderError(502, "tool_limit", "模型仍请求工具，本轮已达上限；未继续执行。")
             messages.append({"role": "assistant", "content": text or None, "tool_calls": result.tool_calls})
             pending = []
+            round_outputs = []
             for call in result.tool_calls:
                 function = call["function"]
                 output = await self.context.execute(function["name"], function["arguments"], call["id"])
+                round_outputs.append(output)
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": function_call_output_payload(output)})
                 pending.append(call["id"])
+            if round_outputs and all(
+                isinstance(o, dict) and o.get("error") and not o.get("confirmation_required")
+                for o in round_outputs
+            ):
+                consecutive_error_rounds += 1
+            else:
+                consecutive_error_rounds = 0
             consume_frames = getattr(self.context, "consume_vision_images", None)
             frames = consume_frames() if callable(consume_frames) else []
             if isinstance(frames, list) and frames:
                 _prune_prior_desktop_images(messages)
                 messages.append(_build_desktop_vision_user_message(frames[-1]))
+            if consecutive_error_rounds >= 3:
+                stop_early_notice = "（系统提示：连续 3 轮工具调用出错，已自动停止重试。请直接简要汇报已完成步骤与最后一次具体报错，禁止继续输出工具调用标签。）"

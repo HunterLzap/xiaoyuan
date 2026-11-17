@@ -60,7 +60,7 @@
         <div class="composer-wrap">
           <form id="chat-form" class="composer">
             <label class="sr-only" for="message">你的消息</label><textarea id="message" maxlength="4000" rows="1" placeholder="发消息…" required></textarea>
-            <div class="composer-bottom"><button id="use-knowledge" type="button" class="knowledge-toggle" aria-pressed="false" title="检索 M5Stack 官方资料后回答"><svg aria-hidden="true"><use href="#i-search"/></svg><span>资料</span></button><span id="composer-state" class="sr-only" role="status"></span><div class="composer-actions"><span id="character-count" class="character-count"></span><button id="voice-toggle" type="button" class="icon-button" aria-label="开始语音输入" aria-pressed="false" title="语音输入"><svg aria-hidden="true"><use href="#i-mic"/></svg></button><button id="send" class="send-button" type="submit" aria-label="发送消息" title="发送消息（Enter）" disabled><svg><use href="#i-arrow"/></svg></button></div></div>
+            <div class="composer-bottom"><button id="use-knowledge" type="button" class="knowledge-toggle" aria-pressed="false" title="检索 M5Stack 官方资料后回答"><svg aria-hidden="true"><use href="#i-search"/></svg><span>资料</span></button><span id="composer-state" class="sr-only" role="status"></span><div class="composer-actions"><span id="character-count" class="character-count"></span><button id="voice-toggle" type="button" class="icon-button" aria-label="开始语音输入" aria-pressed="false" title="语音输入"><svg aria-hidden="true"><use href="#i-mic"/></svg></button><button id="stop-turn" class="stop-button" type="button" aria-label="停止执行" title="停止当前操作" hidden><svg aria-hidden="true"><use href="#i-stop"/></svg></button><button id="send" class="send-button" type="submit" aria-label="发送消息" title="发送消息（Enter）" disabled><svg><use href="#i-arrow"/></svg></button></div></div>
           </form>
           <div class="composer-footnote"><span id="input-hint">Enter 发送 · Shift + Enter 换行</span><button id="configure-link" class="text-button">连接你的 AI 服务</button><span id="context-note" class="sr-only" hidden>仅最近 6 轮参与上下文</span></div>
         </div>
@@ -116,25 +116,24 @@
             <textarea id="system_prompt" maxlength="4000" rows="6" required placeholder="写清楚它是谁、什么性格、怎么回答、如何做事。例如：你是我的个人 AI Agent 小圆，回复简短干脆，先给结论，动手前先核对高风险操作。"></textarea>
             <div class="agent-profile-block">
               <h3><label for="agent_profile">个人工作档案与偏好</label></h3>
-              <p class="small-note">写给 Agent 长期参考的个人环境信息（如常用 Windows / Mac 机器名、代码/桌面目录、口癖或命名规范；勿填密码与密钥）。</p>
-              <textarea id="agent_profile" maxlength="2000" rows="4" placeholder="例如：Mac 笔记本常用目录 ~/Projects；Windows 台式机工作目录 D:\Work；我常让你查完屏幕后再点击确认。"></textarea>
+              <textarea id="agent_profile" maxlength="2000" rows="4" placeholder="常用电脑名、工作目录、偏好或命名规范（勿填密码与密钥），例如：Mac 目录 ~/Projects；Windows 目录 D:\Work"></textarea>
             </div>
           </section>
           <section id="voice-pane" class="assistant-section" aria-label="声音调节"><h2>声音调节</h2>
             <div class="settings-row voice-row"><label for="device-volume">设备音量</label><div class="voice-inline tuning"><input id="device-volume" type="range" min="0" max="100" step="1" value="75"><span id="device-volume-value" class="tuning-value">75</span><button id="volume-apply" type="button" class="secondary-button">应用到设备</button><span id="volume-status" class="small-note" role="status"></span></div></div>
             <div class="settings-row voice-row"><label for="tts_rate">语速</label><div class="voice-inline tuning"><input id="tts_rate" type="range" min="0.5" max="2" step="0.05" value="1"><span id="tts_rate-value" class="tuning-value">1.00x</span></div></div>
             <div class="settings-row voice-row"><label for="tts_pitch">音调</label><div class="voice-inline tuning"><input id="tts_pitch" type="range" min="-8" max="8" step="1" value="0"><span id="tts_pitch-value" class="tuning-value">0</span><button id="tuning-reset" type="button" class="text-button">恢复默认</button></div></div>
-            <div class="voice-preview"><label class="sr-only" for="tts-text">试听文字</label><input id="tts-text" maxlength="500" value="你好，我是你的个人助理。很高兴认识你。"><button id="tts-preview" type="button" class="secondary-button" disabled>试听</button><button id="tts-cancel" type="button" class="secondary-button" hidden>取消合成</button></div><p id="tts-result" class="small-note" role="status" aria-live="polite"></p><audio id="tts-audio" controls preload="none" hidden aria-label="声音调节试听"></audio><p class="small-note usage-scope-note">用量口径：历史消息脚注只统计对话与语音回合；试听与声音复刻按实际用量结算，具体以供应商账单为准，不并入这里。</p>
+            <div class="voice-preview"><label class="sr-only" for="tts-text">试听文字</label><input id="tts-text" maxlength="500" value="你好，我是你的个人助理。很高兴认识你。"><button id="tts-preview" type="button" class="secondary-button" disabled>试听</button><button id="tts-cancel" type="button" class="secondary-button" hidden>取消合成</button></div><p id="tts-result" class="small-note" role="status" aria-live="polite"></p><audio id="tts-audio" controls preload="none" hidden aria-label="声音调节试听"></audio>
           </section>
 </fieldset><div class="settings-actions assistant-save"><span id="role-dirty-state">设置已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="assistant-reset" type="button" class="secondary-button">取消</button><button id="tts-save" type="submit" class="primary-button" disabled>保存</button></div></div></form>
       </div></section>
       <section id="connections-view" class="page-view" aria-label="模型与连接" hidden><div class="page-content">
         <form id="config-form"><fieldset id="config-fields" class="compact-api" disabled>
-          <section class="api-panel model-overview-panel" id="model-overview-panel" aria-label="当前生效模型一览">
-            <h2 class="api-panel-title">当前生效模型一览</h2>
+          <section class="api-panel model-overview-panel" id="model-overview-panel" aria-label="当前生效模型">
+            <h2 class="api-panel-title">当前生效模型</h2>
             <div class="model-overview-grid">
-              <div class="model-overview-item"><span class="model-overview-role">语音 / 日常对话</span><strong id="overview-chat-model">—</strong><small id="overview-chat-meta" class="small-note"></small></div>
-              <div class="model-overview-item"><span class="model-overview-role">电脑操控（Computer Use）</span><strong id="overview-desktop-model">—</strong><small id="overview-desktop-meta" class="small-note"></small></div>
+              <div class="model-overview-item"><span class="model-overview-role">日常对话</span><strong id="overview-chat-model">—</strong><small id="overview-chat-meta"></small></div>
+              <div class="model-overview-item"><span class="model-overview-role">电脑操控</span><strong id="overview-desktop-model">—</strong><small id="overview-desktop-meta"></small></div>
             </div>
           </section>
           <section class="api-panel api-routing">
@@ -242,36 +241,33 @@
             <div class="settings-row voice-row"><label for="tts_model">模型</label><div class="voice-inline"><select id="tts_model" aria-label="声音模型"><option value="mimo-v2.5-tts">mimo-v2.5-tts</option><option value="mimo-v2.5-tts-voicedesign">mimo-v2.5-tts-voicedesign</option><option value="mimo-v2.5-tts-voiceclone">mimo-v2.5-tts-voiceclone</option><option value="__manual__">手动填写模型 ID…</option></select><input id="tts_model_custom" maxlength="200" autocomplete="off" placeholder="例如：tts-1 / qwen3-tts-flash-realtime" hidden><button id="fetch-speech-models" type="button" class="secondary-button" disabled>刷新</button></div></div>
             <div class="settings-row voice-row" id="voice-pick-row"><label for="tts_voice">音色</label><div class="voice-inline"><select id="tts_voice" aria-label="音色"><option value="mimo_default">默认</option></select><input id="tts_voice_custom" maxlength="80" autocomplete="off" placeholder="填写目标音色 ID" hidden><button id="clone-new" type="button" class="secondary-button">新建复刻</button><button id="delete-clone" type="button" class="secondary-button" hidden>删除</button></div></div>
           </section></section>
-          <section class="api-panel" id="desktop-model-panel" aria-label="电脑操控模型配置">
-            <h2 class="api-panel-title">电脑操控模型（Computer Use）<span id="desktop-model-mode-tag" class="connection-label"></span></h2>
+          <section class="api-panel" id="desktop-model-panel" aria-label="电脑操控模型">
+            <h2 class="api-panel-title">电脑操控模型</h2>
             <div class="api-group">
               <div class="settings-row">
-                <div><label for="desktop-planner-preset">主控执行模型</label><p>原生多模态可直接看带方框标号的屏幕截图并操作，无需两次转发。</p></div>
+                <label for="desktop-planner-preset">主控模型</label>
                 <div class="desktop-model-stack">
                   <select id="desktop-planner-preset" aria-label="电脑操控主控模型">
-                    <option value="">自动推荐（百炼 Key 默认 qwen3.5-plus）</option>
-                    <option value="qwen3.5-plus">qwen3.5-plus · 百炼性价比推荐（看图+工具，¥0.8/¥4.8）</option>
-                    <option value="qwen3.5-flash">qwen3.5-flash · 百炼极致省钱（看图+工具，¥0.2/¥2.0）</option>
-                    <option value="qwen3-vl-plus">qwen3-vl-plus · 视觉坐标专精（¥1.0/¥10.0）</option>
-                    <option value="__manual__">手动填写其他模型 ID…</option>
+                    <option value="">自动推荐（qwen3.5-plus）</option>
+                    <option value="qwen3.5-plus">qwen3.5-plus · 推荐（¥0.8 / ¥4.8）</option>
+                    <option value="qwen3.5-flash">qwen3.5-flash · 省钱（¥0.2 / ¥2.0）</option>
+                    <option value="qwen3-vl-plus">qwen3-vl-plus · 视觉（¥1.0 / ¥10.0）</option>
+                    <option value="__manual__">手动填写模型 ID…</option>
                   </select>
                   <input id="desktop_planner_model" maxlength="200" autocomplete="off" placeholder="例如：qwen3.5-plus / qwen3.5-flash / deepseek-chat" hidden>
                 </div>
               </div>
-              <div class="settings-row">
-                <div><label for="desktop_vision_model">纯视觉辅助模型</label><p>仅当主控选了纯文字模型（如 DeepSeek）时用于兜底看图；主控为 qwen3.5/VL 时自动跳过。</p></div>
-                <input id="desktop_vision_model" list="desktop-vision-models" maxlength="200" autocomplete="off" placeholder="留空默认 qwen3-vl-plus">
-                <datalist id="desktop-vision-models"><option value="qwen3-vl-plus"><option value="qwen3.5-plus"><option value="qwen-vl-max"></datalist>
-              </div>
             </div>
-            <p id="desktop-model-summary" class="small-note desktop-model-summary" role="status"></p>
+            <details class="api-disclosure"><summary>更多模型选项</summary><div class="api-group">
+              <div class="settings-row"><label for="desktop_vision_model">纯视觉备用</label><input id="desktop_vision_model" list="desktop-vision-models" maxlength="200" autocomplete="off" placeholder="qwen3-vl-plus（主控非多模态时使用）"><datalist id="desktop-vision-models"><option value="qwen3-vl-plus"><option value="qwen3.5-plus"><option value="qwen-vl-max"></datalist></div>
+            </div></details>
           </section>
           <section class="api-panel api-common"><button type="button" class="text-button" data-view="capabilities">管理技能、电脑操控与知识库 →</button><input id="m5stack_enabled" type="checkbox" checked hidden></section>
         </fieldset><div class="settings-actions"><span id="dirty-state">接入已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="settings-api-cancel" type="button" class="secondary-button">取消</button><button id="save" type="submit" class="primary-button" disabled>保存并关闭</button></div></div></form>
       </div></section>
       <section id="devices-view" class="page-view" aria-label="终端节点" hidden><div class="page-content">
         <section id="desktop-panel" class="desktop-panel" aria-label="个人电脑节点">
-          <div class="section-toolbar"><div><strong id="desktop-state">个人电脑节点（Windows / macOS）</strong><p id="desktop-state-detail" class="small-note">连接你的个人电脑后，Agent 可看屏幕、读文件并在确认后代为键鼠操控。</p></div><button id="desktop-refresh" type="button" class="text-button"><svg aria-hidden="true"><use href="#i-refresh"/></svg>刷新节点</button></div>
+          <div class="section-toolbar"><div><strong id="desktop-state">个人电脑节点（Windows / macOS）</strong><p id="desktop-state-detail" class="small-note" hidden></p></div><button id="desktop-refresh" type="button" class="text-button"><svg aria-hidden="true"><use href="#i-refresh"/></svg>刷新节点</button></div>
           <div id="desktop-nodes" class="desktop-nodes-list" aria-live="polite"><p class="small-note">正在加载个人电脑节点…</p></div>
           <div id="desktop-screen-preview" class="desktop-screen-preview" hidden>
             <div class="desktop-preview-head"><span id="desktop-preview-meta" class="small-note"></span><button id="desktop-preview-close" type="button" class="text-button">收起预览</button></div>
@@ -280,10 +276,9 @@
           <details class="settings-advanced desktop-setup-box">
             <summary>接入新电脑（Windows / Mac 一键命令）<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary>
             <section class="settings-section">
-              <p class="section-description">先在目标电脑安装轻量依赖 <code>pip install -r desktop_node/requirements-desktop.txt</code>，再复制对应命令运行即可持久在线。</p>
               <div class="desktop-cmd-block"><label for="desktop-cmd-macos">macOS 启动命令</label><div class="device-url-row"><input id="desktop-cmd-macos" readonly><button id="desktop-copy-macos" type="button" class="secondary-button">复制</button></div></div>
               <div class="desktop-cmd-block"><label for="desktop-cmd-windows">Windows 启动命令</label><div class="device-url-row"><input id="desktop-cmd-windows" readonly><button id="desktop-copy-windows" type="button" class="secondary-button">复制</button></div></div>
-              <div class="desktop-token-actions"><span class="small-note">提示：若需在「技能与知识」中开启电脑操控技能，Agent 才能调用这些节点。</span><button id="desktop-rotate-token" type="button" class="secondary-button">重置接入令牌</button></div>
+              <div class="desktop-token-actions"><button id="desktop-rotate-token" type="button" class="secondary-button">重置接入令牌</button></div>
             </section>
           </details>
         </section>
@@ -296,9 +291,9 @@
         </section></fieldset><div class="settings-actions"><span class="small-note">保存不会修改设备连接。</span><button type="submit" class="primary-button">保存接入信息</button></div></form>
         <section class="settings-section device-address-section"><h2 id="device-address-title">设备接入地址</h2><p id="device-launch-note" class="small-note"></p><label class="sr-only" for="device-local-url">设备 OTA 接入地址</label><div class="device-url-row"><input id="device-local-url" readonly placeholder="保存接入信息后生成"><button id="device-copy-local" type="button" class="secondary-button" disabled>复制地址</button></div><p class="small-note">在设备配网页的高级选项中填写此地址，保存并按页面提示重新联网。按一下设备按钮建立控制连接。地址包含设备接入凭据，请仅用于自己的设备。</p></section>
         </details><form id="device-preferences-form"><fieldset id="device-preferences-fields"><section class="settings-section">
-          <div class="settings-row"><div><label for="device-text">屏幕文字</label><p>收到指令后显示，实际效果请查看屏幕</p></div><input id="device-text" maxlength="120" required value="已连接电脑服务"></div>
-          <div class="settings-row"><div><label for="device-brightness">屏幕亮度</label><p>10–100，保留可见亮度便于恢复</p></div><input id="device-brightness" type="number" min="10" max="100" required value="60"></div>
-          <div class="settings-row"><div><label for="device-theme">屏幕主题</label><p>由设备固件支持情况决定</p></div><select id="device-theme"><option value="dark">深色</option><option value="light">浅色</option></select></div>
+          <div class="settings-row"><label for="device-text">屏幕文字</label><input id="device-text" maxlength="120" required value="已连接电脑服务"></div>
+          <div class="settings-row"><label for="device-brightness">屏幕亮度</label><input id="device-brightness" type="number" min="10" max="100" required value="60" placeholder="10–100"></div>
+          <div class="settings-row"><label for="device-theme">屏幕主题</label><select id="device-theme"><option value="dark">深色</option><option value="light">浅色</option></select></div>
         </section></fieldset><div class="settings-actions"><span id="device-preferences-note" class="small-note">保存与应用是两个独立操作。</span><button type="submit" class="secondary-button">保存设置</button><button id="device-apply" type="button" class="primary-button" disabled>应用已保存设置</button></div></form>
         <div id="device-application" class="device-application" aria-live="polite"><p class="small-note">设备尚未连接，尚无实机验证结果。</p></div>
         <details class="settings-advanced device-recovery"><summary>切回原服务<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary><ol><li>让设备重新进入配网设置，打开高级选项。</li><li>将保存的原 OTA 地址填回设备；若原值为空，清空设备中的 OTA 字段。保存并重新联网。</li><li>确认小智平台恢复在线，并用设备实际对话验证。</li></ol><p id="device-recovery-value" class="small-note">尚未保存原设备设置。</p><button id="device-copy-original" type="button" class="secondary-button" disabled>复制已保存的原地址</button><p class="small-note">现有固件需要在设备配网页切换；这里不会声称已经远程切回。无需解除原平台绑定。</p></details>
@@ -313,7 +308,6 @@
         <section id="capabilities-panel-tools" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-tools">
           <section class="capability-section" aria-labelledby="capability-tools-title">
             <div class="capability-heading"><h2 id="capability-tools-title">Agent 可用技能</h2><button id="tool-new" type="button" class="secondary-button">+ 新建 HTTP 工具</button></div>
-            <p class="small-note">单用户模式：开启任一技能即直接赋予 Agent 使用，无需二次勾选；涉及写入、发送或电脑操控的操作仍需你口头或点击确认。</p>
             <div class="cap-panes">
               <div class="cap-list" id="capability-tools" role="list" aria-live="polite"></div>
               <div class="cap-detail" id="capability-detail" aria-live="polite"></div>

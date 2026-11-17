@@ -541,8 +541,10 @@ class ToolRegistry:
             raise ProviderError(422, "tool_arguments", "工具参数格式无效或过大。")
         try:
             Draft202012Validator(tool.spec.parameters).validate(arguments)
-        except SchemaValidationError:
-            raise ProviderError(422, "tool_arguments", "工具参数不符合接口定义。") from None
+        except SchemaValidationError as error:
+            path = ".".join(str(p) for p in error.absolute_path)
+            detail = f"{path}: {error.message}" if path else error.message
+            raise ProviderError(422, "tool_arguments", f"工具参数不符合接口定义（{detail[:160]}）。") from None
         if tool.spec.permission not in ("read", "local") and not confirmed:
             raise ProviderError(409, "tool_confirmation_required", "该工具涉及修改或付费，请确认具体参数后执行。")
         try:
