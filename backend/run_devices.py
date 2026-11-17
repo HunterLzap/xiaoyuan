@@ -7,6 +7,7 @@ import os
 
 import uvicorn
 
+from .app.desktop import DesktopHub
 from .app.devices import DeviceHub, create_gateway
 from .app.main import create_app
 from .app.config import Settings
@@ -51,11 +52,17 @@ async def run(admin_port, device_port, require_public=False):
         python=config.speech_python or SPEECH_PYTHON,
         threads=config.speech_threads, model_dir=config.asr_model_dir,
     ))
-    admin = Server(uvicorn.Config(create_app(settings=config, device_hub=hub), host="127.0.0.1",
+    desktop_hub = DesktopHub(
+        port=device_port,
+        public_origin=config.public_origin,
+        public_base_path=config.public_base_path,
+        lan_host_getter=lambda: hub.setup.lan_host if hub.setup else "",
+    )
+    admin = Server(uvicorn.Config(create_app(settings=config, device_hub=hub, desktop_hub=desktop_hub), host="127.0.0.1",
                                  port=admin_port, log_level="info", proxy_headers=False))
     device_host = "127.0.0.1" if config.public_origin else "0.0.0.0"
-    device = Server(uvicorn.Config(create_gateway(hub), host=device_host, port=device_port,
-                                   log_level="info", access_log=False, proxy_headers=False, ws_max_size=12000,
+    device = Server(uvicorn.Config(create_gateway(hub, desktop_hub=desktop_hub), host=device_host, port=device_port,
+                                   log_level="info", access_log=False, proxy_headers=False, ws_max_size=8 * 1024 * 1024,
                                    ws_ping_interval=20, ws_ping_timeout=20))
     tasks = [asyncio.create_task(admin.serve()), asyncio.create_task(device.serve())]
     try:
@@ -68,6 +75,7 @@ async def run(admin_port, device_port, require_public=False):
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
         hub.gateway_running = False
+        await desktop_hub.disconnect()
         await hub.disconnect()
         await hub.speech.close()
         admin.should_exit = True

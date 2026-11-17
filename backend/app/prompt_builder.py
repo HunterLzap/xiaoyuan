@@ -25,6 +25,9 @@ def build_system_prompt(settings, channel="text", tool_names=None, turn_state=No
     base = assistant_prompt if assistant_prompt is not None else (getattr(settings, "system_prompt", "") or "")
     if base:
         parts.append(base)
+    profile = (getattr(settings, "agent_profile", "") or "").strip() if settings is not None else ""
+    if profile:
+        parts.append("\n个人工作档案与偏好：\n" + profile)
     parts.append(
         "\n" + now_context_line() +
         "\n时效事实只依据本轮成功工具结果并说明数据时间；缺依据就说明无法获取，不猜数值。"

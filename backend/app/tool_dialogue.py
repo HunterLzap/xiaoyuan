@@ -29,11 +29,16 @@ TOOL_INSTRUCTIONS = (
 )
 
 
+DESKTOP_TOOL_NAMES = {
+    "desktop_list_nodes", "desktop_inspect_screen", "desktop_clipboard",
+    "desktop_list_dir", "desktop_read_file", "desktop_set_clipboard",
+    "desktop_open", "desktop_gui_action", "desktop_run_command",
+}
 BUILTIN_TOOL_NAMES = {
     "search_m5stack", "search_personal_knowledge", "get_weather",
     "set_device_volume", "set_speech_rate", "set_speech_pitch", "get_device_status",
     "search_conversation_history",
-}
+} | DESKTOP_TOOL_NAMES
 
 
 def build_tool_instructions(tool_names=None, channel="text", compact=False):
@@ -66,6 +71,11 @@ def build_tool_instructions(tool_names=None, channel="text", compact=False):
                 parts.append("\n" + instruction)
         if names & MUTATING_CONTROL_TOOLS:
             parts.append("控制成功须有本轮工具成功与设备校验依据，口头成功不算。")
+        if names & DESKTOP_TOOL_NAMES:
+            parts.append(
+                "\n电脑操控：仅操作已连接电脑节点(desktop_list_nodes)；GUI操作前先desktop_inspect_screen看屏幕尺寸与位置；"
+                "写/打开/点击/输入/命令受确认保护，未确认不声称已执行。"
+            )
         return "".join(parts)
     parts = [TOOL_INSTRUCTIONS]
     if channel != "voice":
@@ -115,6 +125,14 @@ def build_tool_instructions(tool_names=None, channel="text", compact=False):
         parts.append("\n用户问当前音量、亮度或设备状态时调用 get_device_status；null 是未报告，禁止拿偏好或旧值冒充。")
     if names & {"set_device_volume", "set_speech_rate", "set_speech_pitch", "get_device_status"}:
         parts.append("历史口头‘已调好’不证明执行过；只有本轮对应工具成功结果才是依据。未调用、失败或未校验时不得声称已调整成功。")
+    if names & DESKTOP_TOOL_NAMES:
+        parts.append(
+            "\n电脑操控与 Computer Use 规则：只能操作已在线的 Windows / Mac 个人电脑节点（可用 desktop_list_nodes 查询节点及平台）。"
+            "读取屏幕、剪贴板、目录与文件可直接调用；"
+            "执行 desktop_gui_action 前，先调用 desktop_inspect_screen 获取当前分辨率与画面判断目标坐标。"
+            "设置剪贴板、打开应用/网址、点击/输入/快捷键、执行终端命令均有副作用：如工具返回 confirmation_required，"
+            "必须清晰复述拟执行工具、目标电脑与核心参数，请用户口头/打字确认或点击界面确认卡片后再执行，未真实成功前不得声称已完成。"
+        )
     return "".join(parts)
 MAX_TOOL_CALLS = 8
 MAX_TOOL_ROUNDS = 4
@@ -410,6 +428,7 @@ class TurnTools:
         self.tool_gateway = tool_gateway
         self.calls, self.snapshots, self.parse_errors = [], [], []
         self.outputs = {}
+        self.pending_approval: dict | None = None
         self.started = perf_counter()
         self.finished = False
         allowed_defs = (
@@ -484,6 +503,19 @@ class TurnTools:
         if state.get("denied"):
             parts.append("用户已否认此前候选订单号：" + "、".join(sorted(state["denied"]))
                          + "；不得再使用这些编号，请让用户重新提供完整订单号。")
+        if self.tool_gateway is not None:
+            confirmed_tool = self.tool_gateway.confirmations.confirmed_action(self.session_id, self.turn_id)
+            if confirmed_tool:
+                parts.append(
+                    f"本轮用户已明确确认执行工具 {confirmed_tool['tool_name']}（参数：{confirmed_tool['summary']}）；"
+                    "请使用一致参数立即调用该工具完成操作，并根据真实返回结果作答。"
+                )
+            denied_tool = self.tool_gateway.confirmations.denied_action(self.session_id, self.turn_id)
+            if denied_tool:
+                parts.append(
+                    f"本轮用户已取消执行工具 {denied_tool['tool_name']}；"
+                    "请简短确认已取消，不得再次调用该工具。"
+                )
         return "\n".join(parts)
 
     async def execute(self, name, arguments, call_id):
@@ -577,9 +609,23 @@ class TurnTools:
         except SideEffectConfirmationRequired as error:
             call["status"] = "blocked"
             call["error_code"] = error.code
+            if self.tool_gateway is not None:
+                self.pending_approval = self.tool_gateway.confirmations.latest_for_turn(self.session_id, self.turn_id)
+            if self.pending_approval is None and error.approval_id:
+                self.pending_approval = {
+                    "approval_id": error.approval_id,
+                    "session_id": str(self.session_id),
+                    "turn_id": str(self.turn_id),
+                    "tool_name": error.tool_name,
+                    "permission": error.permission,
+                    "summary": error.summary,
+                    "arguments": error.arguments_preview,
+                    "status": "pending",
+                }
             output = {"error": error.code, "message": error.message,
+                      "approval_id": error.approval_id, "permission": error.permission,
                       "tool_name": error.tool_name, "summary": error.summary,
-                      "instruction": "该外部写/付费操作尚未经用户确认，本轮未执行。必须先向用户复述操作内容并询问是否确认；"
+                      "instruction": "该外部写/付费/电脑控制操作尚未经用户确认，本轮未执行。必须先向用户复述操作内容并询问是否确认；"
                                      "在用户明确确认前不得再次调用本工具，也不得声称已执行。"}
         except SideEffectConfirmationDenied as error:
             call["status"] = "blocked"

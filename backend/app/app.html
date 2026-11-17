@@ -55,7 +55,7 @@
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
       <section id="chat-view" class="chat-view" aria-label="对话">
-        <div id="chat-scroll" class="chat-scroll"><div id="empty-state" class="empty-state"><div class="assistant-mark" aria-hidden="true"><svg><use href="#i-chat"/></svg></div><h1>今天想做点什么？</h1><p>输入消息，或点麦克风说话。</p></div><div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div></div>
+        <div id="chat-scroll" class="chat-scroll"><div id="empty-state" class="empty-state"><div class="assistant-mark" aria-hidden="true"><svg><use href="#i-chat"/></svg></div><h1>今天想做点什么？</h1><p>输入消息、语音对话，或让 Agent 查看屏幕并操控 Windows / Mac 电脑。</p></div><div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div></div>
         <div class="composer-wrap">
           <form id="chat-form" class="composer">
             <label class="sr-only" for="message">你的消息</label><textarea id="message" maxlength="4000" rows="1" placeholder="发消息…" required></textarea>
@@ -93,32 +93,31 @@
       <div class="settings-sidebar-head"><h2 id="settings-page-title">设置</h2><button id="settings-close" type="button" class="icon-button" aria-label="关闭设置"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
       <input id="settings-search" type="search" class="settings-search" placeholder="搜索设置" aria-label="搜索设置">
       <nav id="settings-nav" class="settings-nav" aria-label="设置分类">
-        <p class="settings-group">助手</p>
-        <button type="button" data-view="role">助手配置</button>
-        <button type="button" data-view="connections">API 接入</button>
-        <p class="settings-group">能力</p>
-        <button type="button" data-view="capabilities">能力管理</button>
-        <button type="button" data-action="api-workbench">API 配置工作台</button>
-        <p class="settings-group">设备</p>
-        <button type="button" data-view="devices">设备连接</button>
-        <p class="settings-group">数据</p>
-        <button type="button" data-view="insights">数据洞察</button>
+        <p class="settings-group">Agent</p>
+        <button type="button" data-view="role">Agent 与档案</button>
+        <button type="button" data-view="connections">模型与连接</button>
+        <p class="settings-group">技能与知识</p>
+        <button type="button" data-view="capabilities">技能与知识</button>
+        <button type="button" data-action="api-workbench">新建 / 编辑 HTTP 工具</button>
+        <p class="settings-group">终端</p>
+        <button type="button" data-view="devices">终端节点（电脑 &amp; 硬件）</button>
+        <p class="settings-group">运行</p>
+        <button type="button" data-view="insights">执行洞察</button>
       </nav>
     </aside>
     <div class="settings-main">
       <div id="settings-notice" class="notice" role="status" aria-live="polite" hidden></div>
       <div class="settings-dialog-body">
-      <section id="settings-view" class="page-view" aria-label="助手配置" hidden><div class="page-content assistant-content">
+      <section id="settings-view" class="page-view" aria-label="Agent 与档案" hidden><div class="page-content assistant-content">
         <form id="assistant-form"><fieldset id="role-fields" disabled>
-          <section id="role-pane" class="assistant-section"><h2><label for="system_prompt">助手提示词</label></h2><textarea id="system_prompt" maxlength="4000" rows="8" required placeholder="写清楚它是谁、什么性格、怎么说话。例如：你是我的个人助理小圆，说话简短亲切，先说结论。"></textarea></section>
-          <section id="assistant-scope-pane" class="assistant-section" aria-label="本助手使用的能力">
-            <h2>本助手使用的能力</h2>
-            <div class="assistant-scope">
-              <div class="scope-block"><h3>API 能力</h3><div id="assistant-tool-select" class="scope-list" aria-live="polite"><p class="small-note">加载中…</p></div></div>
-              <div class="scope-block"><h3>知识库</h3><div id="assistant-kb-select" class="scope-list" aria-live="polite"><p class="small-note">加载中…</p></div></div>
+          <section id="role-pane" class="assistant-section">
+            <h2><label for="system_prompt">Agent 人设与指令</label></h2>
+            <textarea id="system_prompt" maxlength="4000" rows="6" required placeholder="写清楚它是谁、什么性格、怎么回答、如何做事。例如：你是我的个人 AI Agent 小圆，回复简短干脆，先给结论，动手前先核对高风险操作。"></textarea>
+            <div class="agent-profile-block">
+              <h3><label for="agent_profile">个人工作档案与偏好</label></h3>
+              <p class="small-note">写给 Agent 长期参考的个人环境信息（如常用 Windows / Mac 机器名、代码/桌面目录、口癖或命名规范；勿填密码与密钥）。</p>
+              <textarea id="agent_profile" maxlength="2000" rows="4" placeholder="例如：Mac 笔记本常用目录 ~/Projects；Windows 台式机工作目录 D:\Work；我常让你查完屏幕后再点击确认。"></textarea>
             </div>
-            <div class="scope-actions"><button id="assistant-selection-save" type="button" class="secondary-button" disabled>保存能力选择</button><span id="assistant-selection-status" class="small-note" role="status"></span></div>
-            <p id="assistant-scope-note" class="small-note">勾选＝加入本助手；一项都不勾＝不启用对应能力（不会默认全选）。某项全局是否可用在「能力管理」里启用/停用。</p>
           </section>
           <section id="voice-pane" class="assistant-section" aria-label="声音调节"><h2>声音调节</h2>
             <div class="settings-row voice-row"><label for="device-volume">设备音量</label><div class="voice-inline tuning"><input id="device-volume" type="range" min="0" max="100" step="1" value="75"><span id="device-volume-value" class="tuning-value">75</span><button id="volume-apply" type="button" class="secondary-button">应用到设备</button><span id="volume-status" class="small-note" role="status"></span></div></div>
@@ -235,10 +234,27 @@
             <div class="settings-row voice-row"><label for="tts_model">模型</label><div class="voice-inline"><select id="tts_model" aria-label="声音模型"><option value="mimo-v2.5-tts">mimo-v2.5-tts</option><option value="mimo-v2.5-tts-voicedesign">mimo-v2.5-tts-voicedesign</option><option value="mimo-v2.5-tts-voiceclone">mimo-v2.5-tts-voiceclone</option><option value="__manual__">手动填写模型 ID…</option></select><input id="tts_model_custom" maxlength="200" autocomplete="off" placeholder="例如：tts-1 / qwen3-tts-flash-realtime" hidden><button id="fetch-speech-models" type="button" class="secondary-button" disabled>刷新</button></div></div>
             <div class="settings-row voice-row" id="voice-pick-row"><label for="tts_voice">音色</label><div class="voice-inline"><select id="tts_voice" aria-label="音色"><option value="mimo_default">默认</option></select><input id="tts_voice_custom" maxlength="80" autocomplete="off" placeholder="填写目标音色 ID" hidden><button id="clone-new" type="button" class="secondary-button">新建复刻</button><button id="delete-clone" type="button" class="secondary-button" hidden>删除</button></div></div>
           </section></section>
-          <section class="api-panel api-common"><button type="button" class="text-button" data-view="capabilities">管理工具与个人知识库 →</button><input id="m5stack_enabled" type="checkbox" checked hidden></section>
+          <section class="api-panel api-common"><button type="button" class="text-button" data-view="capabilities">管理技能、电脑操控与知识库 →</button><input id="m5stack_enabled" type="checkbox" checked hidden></section>
         </fieldset><div class="settings-actions"><span id="dirty-state">接入已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="settings-api-cancel" type="button" class="secondary-button">取消</button><button id="save" type="submit" class="primary-button" disabled>保存并关闭</button></div></div></form>
       </div></section>
-      <section id="devices-view" class="page-view" aria-label="设备" hidden><div class="page-content">
+      <section id="devices-view" class="page-view" aria-label="终端节点" hidden><div class="page-content">
+        <section id="desktop-panel" class="desktop-panel" aria-label="个人电脑节点">
+          <div class="section-toolbar"><div><strong id="desktop-state">个人电脑节点（Windows / macOS）</strong><p id="desktop-state-detail" class="small-note">连接你的个人电脑后，Agent 可看屏幕、读文件并在确认后代为键鼠操控。</p></div><button id="desktop-refresh" type="button" class="text-button"><svg aria-hidden="true"><use href="#i-refresh"/></svg>刷新节点</button></div>
+          <div id="desktop-nodes" class="desktop-nodes-list" aria-live="polite"><p class="small-note">正在加载个人电脑节点…</p></div>
+          <div id="desktop-screen-preview" class="desktop-screen-preview" hidden>
+            <div class="desktop-preview-head"><span id="desktop-preview-meta" class="small-note"></span><button id="desktop-preview-close" type="button" class="text-button">收起预览</button></div>
+            <img id="desktop-preview-img" alt="个人电脑实时截图预览">
+          </div>
+          <details class="settings-advanced desktop-setup-box">
+            <summary>接入新电脑（Windows / Mac 一键命令）<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary>
+            <section class="settings-section">
+              <p class="section-description">先在目标电脑安装轻量依赖 <code>pip install -r desktop_node/requirements-desktop.txt</code>，再复制对应命令运行即可持久在线。</p>
+              <div class="desktop-cmd-block"><label for="desktop-cmd-macos">macOS 启动命令</label><div class="device-url-row"><input id="desktop-cmd-macos" readonly><button id="desktop-copy-macos" type="button" class="secondary-button">复制</button></div></div>
+              <div class="desktop-cmd-block"><label for="desktop-cmd-windows">Windows 启动命令</label><div class="device-url-row"><input id="desktop-cmd-windows" readonly><button id="desktop-copy-windows" type="button" class="secondary-button">复制</button></div></div>
+              <div class="desktop-token-actions"><span class="small-note">提示：若需在「技能与知识」中开启电脑操控技能，Agent 才能调用这些节点。</span><button id="desktop-rotate-token" type="button" class="secondary-button">重置接入令牌</button></div>
+            </section>
+          </details>
+        </section>
         <div class="device-connection section-toolbar"><div><strong id="device-state">正在检查连接…</strong><p id="device-state-detail" class="small-note" hidden></p></div><button id="device-refresh" type="button" class="text-button"><svg aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button></div>
         <details class="settings-advanced"><summary>接入与恢复<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary><form id="device-setup-form"><fieldset id="device-setup-fields"><section class="settings-section"><p class="section-description">先保存设备原服务器地址，再修改设备配网页中的地址。</p>
           <div class="settings-row" id="device-host-row"><div><label for="device-host">电脑局域网 IP</label><p>设备与电脑必须能在局域网互相访问</p></div><input id="device-host" autocomplete="off" required placeholder="例如：192.168.1.20"></div>
@@ -255,24 +271,24 @@
         <div id="device-application" class="device-application" aria-live="polite"><p class="small-note">设备尚未连接，尚无实机验证结果。</p></div>
         <details class="settings-advanced device-recovery"><summary>切回原服务<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary><ol><li>让设备重新进入配网设置，打开高级选项。</li><li>将保存的原 OTA 地址填回设备；若原值为空，清空设备中的 OTA 字段。保存并重新联网。</li><li>确认小智平台恢复在线，并用设备实际对话验证。</li></ol><p id="device-recovery-value" class="small-note">尚未保存原设备设置。</p><button id="device-copy-original" type="button" class="secondary-button" disabled>复制已保存的原地址</button><p class="small-note">现有固件需要在设备配网页切换；这里不会声称已经远程切回。无需解除原平台绑定。</p></details>
       </div></section>
-      <section id="capabilities-view" class="page-view" aria-label="能力管理" hidden><div class="page-content capability-content">
-        <div class="section-toolbar"><span id="capability-integration">正在加载能力…</span><button id="capability-refresh" type="button" class="text-button">刷新</button></div>
+      <section id="capabilities-view" class="page-view" aria-label="技能与知识" hidden><div class="page-content capability-content">
+        <div class="section-toolbar"><span id="capability-integration">正在加载技能与知识…</span><button id="capability-refresh" type="button" class="text-button">刷新</button></div>
         <p id="capability-notice" class="small-note" role="status" aria-live="polite"></p>
-        <div class="insight-tabbar" role="tablist" aria-label="能力管理分类">
-          <button id="capabilities-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="capabilities-panel-tools" data-capability-tab="tools"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-wrench"/></svg><span>工具</span></button>
-          <button id="capabilities-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="capabilities-panel-kb" data-capability-tab="kb" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>知识库</span></button>
+        <div class="insight-tabbar" role="tablist" aria-label="技能与知识分类">
+          <button id="capabilities-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="capabilities-panel-tools" data-capability-tab="tools"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-wrench"/></svg><span>技能中心</span></button>
+          <button id="capabilities-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="capabilities-panel-kb" data-capability-tab="kb" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>个人知识库</span></button>
         </div>
         <section id="capabilities-panel-tools" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-tools">
           <section class="capability-section" aria-labelledby="capability-tools-title">
-            <div class="capability-heading"><h2 id="capability-tools-title">API 能力</h2><button id="tool-new" type="button" class="secondary-button">API 配置工作台</button></div>
-            <p class="small-note">天气、M5 官方资料、自定义 API 统一在这里管理；「启用」后可在助手配置中选用（启用不等于选入）。</p>
+            <div class="capability-heading"><h2 id="capability-tools-title">Agent 可用技能</h2><button id="tool-new" type="button" class="secondary-button">+ 新建 HTTP 工具</button></div>
+            <p class="small-note">单用户模式：开启任一技能即直接赋予 Agent 使用，无需二次勾选；涉及写入、发送或电脑操控的操作仍需你口头或点击确认。</p>
             <div class="cap-panes">
               <div class="cap-list" id="capability-tools" role="list" aria-live="polite"></div>
               <div class="cap-detail" id="capability-detail" aria-live="polite"></div>
             </div>
           </section>
           <section class="capability-section" aria-labelledby="device-control-title">
-            <div class="capability-heading"><h2 id="device-control-title">设备控制</h2><button type="button" class="text-button" data-view="devices">管理设备连接 →</button></div>
+            <div class="capability-heading"><h2 id="device-control-title">电脑与硬件终端</h2><button type="button" class="text-button" data-view="devices">管理 Windows / Mac 与 AtomS3R →</button></div>
           </section>
         </section>
         <section id="capabilities-panel-kb" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-kb" hidden>

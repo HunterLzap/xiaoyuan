@@ -1,6 +1,6 @@
 redir {$AI_PUBLIC_BASE_PATH} {$AI_PUBLIC_BASE_PATH}/ 308
 
-@xiaodan_device path {$AI_PUBLIC_BASE_PATH}/xiaozhi/ota/ {$AI_PUBLIC_BASE_PATH}/xiaozhi/v1 {$AI_PUBLIC_BASE_PATH}/xiaozhi/v1/
+@xiaodan_device path {$AI_PUBLIC_BASE_PATH}/xiaozhi/ota/ {$AI_PUBLIC_BASE_PATH}/xiaozhi/v1 {$AI_PUBLIC_BASE_PATH}/xiaozhi/v1/ {$AI_PUBLIC_BASE_PATH}/desktop/v1 {$AI_PUBLIC_BASE_PATH}/desktop/v1/
 handle @xiaodan_device {
     uri strip_prefix {$AI_PUBLIC_BASE_PATH}
     reverse_proxy 127.0.0.1:{$AI_DEVICE_PORT}

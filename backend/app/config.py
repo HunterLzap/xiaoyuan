@@ -48,6 +48,8 @@ class Settings(BaseSettings):
         default="你是一个简洁、可靠的个人 AI 助理。使用中文回答，除非用户要求其他语言。",
         max_length=4000,
     )
+    agent_profile: str = Field(default="", max_length=2000)
+    desktop_enabled: bool = False
     input_price_per_million: Decimal | None = Field(default=None, ge=0)
     output_price_per_million: Decimal | None = Field(default=None, ge=0)
     currency: str = "CNY"

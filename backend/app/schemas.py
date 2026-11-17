@@ -209,6 +209,12 @@ class InsightClearFilters(BaseModel):
     expected_total: int | None = Field(default=None, ge=0)
 
 
+class ApprovalDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: Literal["approve", "deny"]
+    session_id: UUID | None = None
+
+
 class ChatResponse(BaseModel):
     session_id: UUID
     reply: str
@@ -223,6 +229,7 @@ class ChatResponse(BaseModel):
     knowledge: KnowledgeResult | None = None
     sources: list[dict] = Field(default_factory=list)
     tool_calls: list[dict] = Field(default_factory=list)
+    pending_approval: dict | None = None
 
 
 class TranscriptMessage(BaseModel):
@@ -238,6 +245,7 @@ class TranscriptMessage(BaseModel):
     knowledge: KnowledgeResult | None = None
     sources: list[dict] = Field(default_factory=list)
     tool_calls: list[dict] = Field(default_factory=list)
+    pending_approval: dict | None = None
     source: Literal["text", "web_voice", "device_voice"] = "text"
     turn_id: UUID | None = None
     status: Literal["complete", "generating", "interrupted", "failed"] = "complete"

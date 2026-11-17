@@ -137,6 +137,15 @@ class RealtimeTurn:
             self.reply = self.reply[: len(self.reply) - len(self._response_text)] + transcript
             self._response_text = transcript
 
+    def _realtime_tool_definitions(self, nested=False):
+        registry = getattr(self.tool_context, "registry", None)
+        if registry is None:
+            return []
+        gateway = getattr(self.tool_context, "tool_gateway", None)
+        if gateway is not None:
+            return gateway.definitions(registry, nested=nested, include_side_effects=True)
+        return registry.definitions(nested=nested)
+
     def tool_instructions(self):
         turn_state = "最近控制调用记录（仅供核对历史，不代表当前设备值）：" + control_history(self.session.history)
         if self.required_controls:
@@ -144,15 +153,16 @@ class RealtimeTurn:
         order_state = self.tool_context.order_state_text()
         if order_state:
             turn_state += "\n" + order_state
-        registry = getattr(self.tool_context, "registry", None)
-        tool_names = ([item["name"] for item in registry.definitions()]
-                      if registry and self.tool_rounds < MAX_TOOL_ROUNDS and not self.control_continuation else [])
+        tool_names = ([item.get("function", item)["name"] for item in self._realtime_tool_definitions()]
+                      if getattr(self.tool_context, "registry", None)
+                      and self.tool_rounds < MAX_TOOL_ROUNDS and not self.control_continuation else [])
         return build_system_prompt(self.config, "voice", tool_names, turn_state)
 
     async def refresh_tools(self):
         session_patch: dict = {
-            "tools": self.tool_context.registry.definitions(nested=self.config.rt_provider == "bailian")
-                     if self.tool_context.registry and self.tool_rounds < MAX_TOOL_ROUNDS and not self.control_continuation else [],
+            "tools": self._realtime_tool_definitions(nested=self.config.rt_provider == "bailian")
+                     if getattr(self.tool_context, "registry", None)
+                     and self.tool_rounds < MAX_TOOL_ROUNDS and not self.control_continuation else [],
             "instructions": self.tool_instructions(),
         }
         if self._compatible_ga:
@@ -394,7 +404,7 @@ class RealtimeTurn:
                     raise ValueError()
                 session_config = self._build_session_config(created.get("session"))
                 if self.tool_context.allowed and self.tool_context.registry is not None:
-                    session_config["tools"] = self.tool_context.registry.definitions(nested=cfg.rt_provider == "bailian")
+                    session_config["tools"] = self._realtime_tool_definitions(nested=cfg.rt_provider == "bailian")
                     session_config["instructions"] = self.tool_instructions()
                 await self.send("session.update", session=session_config)
                 if json.loads(await self.ws.recv()).get("type") != "session.updated":

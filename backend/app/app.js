@@ -109,7 +109,7 @@ function navigate(view, push = true) {
   if (view !== "chat") el("api-workbench").hidden = true;
   document.querySelectorAll("[data-view]").forEach(link => { const active = (link.dataset.view === view) && view !== "chat"; link.classList.toggle("active", active); link.setAttribute("aria-current", active ? "page" : "false"); });
   el("settings-button").classList.toggle("active", view !== "chat");
-  const title = view === "chat" ? state.detail?.title || "新对话" : {settings:"助手配置", connections:"API接入", role:"助手配置", devices:"设备", capabilities:"能力", insights:"数据洞察"}[view];
+  const title = view === "chat" ? state.detail?.title || "新对话" : {settings:"Agent 与档案", connections:"模型与连接", role:"Agent 与档案", devices:"终端节点", capabilities:"技能与知识", insights:"执行洞察"}[view];
   el("view-title").textContent = title;
   el("rename-form").hidden = true; el("view-title").hidden = false;
   const path = appPath({settings:"/settings", connections:"/settings#api", role:"/settings#role", devices:"/devices", capabilities:"/settings#capabilities", insights:"/settings#insights", chat:"/"}[view]);
@@ -118,8 +118,10 @@ function navigate(view, push = true) {
   closeSidebar(); notice(); refreshControls(); renderSessions();
   if (view === "connections" && state.loaded && savedConfig?.voice_mode === "pipeline" && savedConfig?.api_key_configured && !modelsFetched && !state.busy) queueMicrotask(refreshModelChoices);
   if (view === "role" && state.loaded && !deviceData) loadDevices(true).catch(error => notice(error.message,"error"));
-  if (view === "role" && !capabilityState.tools.length && !capabilityState.loading) loadCapabilities().catch(() => {});
-  if (view === "devices") loadDevices(!deviceData).catch(error => notice(error.message,"error"));
+  if (view === "devices") {
+    loadDevices(!deviceData).catch(error => notice(error.message,"error"));
+    loadDesktopNodes().catch(error => notice(error.message,"error"));
+  }
   if (view === "capabilities") loadCapabilities().catch(error => capabilityNotice(error.message,true));
   if (view === "insights") loadInsights().catch(error => insightNotice(error.message,true));
 }
@@ -261,11 +263,101 @@ function messageNode(message) {
   renderMessageReferences(article,message);
   return article;
 }
+const TOOL_DISPLAY_NAMES = {
+  get_weather: "天气查询",
+  search_m5stack: "M5 官方资料",
+  search_personal_knowledge: "个人知识库",
+  search_conversation_history: "会话历史",
+  get_device_status: "硬件状态",
+  set_device_volume: "硬件音量",
+  set_speech_rate: "语音语速",
+  set_speech_pitch: "语音音调",
+  desktop_list_nodes: "列出电脑节点",
+  desktop_inspect_screen: "观察电脑屏幕",
+  desktop_clipboard: "读取剪贴板",
+  desktop_list_dir: "浏览电脑目录",
+  desktop_read_file: "读取电脑文件",
+  desktop_set_clipboard: "写入剪贴板",
+  desktop_open: "打开电脑应用/链接",
+  desktop_gui_action: "电脑键鼠操控",
+  desktop_run_command: "电脑终端命令",
+};
+function toolDisplayName(name) { return TOOL_DISPLAY_NAMES[name] || name || "工具调用"; }
+const APPROVAL_STATUS_TEXT = {
+  pending: "等待确认",
+  approved: "已确认执行",
+  consumed: "已确认执行",
+  denied: "已取消",
+  expired: "已超时",
+  superseded: "已被后续操作取代",
+};
+function renderApprovalCard(article, message) {
+  article.querySelector(".approval-card")?.remove();
+  const pa = message.pending_approval;
+  if (!pa || !pa.tool_name) return;
+  const status = pa.status || "pending";
+  const card = node("div", `approval-card approval-${status}`);
+  const head = node("div", "approval-card-head");
+  head.append(node("strong", "", `待确认操作 · ${toolDisplayName(pa.tool_name)}`));
+  head.append(node("span", "approval-status-badge", APPROVAL_STATUS_TEXT[status] || status));
+  card.append(head);
+  if (pa.summary) card.append(node("div", "approval-summary", pa.summary));
+  if (status === "pending" && pa.approval_id) {
+    const actions = node("div", "approval-actions");
+    const approveBtn = node("button", "primary-button", "确认执行"); approveBtn.type = "button";
+    const denyBtn = node("button", "secondary-button", "取消执行"); denyBtn.type = "button";
+    const submitDecision = async decision => {
+      approveBtn.disabled = true; denyBtn.disabled = true;
+      try {
+        const res = await request(`/api/approvals/${encodeURIComponent(pa.approval_id)}`, "POST", {
+          decision,
+          session_id: state.active || pa.session_id || null,
+        });
+        pa.status = res.status;
+        renderApprovalCard(article, message);
+        if (decision === "approve") await sendMessage("确认执行");
+        else notice("已取消该操作。");
+      } catch (error) {
+        notice(error.message, "error");
+        if (error.code === "approval_expired" || error.code === "approval_closed") {
+          pa.status = error.code === "approval_expired" ? "expired" : "denied";
+          renderApprovalCard(article, message);
+        } else {
+          approveBtn.disabled = false; denyBtn.disabled = false;
+        }
+      }
+    };
+    approveBtn.addEventListener("click", () => submitDecision("approve"));
+    denyBtn.addEventListener("click", () => submitDecision("deny"));
+    actions.append(approveBtn, denyBtn);
+    card.append(actions);
+  }
+  article.append(card);
+}
 function renderMessageReferences(article,message) {
   if (!article) return;
+  article.querySelector(".tool-pills")?.remove();
+  article.querySelector(".approval-card")?.remove();
   article.querySelector(".message-personal-sources")?.remove();
   article.querySelector(".message-tool-calls")?.remove();
   article.querySelector(".message-token-usage")?.remove();
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
+    const visibleCalls = message.tool_calls.filter(call => (call.tool_name || call.name) !== "_load_task_tools");
+    if (visibleCalls.length) {
+      const strip = node("div", "tool-pills");
+      for (const call of visibleCalls) {
+        const st = call.status || "ok";
+        const pill = node("span", `tool-pill tool-pill-${st}`);
+        pill.append(node("i", "tool-pill-dot"));
+        const label = toolDisplayName(call.tool_name || call.name);
+        pill.append(document.createTextNode(call.elapsed_ms != null ? `${label} · ${call.elapsed_ms}ms` : label));
+        strip.append(pill);
+      }
+      const footer = article.querySelector(".message-footer");
+      if (footer) footer.before(strip); else article.append(strip);
+    }
+  }
+  renderApprovalCard(article, message);
   const usageDetails = tokenUsageDetails(message.usage);
   article.append(usageDetails);
   if (Array.isArray(message.sources) && message.sources.length) {
@@ -294,7 +386,7 @@ function renderMessageReferences(article,message) {
     const list = node("ul","message-reference-list");
     for (const call of message.tool_calls) {
       const entry = node("li");
-      entry.append(node("span","",call.tool_name || call.name || "工具调用"));
+      entry.append(node("span","",`${toolDisplayName(call.tool_name || call.name)} (${call.tool_name || call.name || "tool"})`));
       const bits = [call.status || (call.http_status != null ? `HTTP ${call.http_status}` : ""), call.elapsed_ms != null ? `${call.elapsed_ms} ms` : "", call.error_code || ""].filter(Boolean);
       if (bits.length) entry.append(node("span","metadata",bits.join(" · ")));
       list.append(entry);
@@ -386,6 +478,7 @@ window.atoms3rVoiceMessages = {
       estimated_cost:data.estimated_cost, currency:data.currency, finish_reason:data.finish_reason,
       status:"complete", audio_status:data.audio_status,
       sources:data.sources ?? latest.sources, tool_calls:data.tool_calls ?? latest.tool_calls,
+      pending_approval:data.pending_approval ?? latest.pending_approval,
     });
     const footer = article?.querySelector(".message-footer > span");
     if (footer && latest) footer.textContent = assistantInfo(latest);
@@ -454,7 +547,7 @@ async function sendMessage(value, useKnowledge = state.useKnowledge) {
     state.active = data.session_id; remember("atoms3r.active", data.session_id);
     if (!state.detail) state.detail = {session_id:data.session_id, title:message.slice(0,40), messages:[]};
     const now = new Date().toISOString();
-    state.detail.messages.push({role:"user",content:message,created_at:now}, {role:"assistant",content:data.reply,created_at:now,model:data.model,provider:data.provider,usage:data.usage,estimated_cost:data.estimated_cost,currency:data.currency,finish_reason:data.finish_reason,knowledge:data.knowledge,sources:data.sources,tool_calls:data.tool_calls});
+    state.detail.messages.push({role:"user",content:message,created_at:now}, {role:"assistant",content:data.reply,created_at:now,model:data.model,provider:data.provider,usage:data.usage,estimated_cost:data.estimated_cost,currency:data.currency,finish_reason:data.finish_reason,knowledge:data.knowledge,sources:data.sources,tool_calls:data.tool_calls,pending_approval:data.pending_approval || null});
     state.pending = null; state.failure = null; renderMessages();
     if (state.view === "chat") { el("view-title").textContent = state.detail.title; document.title = `${state.detail.title} · AtomS3R`; }
     if (data.history_persisted === false) notice("已收到回答，但历史记录未能写入本机；当前对话仅保留在内存。", "error");
@@ -613,17 +706,18 @@ function voiceChoice() {
 }
 function assistantPayload() {
   const prompt = el("system_prompt").value.trim();
+  const profile = el("agent_profile")?.value?.trim() || "";
   const choice = voiceChoice();
   // The role description drives the model's words; the speaking style is a separate,
   // short instruction. Reusing the whole role text here overflowed its length limit and
   // made a long persona break voice preview.
-  // 选择能力/知识库走独立的 /api/assistant/selection，这里只提交提示词与声音，避免两次保存互相污染。
-  return {system_prompt:prompt, tts_provider:el("tts_provider").value, tts_model:selectedSpeechModel(), tts_voice:choice.tts_voice,
+  return {system_prompt:prompt, agent_profile:profile, tts_provider:el("tts_provider").value, tts_model:selectedSpeechModel(), tts_voice:choice.tts_voice,
     tts_rate:Number(el("tts_rate").value), tts_pitch:Number(el("tts_pitch").value),
     tts_instruction:SPEAKING_STYLE, tts_timeout_seconds:savedTtsConfig?.tts_timeout_seconds ?? 60};
 }
 function assistantDirty() {
   const changed = el("system_prompt").value.trim() !== (savedConfig?.system_prompt || "")
+    || (el("agent_profile")?.value?.trim() || "") !== (savedConfig?.agent_profile || "")
     || el("tts_provider").value !== (savedTtsConfig?.tts_provider || "mimo")
     || selectedSpeechModel() !== savedTtsConfig?.tts_model
     || voiceChoice().tts_voice !== savedTtsConfig?.tts_voice
@@ -797,7 +891,10 @@ function applyConfig(data, preserve = false) {
   el("rt-fields").hidden = data.voice_mode !== "realtime";
   el("rt_api_key").value = ""; el("rt_api_key").placeholder = data.rt_key_configured ? "已保存，留空保留" : "输入百炼 API Key";
   const model = el("model").value;
-  if (!preserve) el("system_prompt").value = data.system_prompt;
+  if (!preserve) {
+    el("system_prompt").value = data.system_prompt;
+    if (el("agent_profile")) el("agent_profile").value = data.agent_profile || "";
+  }
   savedConfig = data; state.configured = data.configured;
   applyWeatherSettings(data);
   capabilityState.selectionSupported = Array.isArray(data.selected_tool_ids) || Array.isArray(data.selected_kb_ids);
@@ -1379,21 +1476,55 @@ async function loadKbLibraries() {
 }
 async function loadCapabilities() {
   if (capabilityState.loading || capabilityState.busy) return;
-  capabilityState.loading = true; capabilityControls(); capabilityNotice("正在加载能力与资料…");
+  capabilityState.loading = true; capabilityControls(); capabilityNotice("正在加载技能与资料…");
   try {
-    const results = await Promise.allSettled([request("/api/tools"), request("/api/knowledge/personal?limit=50&offset=0")]);
+    const results = await Promise.allSettled([
+      request("/api/tools"),
+      request("/api/knowledge/personal?limit=50&offset=0"),
+      loadAssistantSelection(),
+      loadKbLibraries(),
+    ]);
     const failures = [];
     if (results[0].status === "fulfilled") updateCapabilityCatalog(results[0].value);
-    else {capabilityState.toolsLoaded = false; el("capability-integration").textContent = "能力目录加载失败"; failures.push(results[0].reason.message);}
+    else {capabilityState.toolsLoaded = false; el("capability-integration").textContent = "技能目录加载失败"; failures.push(results[0].reason.message);}
     if (results[1].status === "fulfilled") {
       capabilityState.documents = results[1].value.documents; capabilityState.total = results[1].value.total;
       capabilityState.offset = capabilityState.documents.length; renderKnowledgeDocuments();
     } else {el("kb-documents").replaceChildren(node("p","small-note","资料加载失败，请刷新重试。")); failures.push(results[1].reason.message);}
-    await Promise.allSettled([loadAssistantSelection(), loadKbLibraries()]);
-    renderAssistantScope();
+    renderCapabilityTools();
+    renderKbLibraries();
     if (capabilityState.activeLibraryId) await reloadKnowledgeDocuments().catch(() => {});
     capabilityNotice(failures.join("；"),failures.length > 0);
   } finally { capabilityState.loading = false; capabilityControls(); }
+}
+async function syncAssistantSelection(nextTools, nextKbs) {
+  if (!capabilityState.selectionSupported) return {selected_tool_ids: nextTools, selected_kb_ids: nextKbs};
+  const saved = await request("/api/assistant/selection", "PUT", {
+    selected_tool_ids: Array.from(new Set(nextTools)),
+    selected_kb_ids: Array.from(new Set(nextKbs)),
+  });
+  capabilityState.selectedTools = Array.isArray(saved.selected_tool_ids) ? saved.selected_tool_ids.slice() : nextTools.slice();
+  capabilityState.selectedKbs = Array.isArray(saved.selected_kb_ids) ? saved.selected_kb_ids.slice() : nextKbs.slice();
+  if (savedConfig) {
+    savedConfig.selected_tool_ids = capabilityState.selectedTools.slice();
+    savedConfig.selected_kb_ids = capabilityState.selectedKbs.slice();
+  }
+  return saved;
+}
+function isSkillActive(tool) {
+  if (!tool || !tool.enabled) return false;
+  return !capabilityState.selectionSupported || capabilityState.selectedTools.includes(tool.name);
+}
+async function setSkillEnabled(tool, enabled) {
+  await request(`/api/tools/${encodeURIComponent(tool.name)}/enabled`, "PUT", {enabled});
+  if (capabilityState.selectionSupported) {
+    const nextTools = enabled
+      ? [...capabilityState.selectedTools, tool.name]
+      : capabilityState.selectedTools.filter(id => id !== tool.name);
+    await syncAssistantSelection(nextTools, capabilityState.selectedKbs);
+  }
+  const catalog = await request("/api/tools");
+  updateCapabilityCatalog(catalog);
 }
 function syncWeatherCard() {
   const city = el("weather_default_city");
@@ -1405,24 +1536,24 @@ function applyWeatherSettings(data) {
   syncWeatherCard();
 }
 function weatherHeading() {
-  const titleWrap = node("div","capability-item-title"); titleWrap.append(node("h3","","天气")); return titleWrap;
+  const titleWrap = node("div","capability-item-title"); titleWrap.append(node("h3","","天气查询")); return titleWrap;
 }
 function weatherToolCard(tool) {
+  const active = isSkillActive(tool);
   const card = node("div","capability-item"), header = node("div","capability-item-header");
   header.append(weatherHeading());
   const toggleLabel = node("label","checkbox-control"), toggle = node("input");
-  toggle.type = "checkbox"; toggle.id = "weather_enabled"; toggle.checked = Boolean(tool.enabled);
-  toggle.setAttribute("aria-label","启用天气工具");
-  const toggleText = document.createTextNode(tool.enabled ? "已启用" : "已停用");
+  toggle.type = "checkbox"; toggle.id = "weather_enabled"; toggle.checked = active;
+  toggle.setAttribute("aria-label","开启天气查询技能");
+  const toggleText = document.createTextNode(active ? "已开启" : "已停用");
   toggle.addEventListener("change", async () => {
-    const enabled = toggle.checked, previous = Boolean(tool.enabled);
+    const enabled = toggle.checked, previous = active;
     toggle.disabled = true;
     try {
-      await request(`/api/tools/${encodeURIComponent(tool.name)}/enabled`,"PUT",{enabled});
-      tool.enabled = enabled; savedWeather.enabled = enabled;
+      await setSkillEnabled(tool, enabled);
+      savedWeather.enabled = enabled;
       if (savedConfig) savedConfig.weather_enabled = enabled;
-      toggleText.nodeValue = enabled ? "已启用" : "已停用";
-      capabilityNotice(enabled ? "天气已启用。" : "天气已停用。");
+      capabilityNotice(enabled ? "已为 Agent 开启天气查询。" : "已停用天气查询。");
     } catch (error) {
       toggle.checked = previous;
       capabilityNotice(error.message, true);
@@ -1437,7 +1568,6 @@ function weatherToolCard(tool) {
     if (value === (savedWeather.city || "")) return;
     city.disabled = true;
     try {
-      // 只提交城市，不整包提交设置，避免顺带保存角色页未保存的草稿或覆盖运行时配置。
       const data = await request("/api/settings/assistant","PUT",{weather_default_city: value});
       if (data && data.text) { savedConfig = data.text; savedTtsConfig = data.tts; }
       savedWeather.city = (data && data.text && typeof data.text.weather_default_city === "string") ? data.text.weather_default_city : value;
@@ -1450,7 +1580,7 @@ function weatherToolCard(tool) {
   city.addEventListener("change", saveCity);
   city.addEventListener("keydown", event => {if (event.key === "Enter") {event.preventDefault(); saveCity();}});
   row.append(city); details.append(summary,row);
-  card.append(header,node("p","small-note",tool.description || "允许助手查询天气（数据来自 Open-Meteo，无需密钥）。"),details);
+  card.append(header,node("p","small-note",tool.description || "允许 Agent 查询实时与未来天气（Open-Meteo，无需密钥）。"),details);
   return card;
 }
 function weatherHeadingPair(toggleLabel) {
@@ -1461,14 +1591,51 @@ function weatherUnavailableCard(message) {
   card.append(header,node("p","small-note",message));
   return card;
 }
+function desktopToolCard(tool) {
+  const active = isSkillActive(tool);
+  const card = node("div", "capability-item"), header = node("div", "capability-item-header");
+  const titleWrap = node("div", "capability-item-title");
+  titleWrap.append(node("h3", "", "个人电脑操控（Windows / Mac）"), node("span", "capability-state-tag", "看屏与键鼠需确认"));
+  header.append(titleWrap);
+  const toggleLabel = node("label", "checkbox-control"), toggle = node("input");
+  toggle.type = "checkbox"; toggle.checked = active;
+  const toggleText = document.createTextNode(active ? "已开启" : "已停用");
+  toggle.addEventListener("change", () => {
+    const enabled = toggle.checked; toggle.checked = active;
+    capabilityAction(async () => {
+      await setSkillEnabled(tool, enabled);
+      if (savedConfig) savedConfig.desktop_enabled = enabled;
+      capabilityNotice(enabled ? "已开启个人电脑操控技能；请在「终端节点」连接 Mac 或 Windows。" : "已停用个人电脑操控技能。");
+    });
+  });
+  toggleLabel.append(toggle, toggleText); header.append(toggleLabel);
+  card.append(
+    header,
+    node("p", "small-note", tool.description || "跨平台连接个人 Windows / macOS 电脑，支持截屏观察（Computer Use）、读取文件/剪贴板，并在你确认后点击界面、打开应用或执行命令。"),
+  );
+  const actions = node("div", "capability-item-actions");
+  const goDevices = capabilityButton("连接或查看电脑节点 →", () => navigate("devices"));
+  actions.append(goDevices);
+  card.append(actions);
+  return card;
+}
+const CAPABILITY_LABELS = {
+  get_weather: "天气查询",
+  search_m5stack: "M5 官方资料",
+  desktop_control: "个人电脑操控 (Win/Mac)",
+};
 function capabilityItems() {
   const items = [];
   const weather = capabilityState.tools.find(tool => tool.name === "get_weather");
-  items.push({key:"get_weather", title:"天气", type:"weather", available:Boolean(weather), enabled:weather ? Boolean(weather.enabled) : false, tool:weather || null});
+  items.push({key:"get_weather", title:CAPABILITY_LABELS.get_weather, type:"weather", available:Boolean(weather), enabled:isSkillActive(weather), tool:weather || null});
+  const desktop = capabilityState.tools.find(tool => tool.name === "desktop_control");
+  if (desktop) {
+    items.push({key:desktop.name, title:CAPABILITY_LABELS.desktop_control, type:"desktop", available:true, enabled:isSkillActive(desktop), tool:desktop});
+  }
   for (const tool of capabilityState.tools) {
-    if (tool.name === "get_weather") continue;
-    if (tool.kind === "personal") continue; // 个人知识库检索由助手选入知识库驱动，不单列工具项
-    items.push({key:tool.name, title:tool.kind === "official" ? "M5 官方资料" : tool.name, type:tool.kind, available:true, enabled:Boolean(tool.enabled), tool});
+    if (tool.name === "get_weather" || tool.name === "desktop_control") continue;
+    if (tool.kind === "personal") continue; // 个人知识库检索在「个人知识库」页签按库直接开关
+    items.push({key:tool.name, title:CAPABILITY_LABELS[tool.name] || tool.name, type:tool.kind, available:true, enabled:isSkillActive(tool), tool});
   }
   return items;
 }
@@ -1481,7 +1648,7 @@ function renderCapabilityTools() {
   for (const item of items) {
     const row = node("button","cap-list-item"); row.type = "button"; row.dataset.key = item.key;
     if (item.key === capabilityState.selectedCapability) row.classList.add("active");
-    const state = node("span","cap-list-state", !item.available ? "不可用" : item.enabled ? "已启用" : "已停用");
+    const state = node("span","cap-list-state", !item.available ? "不可用" : item.enabled ? "已开启" : "已停用");
     state.dataset.state = !item.available ? "unavailable" : item.enabled ? "on" : "off";
     row.append(node("span","cap-list-title", item.title), state);
     row.addEventListener("click", () => { capabilityState.selectedCapability = item.key; renderCapabilityTools(); });
@@ -1491,106 +1658,52 @@ function renderCapabilityTools() {
 }
 function renderCapabilityDetail(item) {
   const detail = el("capability-detail"); detail.replaceChildren();
-  if (!item) { detail.append(node("p","small-note","暂无 API 能力。")); return; }
+  if (!item) { detail.append(node("p","small-note","暂无技能。")); return; }
   if (item.type === "weather") {
     if (!item.available) { detail.append(weatherUnavailableCard("天气工具当前不可用（后端未提供 get_weather）。")); return; }
     detail.append(weatherToolCard(item.tool)); return;
   }
+  if (item.type === "desktop") {
+    detail.append(desktopToolCard(item.tool)); return;
+  }
   detail.append(toolDetailCard(item.tool));
 }
 function toolDetailCard(tool) {
+  const active = isSkillActive(tool);
   const card = node("div","capability-item");
   const header = node("div","capability-item-header");
-  header.append(node("h3","", tool.kind === "official" ? "M5 官方资料" : tool.name));
+  header.append(node("h3","", CAPABILITY_LABELS[tool.name] || tool.name));
   const toggleLabel = node("label","checkbox-control"), toggle = node("input");
-  toggle.type = "checkbox"; toggle.checked = tool.enabled;
-  const toggleText = document.createTextNode(tool.enabled ? "已启用" : "已停用");
+  toggle.type = "checkbox"; toggle.checked = active;
+  const toggleText = document.createTextNode(active ? "已开启" : "已停用");
   toggle.addEventListener("change", () => {
-    const enabled = toggle.checked; toggle.checked = tool.enabled;
+    const enabled = toggle.checked; toggle.checked = active;
     capabilityAction(async () => {
-      updateCapabilityCatalog(await request(`/api/tools/${encodeURIComponent(tool.name)}/enabled`,"PUT",{enabled}));
-      capabilityNotice(enabled ? "已启用。" : "已停用。");
+      await setSkillEnabled(tool, enabled);
+      capabilityNotice(enabled ? `已为 Agent 开启「${CAPABILITY_LABELS[tool.name] || tool.name}」。` : "已停用。");
     });
   });
   toggleLabel.append(toggle,toggleText); header.append(toggleLabel);
   card.append(header,node("p","small-note",tool.description || ""));
   if (tool.kind === "http") card.append(node("p","small-note",`${tool.request?.method || tool.method} ${tool.request?.url || tool.url}`));
   const actions = node("div","capability-item-actions");
-  const call = capabilityButton("手动调用", () => openToolCall(tool)); call.disabled = !tool.enabled; call.dataset.requiresEnabled = String(tool.enabled); actions.append(call);
+  const call = capabilityButton("手动测试", () => openToolCall(tool)); call.disabled = !tool.enabled; call.dataset.requiresEnabled = String(tool.enabled); actions.append(call);
   if (tool.kind === "http") {
     actions.append(capabilityButton("编辑", () => editExternalTool(tool)), capabilityButton("删除", () => {
-      if (!confirm(`删除外部工具「${tool.name}」及其配置？`)) return;
-      capabilityAction(async () => {await request(`/api/tools/${encodeURIComponent(tool.name)}`,"DELETE"); updateCapabilityCatalog(await request("/api/tools")); capabilityNotice("工具已删除。");});
+      if (!confirm(`删除自定义工具「${tool.name}」及其配置？`)) return;
+      capabilityAction(async () => {
+        if (capabilityState.selectionSupported && capabilityState.selectedTools.includes(tool.name)) {
+          await syncAssistantSelection(capabilityState.selectedTools.filter(id => id !== tool.name), capabilityState.selectedKbs);
+        }
+        await request(`/api/tools/${encodeURIComponent(tool.name)}`,"DELETE");
+        updateCapabilityCatalog(await request("/api/tools"));
+        capabilityNotice("工具已删除。");
+      });
     }));
   }
   card.append(actions);
   return card;
 }
-function renderAssistantScope() {
-  const toolBox = el("assistant-tool-select"), kbBox = el("assistant-kb-select");
-  if (!toolBox || !kbBox) return;
-  const ready = capabilityState.selectionSupported && capabilityState.toolsLoaded && capabilityState.librariesLoaded;
-  const disabled = !ready || capabilityState.selectionSaving;
-  toolBox.replaceChildren();
-  if (!capabilityState.toolsLoaded) toolBox.append(node("p","small-note", capabilityState.loading ? "API 能力加载中…" : "API 能力加载失败，请刷新重试。"));
-  else for (const item of capabilityItems()) {
-    const label = node("label","scope-item");
-    const cb = node("input"); cb.type = "checkbox"; cb.dataset.toolId = item.key;
-    cb.checked = capabilityState.selectionSupported && capabilityState.selectedTools.includes(item.key);
-    cb.disabled = disabled;
-    cb.addEventListener("change", () => {
-      const set = new Set(capabilityState.selectedTools);
-      if (cb.checked) set.add(item.key); else set.delete(item.key);
-      capabilityState.selectedTools = Array.from(set);
-    });
-    label.append(cb, document.createTextNode(`${item.title}${item.available ? "" : "（不可用）"}`));
-    toolBox.append(label);
-  }
-  kbBox.replaceChildren();
-  if (!capabilityState.librariesLoaded) kbBox.append(node("p","small-note", capabilityState.librariesError ? "知识库加载失败，请刷新重试。" : "知识库加载中…"));
-  else if (!capabilityState.libraries.length) kbBox.append(node("p","small-note","还没有知识库"));
-  else for (const lib of capabilityState.libraries) {
-    const label = node("label","scope-item");
-    const cb = node("input"); cb.type = "checkbox"; cb.dataset.kbId = lib.id;
-    cb.checked = capabilityState.selectionSupported && capabilityState.selectedKbs.includes(lib.id);
-    cb.disabled = disabled;
-    cb.addEventListener("change", () => {
-      const set = new Set(capabilityState.selectedKbs);
-      if (cb.checked) set.add(lib.id); else set.delete(lib.id);
-      capabilityState.selectedKbs = Array.from(set);
-    });
-    label.append(cb, document.createTextNode(`${lib.name}${lib.document_count != null ? `（${lib.document_count} 份）` : ""}`));
-    kbBox.append(label);
-  }
-  const saveBtn = el("assistant-selection-save");
-  if (saveBtn) saveBtn.disabled = !ready || capabilityState.selectionSaving;
-  const note = el("assistant-scope-note");
-  if (note) note.textContent = ready
-    ? "勾选＝加入本助手；一项都不勾＝不启用对应能力（不会默认全选）。其余在「能力管理」启停。"
-    : (capabilityState.selectionError ? "能力选择暂不可用，请刷新重试。" : "能力选择加载中…");
-}
-el("assistant-selection-save").addEventListener("click", async () => {
-  if (capabilityState.selectionSaving) return;
-  const status = el("assistant-selection-status"), btn = el("assistant-selection-save");
-  const payload = {
-    selected_tool_ids: Array.from(document.querySelectorAll("#assistant-tool-select input:checked")).map(input => input.dataset.toolId),
-    selected_kb_ids: Array.from(document.querySelectorAll("#assistant-kb-select input:checked")).map(input => input.dataset.kbId)
-  };
-  capabilityState.selectionSaving = true; if (btn) btn.disabled = true;
-  status.textContent = "正在保存…"; status.dataset.kind = "";
-  const sameSet = (a,b) => a.length === b.length && a.every(x => b.includes(x));
-  try {
-    await request("/api/assistant/selection","PUT",payload);
-    const readback = await request("/api/assistant/selection");
-    const rt = Array.isArray(readback.selected_tool_ids) ? readback.selected_tool_ids : [];
-    const rk = Array.isArray(readback.selected_kb_ids) ? readback.selected_kb_ids : [];
-    if (sameSet(rt,payload.selected_tool_ids) && sameSet(rk,payload.selected_kb_ids)) {
-      capabilityState.selectedTools = rt; capabilityState.selectedKbs = rk;
-      status.textContent = (rt.length || rk.length) ? "已保存。" : "已保存：未选择任何能力。";
-    } else { status.textContent = "保存后读回不一致，请重试。"; status.dataset.kind = "error"; }
-  } catch (error) { status.textContent = error.message; status.dataset.kind = "error"; }
-  finally { capabilityState.selectionSaving = false; renderAssistantScope(); }
-});
 function renderKbLibraries() {
   const box = el("kb-library-list"); if (!box) return;
   box.replaceChildren();
@@ -1610,18 +1723,43 @@ function renderKbLibraries() {
     name.addEventListener("click", () => { capabilityState.activeLibraryId = lib.id; renderKbLibraries(); reloadKnowledgeDocuments().catch(error => capabilityNotice(error.message,true)); });
     row.append(name);
     row.append(node("span","kb-lib-count", `${lib.document_count != null ? lib.document_count : "?"} 份`));
+    if (capabilityState.selectionSupported) {
+      const useWrap = node("label", "kb-lib-use"), cb = node("input");
+      cb.type = "checkbox"; cb.checked = capabilityState.selectedKbs.includes(lib.id);
+      cb.setAttribute("aria-label", `允许 Agent 检索知识库 ${lib.name}`);
+      const badge = node("span", "", cb.checked ? "已挂载" : "未挂载");
+      cb.addEventListener("click", event => event.stopPropagation());
+      cb.addEventListener("change", () => {
+        const nextChecked = cb.checked; cb.checked = !nextChecked;
+        capabilityAction(async () => {
+          const nextKbs = nextChecked
+            ? [...capabilityState.selectedKbs, lib.id]
+            : capabilityState.selectedKbs.filter(id => id !== lib.id);
+          await syncAssistantSelection(capabilityState.selectedTools, nextKbs);
+          renderKbLibraries();
+          capabilityNotice(nextChecked ? `已将「${lib.name}」挂载给 Agent 检索。` : `已取消挂载「${lib.name}」。`);
+        });
+      });
+      useWrap.append(cb, badge);
+      row.append(useWrap);
+    }
     if (!lib.is_default) {
       const acts = node("span","kb-lib-actions");
       const rename = capabilityButton("改名", () => openKbLibraryDialog(lib));
       const del = capabilityButton("删除", () => {
         if (!confirm(`删除知识库「${lib.name}」？空库才能删，默认库不能删。`)) return;
         capabilityAction(async () => {
-          try { await request(`/api/knowledge/libraries/${encodeURIComponent(lib.id)}`,"DELETE"); }
-          catch (error) { capabilityNotice(error.message,true); return; }
+          if (capabilityState.selectionSupported && capabilityState.selectedKbs.includes(lib.id)) {
+            await syncAssistantSelection(
+              capabilityState.selectedTools,
+              capabilityState.selectedKbs.filter(id => id !== lib.id),
+            );
+          }
+          await request(`/api/knowledge/libraries/${encodeURIComponent(lib.id)}`,"DELETE");
           if (capabilityState.activeLibraryId === lib.id) capabilityState.activeLibraryId = null;
           await loadKbLibraries();
-          capabilityState.selectedKbs = capabilityState.selectedKbs.filter(id => capabilityState.libraries.some(item => item.id === id));
-          await reloadKnowledgeDocuments().catch(() => {}); renderAssistantScope();
+          await reloadKnowledgeDocuments().catch(() => {});
+          renderKbLibraries();
           capabilityNotice("知识库已删除。");
         });
       });
@@ -1651,11 +1789,16 @@ el("kb-library-form").addEventListener("submit", event => {
       else created = await request("/api/knowledge/libraries","POST",{name});
     } catch (error) { status.textContent = error.message; status.dataset.kind = "error"; return; }
     el("kb-library-dialog").close();
-    if (created && created.id) capabilityState.activeLibraryId = created.id; // 新建后选中它并进入其上传/资料
+    if (created && created.id) {
+      capabilityState.activeLibraryId = created.id;
+      if (capabilityState.selectionSupported) {
+        await syncAssistantSelection(capabilityState.selectedTools, [...capabilityState.selectedKbs, created.id]).catch(() => {});
+      }
+    }
     await loadKbLibraries();
     await reloadKnowledgeDocuments().catch(() => {});
-    renderAssistantScope();
-    capabilityNotice(kbLibraryEditing ? "知识库已重命名。" : "知识库已新建。");
+    renderKbLibraries();
+    capabilityNotice(kbLibraryEditing ? "知识库已重命名。" : "知识库已新建并默认挂载给 Agent。");
   });
 });
 const apiWorkbench = { tool:null, baseline:"", loading:false, saving:false, debug:null, pending:null, response:null, generation:0, mode:"visual" };
@@ -2898,7 +3041,97 @@ for (const [id,key] of [["device-copy-local","local"],["device-copy-original","o
     catch { notice("无法写入剪贴板，请在输入框中选择地址后手动复制。","error"); }
   });
 }
-setInterval(() => { if (state.view === "devices" && !deviceBusy) loadDevices().catch(() => { el("device-state").textContent = "无法连接电脑服务"; }); },3000);
+let desktopData = null;
+let desktopBusy = false;
+function renderDesktopNodes(data) {
+  desktopData = data;
+  el("desktop-state").textContent = data.online_count > 0
+    ? `已连接 ${data.online_count} 台个人电脑`
+    : "个人电脑节点（暂无在线电脑）";
+  el("desktop-state-detail").textContent = data.last_error || "连接你的 Windows 或 Mac 电脑后，Agent 可看屏幕（Computer Use）、读写文件/剪贴板并请求确认操控。";
+  el("desktop-cmd-macos").value = data.commands?.macos || "";
+  el("desktop-cmd-windows").value = data.commands?.windows || "";
+  const list = el("desktop-nodes"); list.replaceChildren();
+  const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+  if (!nodes.length) {
+    list.append(node("p", "small-note", "尚未连接任何 Windows 或 Mac 节点；展开下方「接入新电脑」复制启动命令。"));
+    return;
+  }
+  for (const item of nodes) {
+    const card = node("div", `desktop-node-card${item.online ? " online" : ""}`);
+    const head = node("div", "desktop-node-head");
+    const titleWrap = node("div", "desktop-node-title");
+    titleWrap.append(node("strong", "", item.name || item.node_id));
+    titleWrap.append(node("span", "desktop-os-badge", item.os === "macos" ? "macOS" : item.os === "windows" ? "Windows" : item.os));
+    if (item.is_default) titleWrap.append(node("span", "desktop-default-badge", "默认"));
+    head.append(titleWrap);
+    head.append(node("span", `desktop-status-dot ${item.online ? "online" : "offline"}`, item.online ? "在线" : "离线"));
+    card.append(head);
+    const screenInfo = item.screen?.width ? `${item.screen.width}×${item.screen.height}` : "未知分辨率";
+    const meta = [item.hostname || item.node_id, screenInfo, ...(item.capabilities || [])].filter(Boolean).join(" · ");
+    card.append(node("p", "small-note", meta));
+    const acts = node("div", "capability-item-actions");
+    if (item.online) {
+      const snapBtn = node("button", "secondary-button", "查看当前屏幕"); snapBtn.type = "button"; snapBtn.disabled = desktopBusy;
+      snapBtn.addEventListener("click", () => desktopAction(async () => {
+        const res = await request(`/api/desktop/nodes/${encodeURIComponent(item.node_id)}/screenshot`, "POST");
+        const preview = el("desktop-screen-preview"), img = el("desktop-preview-img");
+        const win = res.active_window?.title || res.active_window?.app || "";
+        el("desktop-preview-meta").textContent = `${item.name} · ${res.screen?.width || 0}×${res.screen?.height || 0}${win ? ` · ${win}` : ""}`;
+        img.src = appPath(`/api/desktop/nodes/${encodeURIComponent(item.node_id)}/screenshot?t=${Date.now()}`);
+        preview.hidden = false;
+      }));
+      acts.append(snapBtn);
+    }
+    if (!item.is_default) {
+      const defBtn = node("button", "secondary-button", "设为默认"); defBtn.type = "button"; defBtn.disabled = desktopBusy;
+      defBtn.addEventListener("click", () => desktopAction(async () => {
+        renderDesktopNodes(await request("/api/desktop/default", "PUT", {node_id: item.node_id}));
+        notice(`已将「${item.name}」设为默认电脑。`, "success");
+      }));
+      acts.append(defBtn);
+    }
+    const delBtn = node("button", "text-button", "移除记录"); delBtn.type = "button"; delBtn.disabled = desktopBusy;
+    delBtn.addEventListener("click", () => {
+      if (!confirm(`移除电脑节点「${item.name}」的记录？`)) return;
+      desktopAction(async () => {
+        renderDesktopNodes(await request(`/api/desktop/nodes/${encodeURIComponent(item.node_id)}`, "DELETE"));
+      });
+    });
+    acts.append(delBtn);
+    card.append(acts);
+    list.append(card);
+  }
+}
+async function loadDesktopNodes() { renderDesktopNodes(await request("/api/desktop")); }
+async function desktopAction(action) {
+  if (desktopBusy) return;
+  desktopBusy = true;
+  if (desktopData) renderDesktopNodes(desktopData);
+  try { await action(); }
+  catch (error) { notice(error.message, "error"); }
+  finally { desktopBusy = false; if (desktopData) renderDesktopNodes(desktopData); }
+}
+el("desktop-refresh")?.addEventListener("click", () => desktopAction(() => loadDesktopNodes()));
+el("desktop-preview-close")?.addEventListener("click", () => { el("desktop-screen-preview").hidden = true; });
+el("desktop-rotate-token")?.addEventListener("click", () => {
+  if (!confirm("重置令牌后，所有已连接的 Mac / Windows 电脑都会断开并使用下方新命令重连，确定继续？")) return;
+  desktopAction(async () => {
+    renderDesktopNodes(await request("/api/desktop/token/rotate", "POST"));
+    notice("桌面节点接入令牌已重置。", "success");
+  });
+});
+for (const [btnId, inputId] of [["desktop-copy-macos", "desktop-cmd-macos"], ["desktop-copy-windows", "desktop-cmd-windows"]]) {
+  el(btnId)?.addEventListener("click", async () => {
+    const val = el(inputId)?.value; if (!val) return;
+    try { await navigator.clipboard.writeText(val); notice("启动命令已复制。", "success"); }
+    catch { notice("无法写入剪贴板，请手动选中命令复制。", "error"); }
+  });
+}
+setInterval(() => {
+  if (state.view === "devices" && !deviceBusy) loadDevices().catch(() => { el("device-state").textContent = "无法连接电脑服务"; });
+  if (state.view === "devices" && !desktopBusy) loadDesktopNodes().catch(() => {});
+}, 3000);
 function routeView() {
   const path = window.assistantPaths.routePath();
   if (path === "/settings") return {"#api":"connections", "#tts":"connections", "#role":"role", "#capabilities":"capabilities", "#insights":"insights"}[location.hash] || recalled("atoms3r.settingsSection") || "role";

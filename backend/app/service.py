@@ -158,6 +158,8 @@ class ChatService:
                         audio_status if audio_status is not None
                         else ("streamed" if status == "complete" else "interrupted")
                     )
+                    pending_approval = tool_context.pending_approval if tool_context is not None else None
+                    self._sync_approval_statuses(session)
                     session.history.append(TranscriptMessage(
                         role="assistant",
                         content=reply_text,
@@ -169,6 +171,7 @@ class ChatService:
                         status=status,
                         sources=sources,
                         tool_calls=summaries,
+                        pending_approval=pending_approval,
                         audio_status=resolved_audio,
                     ))
                 session.updated_at = datetime.now(timezone.utc)
@@ -290,6 +293,35 @@ class ChatService:
 
     def session_detail(self, session_id: UUID) -> SessionDetail:
         return SessionDetail(**self.summary(session_id).model_dump(), messages=self.get_session(session_id).history)
+
+    def _sync_approval_statuses(self, session: Session) -> bool:
+        confirmations = self.tool_gateway.confirmations
+        changed = False
+        for msg in session.history:
+            pa = getattr(msg, "pending_approval", None)
+            if isinstance(pa, dict) and pa.get("approval_id") and pa.get("status") in ("pending", "approved"):
+                latest = confirmations.approval_status(str(pa["approval_id"]))
+                if latest and latest != pa.get("status"):
+                    msg.pending_approval = {**pa, "status": latest}
+                    changed = True
+        return changed
+
+    def resolve_approval(self, approval_id: str, decision: str, session_id: UUID | None = None) -> dict:
+        result = self.tool_gateway.confirmations.decide(approval_id, decision, session_id=session_id)
+        try:
+            target_sid = UUID(result["session_id"])
+            session = self.get_session(target_sid)
+        except (ValueError, ProviderError):
+            return result
+        updated = False
+        for msg in session.history:
+            pa = getattr(msg, "pending_approval", None)
+            if isinstance(pa, dict) and pa.get("approval_id") == approval_id:
+                msg.pending_approval = {**pa, "status": result["status"]}
+                updated = True
+        if updated:
+            self.persist(target_sid)
+        return result
 
     def persist(self, session_id: UUID) -> None:
         session = self.sessions[session_id]
@@ -531,6 +563,8 @@ class ChatService:
                                 answer.estimated_cost = self.estimate_cost(answer.usage, config)
                             answer.sources = tool_context.sources()
                             answer.tool_calls = tool_context.summaries()
+                            answer.pending_approval = tool_context.pending_approval
+                            self._sync_approval_statuses(session)
                             session.updated_at = datetime.now(timezone.utc)
                             self.persist(session_id)
                         elif kind == "warning":
@@ -569,6 +603,8 @@ class ChatService:
                     answer.estimated_cost = self.estimate_cost(answer.usage, config)
                 answer.sources = tool_context.sources()
                 answer.tool_calls = tool_context.summaries()
+                answer.pending_approval = tool_context.pending_approval
+                self._sync_approval_statuses(session)
                 self.rebuild_context(session, self.settings.history_turns)
                 session.updated_at = datetime.now(timezone.utc)
                 self.persist(session_id)
@@ -622,6 +658,7 @@ class ChatService:
                 estimated_cost=answer.estimated_cost, currency=config.currency,
                 session_usage=session.usage.model_copy(), history_persisted=session.history_persisted,
                 knowledge=knowledge, sources=answer.sources, tool_calls=answer.tool_calls,
+                pending_approval=answer.pending_approval,
             ).model_dump(mode="json")
             yield "done", {**response, "turn_id": str(identity),
                            "ms": int((perf_counter() - started) * 1000),

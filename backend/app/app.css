@@ -863,3 +863,45 @@ body.voice-mode { overflow:hidden; }
 #api-workbench [hidden] {display:none!important}
 .checkbox-control[hidden] {display:none!important}
 #api-response-headers {max-height:220px;overflow:auto}
+
+/* Agent 档案 / 执行流 / 确认卡片 / 电脑节点 */
+.agent-profile-block {margin-top:18px;padding-top:16px;border-top:1px solid var(--border)}
+.agent-profile-block h3 {font-size:13px;margin:0 0 4px}
+.agent-profile-block .small-note {margin:0 0 8px}
+#agent_profile {width:100%;min-height:92px;padding:10px 12px;border:1px solid var(--input-border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;resize:vertical}
+
+.tool-pills {display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 4px}
+.tool-pill {display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border:1px solid var(--border);border-radius:999px;font-size:11.5px;color:var(--muted);background:var(--surface)}
+.tool-pill-dot {width:6px;height:6px;border-radius:50%;background:var(--success);flex-shrink:0}
+.tool-pill-blocked .tool-pill-dot {background:#c78d32}
+.tool-pill-error .tool-pill-dot,.tool-pill-cancelled .tool-pill-dot {background:var(--error)}
+
+.approval-card {margin:10px 0;padding:12px 14px;border:1px solid var(--input-border);border-left:3px solid #c78d32;border-radius:9px;background:var(--surface)}
+.approval-card.approval-approved,.approval-card.approval-consumed {border-left-color:var(--success)}
+.approval-card.approval-denied,.approval-card.approval-expired {border-left-color:var(--muted);opacity:.88}
+.approval-card-head {display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;margin-bottom:6px}
+.approval-status-badge {font-size:11px;padding:2px 8px;border:1px solid var(--border);border-radius:999px;color:var(--muted);white-space:nowrap}
+.approval-summary {font:12px Consolas,monospace;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 9px;color:var(--text);overflow-wrap:anywhere;margin-bottom:10px}
+.approval-actions {display:flex;flex-wrap:wrap;gap:8px}
+
+.kb-lib-use {display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);cursor:pointer;padding:2px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg);flex-shrink:0}
+.kb-lib-use input {width:13px;height:13px;accent-color:var(--primary);margin:0}
+
+.desktop-panel {padding-bottom:24px;margin-bottom:26px;border-bottom:1px solid var(--border)}
+.desktop-nodes-list {display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:14px 0}
+.desktop-node-card {border:1px solid var(--border);border-radius:9px;padding:13px 14px;background:var(--bg);min-width:0}
+.desktop-node-card.online {border-color:color-mix(in srgb,var(--success) 45%,var(--border))}
+.desktop-node-head {display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.desktop-node-title {display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}
+.desktop-os-badge,.desktop-default-badge {font-size:11px;padding:1px 7px;border:1px solid var(--border);border-radius:999px;color:var(--muted)}
+.desktop-default-badge {color:var(--text);border-color:var(--input-border)}
+.desktop-status-dot {font-size:11.5px;white-space:nowrap;color:var(--muted)}
+.desktop-status-dot.online {color:var(--success);font-weight:600}
+.desktop-screen-preview {margin:14px 0;padding:12px;border:1px solid var(--border);border-radius:9px;background:var(--bg)}
+.desktop-preview-head {display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.desktop-screen-preview img {display:block;width:100%;max-height:420px;object-fit:contain;border-radius:6px;border:1px solid var(--border);background:var(--surface)}
+.desktop-setup-box {margin-top:12px}
+.desktop-cmd-block {margin:10px 0}
+.desktop-cmd-block label {display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.desktop-token-actions {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:12px}
+

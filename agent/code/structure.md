@@ -19,12 +19,12 @@
 | 位置 | 职责 |
 | --- | --- |
 | `backend/run_devices.py` | 单进程管理端/设备网关启动；Windows8000/8003，云端8010/8013 |
-| `backend/app/main.py` / `devices.py` | 管理路由、OTA/设备WS鉴权、协商与MCP控制 |
+| `backend/app/main.py` / `devices.py` / `desktop.py` | 管理路由、OTA/设备WS、Windows/Mac桌面节点WS(`/desktop/v1/`)与屏幕观察 |
 | `realtime.py` / `realtime_text.py` | 百炼实时语音与实时模型文字会话/工具反馈；两种入口时序不同 |
 | `device_realtime.py` / `voice_transport.py` | 设备实时桥接、Opus/发送节奏/预缓冲、播放结束与取消隔离 |
 | `voice_chat.py` / `conversation.py` / `device_turn.py` | 网页/设备对话协调及显式分模型路径，不是切换实时音色的入口 |
-| `prompt_builder.py` / `prompt_context.py` / `speech_text.py` | 角色/规则/时间/渠道提示与朗读规范化 |
-| `tools.py` / `tool_dialogue.py` | 注册与选用范围、Schema/权限/控制意图、业务工具循环 |
+| `prompt_builder.py` / `prompt_context.py` / `speech_text.py` | 角色/工作档案/规则/时间/渠道提示与朗读规范化 |
+| `tools.py` / `desktop_tools.py` / `tool_dialogue.py` / `tool_gateway.py` | 注册/桌面控制工具、权限与确认闭环(`approval_id`/TTL)、工具循环与审计脱敏 |
 | `text_tool_selection.py` | 网页实时文字候选并集与同轮补充加载；语音尚未接入 |
 | `conversation_memory.py` | 活动历史预算与当前会话原文按需检索，无跨会话画像 |
 | `weather.py` / `knowledge.py` / `api_requests.py` | 天气、M5官方只读资料、自定义HTTP API |
@@ -35,8 +35,9 @@
 | `audio_fx.py` / `audio_metrics.py` | 原语速/音调后处理与被动PCM/网关计量；不长期保存音频 |
 | `qwen_voices.py` / `voices.py` / `tts.py` | 百炼/分模型音色元数据及显式TTS适配，不混接实时主线 |
 | `ack_audio.py` / `community.py` / `speech_bridge.py` | 历史应答音、已有社区代码桥、本地worker；不是新主线依赖 |
-| `app.html` / `app.js` / `app.css` / `paths.js` | 原生管理前端、用量展示及部署子路径支持 |
+| `app.html` / `app.js` / `app.css` / `paths.js` | Agent 优先管理后台、确认卡片/执行胶囊、电脑节点控制台与子路径支持 |
 | `voice.js` / `voice-capture.js` | 网页音频采集、真实状态与播放 |
+| `desktop_node/` (`client.py` / `platform_windows.py` / `platform_macos.py`) | Windows 与 macOS 跨平台桌面节点客户端（位于项目根 `desktop_node/`） |
 
 上述后端文件除首行外均位于 `backend/app/`。细节按实际代码核对，不因共享模块断言所有渠道都已通过。
 

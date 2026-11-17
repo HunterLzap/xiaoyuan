@@ -5,9 +5,9 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 import json
 import re
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from .audit_store import redact_value
 from .llm import ProviderError
@@ -21,10 +21,21 @@ _DENY_RE = re.compile(
 
 
 class SideEffectConfirmationRequired(Exception):
-    def __init__(self, tool_name: str, summary: str):
+    def __init__(
+        self,
+        tool_name: str,
+        summary: str,
+        *,
+        approval_id: str = "",
+        permission: str = "write",
+        arguments_preview: dict | None = None,
+    ):
         self.code = "confirmation_required"
         self.tool_name = tool_name
         self.summary = summary
+        self.approval_id = approval_id
+        self.permission = permission
+        self.arguments_preview = arguments_preview or {}
         self.message = f"该操作（{tool_name}）会修改外部状态或产生费用，参数：{summary}。确认执行吗？"
         super().__init__(self.message)
 
@@ -42,12 +53,46 @@ def _args_digest(arguments: dict) -> str:
     return sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
+def _preview_arguments(arguments: Any, secrets=()) -> Any:
+    redacted = redact_value(arguments, secrets)
+    if isinstance(redacted, dict):
+        preview = {}
+        for k, v in list(redacted.items())[:12]:
+            if isinstance(v, str) and len(v) > 120:
+                preview[k] = v[:117] + "..."
+            else:
+                preview[k] = v
+        return preview
+    return redacted
+
+
 @dataclass
 class _PendingAction:
+    approval_id: str
+    session_id: UUID
     tool_name: str
     args_digest: str
     turn_id: UUID
     summary: str
+    permission: str = "write"
+    arguments_preview: dict = field(default_factory=dict)
+    created_at: float = field(default_factory=monotonic)
+    expires_at: float = field(default_factory=lambda: monotonic() + 300.0)
+    status: str = "pending"  # pending | approved | denied | expired | consumed | superseded
+
+    def to_public(self) -> dict:
+        remaining = max(0, int(self.expires_at - monotonic()))
+        return {
+            "approval_id": self.approval_id,
+            "session_id": str(self.session_id),
+            "turn_id": str(self.turn_id),
+            "tool_name": self.tool_name,
+            "permission": self.permission,
+            "summary": self.summary,
+            "arguments": self.arguments_preview,
+            "status": self.status,
+            "expires_in_seconds": remaining,
+        }
 
 
 @dataclass
@@ -56,6 +101,7 @@ class _SessionConfirmationState:
     confirmed_for_turn: UUID | None = None
     confirmed_tool: str = ""
     confirmed_digest: str = ""
+    confirmed_summary: str = ""
     denied_for_turn: UUID | None = None
     denied_tool: str = ""
 
@@ -63,34 +109,67 @@ class _SessionConfirmationState:
 class SideEffectConfirmationStore:
     """Tracks generic write/paid tool confirmation per session."""
 
-    def __init__(self):
+    def __init__(self, ttl_seconds: float = 300.0):
+        self.ttl_seconds = max(5.0, float(ttl_seconds))
         self._sessions: dict[UUID, _SessionConfirmationState] = {}
+        self._approvals: dict[str, _PendingAction] = {}
+
+    def _prune_approvals(self) -> None:
+        now = monotonic()
+        for item in self._approvals.values():
+            if item.status == "pending" and now > item.expires_at:
+                item.status = "expired"
+                state = self._sessions.get(item.session_id)
+                if state is not None and state.pending is item:
+                    state.pending = None
+        if len(self._approvals) > 512:
+            for key in list(self._approvals)[: len(self._approvals) - 256]:
+                self._approvals.pop(key, None)
 
     def begin_turn(self, session_id: UUID, turn_id: UUID, question: str) -> None:
+        self._prune_approvals()
         state = self._sessions.get(session_id)
         if state is None or state.pending is None:
             return
         pending = state.pending
         if pending.turn_id == turn_id:
             return
+        if monotonic() > pending.expires_at:
+            pending.status = "expired"
+            state.pending = None
+            return
         text = (question or "").strip()
         if not text:
             return
         if _DENY_RE.search(text):
+            pending.status = "denied"
             state.denied_for_turn = turn_id
             state.denied_tool = pending.tool_name
             state.pending = None
             return
-        if _CONFIRM_RE.match(text):
+        if pending.status == "approved" or _CONFIRM_RE.match(text):
+            pending.status = "consumed"
             state.confirmed_for_turn = turn_id
             state.confirmed_tool = pending.tool_name
             state.confirmed_digest = pending.args_digest
+            state.confirmed_summary = pending.summary
             state.pending = None
             return
         # New unrelated question clears stale pending confirmation safely.
+        pending.status = "expired"
         state.pending = None
 
-    def authorize(self, session_id: UUID, turn_id: UUID, tool_name: str, arguments: dict) -> str:
+    def authorize(
+        self,
+        session_id: UUID,
+        turn_id: UUID,
+        tool_name: str,
+        arguments: dict,
+        *,
+        permission: str = "write",
+        secrets=(),
+    ) -> str:
+        self._prune_approvals()
         state = self._sessions.setdefault(session_id, _SessionConfirmationState())
         digest = _args_digest(arguments)
         if (state.confirmed_for_turn == turn_id
@@ -99,19 +178,84 @@ class SideEffectConfirmationStore:
             return "execute"
         if state.denied_for_turn == turn_id and state.denied_tool == tool_name:
             return "denied"
-        summary = json.dumps(arguments, ensure_ascii=False)
+        if state.pending is not None and state.pending.status == "pending":
+            state.pending.status = "superseded"
+        preview = _preview_arguments(arguments, secrets)
+        summary = json.dumps(preview, ensure_ascii=False)
         if len(summary) > 200:
             summary = summary[:197] + "..."
-        state.pending = _PendingAction(
+        action = _PendingAction(
+            approval_id=uuid4().hex[:16],
+            session_id=session_id,
             tool_name=tool_name,
             args_digest=digest,
             turn_id=turn_id,
             summary=summary,
+            permission=permission,
+            arguments_preview=preview if isinstance(preview, dict) else {},
+            expires_at=monotonic() + self.ttl_seconds,
         )
+        state.pending = action
+        self._approvals[action.approval_id] = action
         return "ask"
+
+    def latest_for_turn(self, session_id: UUID, turn_id: UUID) -> dict | None:
+        self._prune_approvals()
+        state = self._sessions.get(session_id)
+        if state is None or state.pending is None or state.pending.turn_id != turn_id:
+            return None
+        return state.pending.to_public()
+
+    def confirmed_action(self, session_id: UUID, turn_id: UUID) -> dict | None:
+        state = self._sessions.get(session_id)
+        if state is None or state.confirmed_for_turn != turn_id or not state.confirmed_tool:
+            return None
+        return {"tool_name": state.confirmed_tool, "summary": state.confirmed_summary}
+
+    def denied_action(self, session_id: UUID, turn_id: UUID) -> dict | None:
+        state = self._sessions.get(session_id)
+        if state is None or state.denied_for_turn != turn_id or not state.denied_tool:
+            return None
+        return {"tool_name": state.denied_tool}
+
+    def approval_status(self, approval_id: str) -> str | None:
+        self._prune_approvals()
+        action = self._approvals.get(approval_id)
+        return action.status if action is not None else None
+
+    def get(self, approval_id: str) -> dict | None:
+        self._prune_approvals()
+        action = self._approvals.get(approval_id)
+        return action.to_public() if action is not None else None
+
+    def decide(self, approval_id: str, decision: str, session_id: UUID | None = None) -> dict:
+        self._prune_approvals()
+        action = self._approvals.get(approval_id)
+        if action is None:
+            raise ProviderError(404, "approval_not_found", "待确认操作不存在或已过期。")
+        if session_id is not None and action.session_id != session_id:
+            raise ProviderError(403, "approval_session_mismatch", "该确认请求不属于当前会话。")
+        if action.status == "expired":
+            raise ProviderError(409, "approval_expired", "该确认请求已超时，请重新发起请求。")
+        if action.status != "pending":
+            raise ProviderError(409, "approval_closed", f"该操作已处于 {action.status} 状态，不能重复确认。")
+        state = self._sessions.setdefault(action.session_id, _SessionConfirmationState())
+        if decision == "deny":
+            action.status = "denied"
+            if state.pending is action:
+                state.pending = None
+        elif decision == "approve":
+            action.status = "approved"
+            state.pending = action
+        else:
+            raise ProviderError(422, "invalid_decision", "仅支持 approve 或 deny。")
+        return action.to_public()
 
     def clear_session(self, session_id: UUID) -> None:
         self._sessions.pop(session_id, None)
+        for key, item in list(self._approvals.items()):
+            if item.session_id == session_id:
+                self._approvals.pop(key, None)
 
 
 class ToolGateway:
@@ -196,12 +340,21 @@ class ToolGateway:
             raise ProviderError(403, "tool_not_allowed", "工具已被取消选用或停用，未执行。")
         confirmed = True
         if tool.spec.permission in ("write", "paid"):
-            decision = self.confirmations.authorize(session_id, turn_id, name, arguments)
+            decision = self.confirmations.authorize(
+                session_id, turn_id, name, arguments,
+                permission=tool.spec.permission, secrets=secrets,
+            )
             if decision == "denied":
                 raise SideEffectConfirmationDenied(name)
             if decision == "ask":
-                summary = json.dumps(arguments, ensure_ascii=False)[:200]
-                raise SideEffectConfirmationRequired(name, summary)
+                pending = self.confirmations.latest_for_turn(session_id, turn_id)
+                summary = pending["summary"] if pending else json.dumps(arguments, ensure_ascii=False)[:200]
+                raise SideEffectConfirmationRequired(
+                    name, summary,
+                    approval_id=pending["approval_id"] if pending else "",
+                    permission=tool.spec.permission,
+                    arguments_preview=pending.get("arguments") if pending else None,
+                )
             confirmed = True
         result = await registry.call(name, arguments, confirmed=confirmed, trace=trace)
         return redact_value(result, secrets)

@@ -23,9 +23,11 @@ BUSINESS_STATE_FIELDS = frozenset({
     "weather_enabled",
     "weather_default_city",
     "embedding_enabled",
+    "desktop_enabled",
     "tts_rate",
     "tts_pitch",
     "system_prompt",
+    "agent_profile",
     "voice_mode",
 })
 

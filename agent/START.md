@@ -1,19 +1,19 @@
 # 当前工作入口
 
-更新：2026-11-15。本文只写当前快照；历史过程与原始证据在 [progress](docs/progress.md)。
+更新：2026-11-16。本文只写当前快照；历史过程与原始证据在 [progress](docs/progress.md)。
 
 ## 当前任务与暂停事项
 
-全项目文档审计与治理已完成，结果见progress。用户随后明确要求将项目保存到Git，以便新电脑/新Agent统一接手；本次提交现有开发源码、文档与实验资产并同步既有远端main，不改运行配置，不部署或操作设备。提交记录以 `git log` 为准，不在本文件引用自身尚未产生的提交号。
+已完成**个人 Agent 核心底座重构、Agent 优先单用户 UI 重构，以及 Windows / macOS 跨平台桌面控制与 Computer Use 桥梁**代码实现与本机自动化验证：
 
-新电脑以实际clone目录为项目根，先读AGENTS→本文；下表路径、PID、串口和本地证据均属于原电脑，不要求复制原路径。缺少私有配置/本地日志时，按handoff说明处理，不因此重建数据或改设备地址。
+1. **硬件闭环状态（上轮已完成并实机通过）**：云端 `5ccb283-20261116-223239` 与 COM3 固件 `5ccb283` 已解决待机跳回原版小黄脸、WS 重连 403 僵尸锁定及“退下/关闭”直接待机问题，用户现场实测确认通过。
+2. **本轮新实现范围（待提交、部署与双端真机体验确认）**：
+   - **Agent 内核升级**：`SideEffectConfirmationStore` 升级为带 `approval_id` / TTL / 参数预览 / `POST /api/approvals/{id}` 持久化确认卡片；`agent_profile` 个人工作档案写入 SQLite 并注入全渠道系统提示；`RealtimeTurn` 同步安全暴露写/电脑操控工具。
+   - **Agent 优先单用户 UI 重构**：移除原「助手配置」中冗余的双层能力/知识库勾选框与第二保存按钮，统一为「Agent 与档案」「技能与知识」（开启即自动同步授权，支持知识库行内挂载与新建即用）「终端节点（Windows/Mac + AtomS3R）」，对话消息内置工具执行胶囊与交互确认卡片，保留 Codex 灰阶主题与全部语音面板功能。
+   - **跨平台桌面节点与 Computer Use（`desktop_node/` + `backend/app/desktop.py` + `desktop_tools.py`）**：WebSocket `/desktop/v1/` 双系统长连接网关与断线顶替重连，支持截屏+视觉模型看图定位、剪贴板、非敏感目录/文件读取、打开应用/网址、自适应分辨率鼠标键盘（Win32 `ctypes`/PowerShell 与 macOS `CoreGraphics`/`screencapture`/`sips` 零重型依赖原生实现）及确认后执行终端命令。
 
-用户已明确卡顿表现：**一整段回答中随机有两处卡一下，随后继续说**；用户要求这一块先不解决。不要再按“只是数字之间的自然停顿”解释，也不要继续要求用户复述卡顿类型。根因未定，暂缓排查。
-
-- 保留现有模型、塔菲复刻音色、语速/音调与唤醒、对话、待机链路；不擅自换模型或声音。
-- 新动画、显示事件与 TCP 试验代码保留，不并入稳定服务，不刷固件/资源。
-- OTA 已切云成功，不再安排用户改地址、拼接 key、改鉴权形式或重复配网。
-- 工具/Token/上下文后续工作保留为待办，本轮不恢复实施，不自动部署或发付费探查。
+- 保留既有实时主线模型 `qwen3.8-omni-flash-realtime`、塔菲复刻音色与唤醒/待机/卡顿暂缓约定，不擅自更改语音服务或重置历史数据。
+- **尚未交付确认事项**：本机改动尚待 Mac 提交推送 → 云端 `/opt/xiaodan/current/deploy/release_from_git.sh` 发布 → Windows/Mac 实机运行 `python -m desktop_node` 验证。
 
 ## 版本与位置
 
@@ -22,9 +22,9 @@
 | 稳定基线 | 截图远端 HEAD `bd639a9`，包含 `ead6381` 语音修复 | 是恢复与发布的追溯点，不等于开发工作树 HEAD 内容 |
 | Windows 运行副本 | `E:\xiaodan`；旧进程 PID17156 于11月15日15:58:28启动，8000/8003 | 这是最后采样值，不是永久 PID；磁盘有后续修改，不能据文件推断进程已加载 |
 | Git 开发快照 | 原电脑在 `E:\xiaodan\.cache\repo-export`；新电脑为当前clone目录 | Git保留云端适配/工具优化源码及新动画/UI/TCP实验；不是在线稳定包，不能整体部署或重编译刷入 |
-| 云端在线版本 | `/opt/xiaodan/current` → `/opt/xiaodan/releases/bd639a9-voice-20261115`；网页 `https://ryan406.online/xiaoyuan/` | 最后已确认；原 `bd639a9-tasktools-20261115` 等发布保留；本轮未重查或部署 |
+| 云端在线版本 | `/opt/xiaodan/current` → `/opt/xiaodan/releases/5ccb283-20261116-223239`；网页 `https://ryan406.online/xiaoyuan/` | 已通过上轮固件+网关实测；**本轮 Mac 新功能尚未部署到云端** |
 | 云端运行数据 | `/opt/xiaodan/shared` | `.env`、data、logs、缓存独立于 release；回滚代码不回滚数据库 |
-| 设备 | AtomS3R + Echo Base，固件2.2.6；编译指纹Nov11 23:24:33、ELF前缀67687035c，末次与恢复版一致 | 已接云；用户说画面仍像新动画，assets 图像内容未独立重核，不因猜测刷写 |
+| 设备 | AtomS3R + Echo Base，固件按 `5ccb283` (`2,777,232B` app-flash，COM3) 与对应 `generated_assets.bin` | 上轮真机对话+待机动画+“退下/关闭”直接待机已实测通过；本次未改动固件 |
 
 Windows进程值来自此前检查，云端/设备实跑证据最后为11月15日21:26–21:28；文档/Git同步没有重新确认即时在线状态。实时主线保留百炼 `qwen3.8-omni-flash-realtime`、原塔菲复刻音色和末次语速1.2/音调+3。`main`的开发快照不等于该云端release；需要运行/发布时先按architecture/operations区分模块，不用“Git已提交”推断声音已验证。
 
@@ -43,7 +43,9 @@ Windows进程值来自此前检查，云端/设备实跑证据最后为11月15�
 
 | 项目 | 当前范围与限制 |
 | --- | --- |
-| 单助手与多库 | 助手选 API/选库、显式迁移、服务端库过滤已实现；真实关键词及 hybrid 双库隔离有证据，不重做迁移 |
+| 单助手与多库 | 单用户自动同步 `/api/assistant/selection`（API单开关+知识库行内挂载+新建默认挂载）；服务端库过滤不变 |
+| 个人 Agent 与确认 | `agent_profile` 持久化写入提示词；`SideEffectConfirmationStore` 支持 `approval_id`/TTL/交互确认卡片与语音“确认”；未重做多助手 |
+| 跨平台桌面控制 | `DesktopHub (/desktop/v1/)` + 9个桌面读写/GUI/终端工具 + `desktop_node/` (Win/Mac)；WebSocket、缩放换算与门禁已通过自动化测试，**双端实机长连接与浏览器真实界面待上云后实测** |
 | 工具误调用 | 共用执行层校验本轮控制意图及明确目标，报数零工具有真实记录；不承诺所有工具场景都正确 |
 | Token 明细 | 保存供应商输入/输出/合计、文字/音频/缓存明细和响应次数；缺项不填0。多次响应按轮汇总；不是纯输出字数或最终账单 |
 | 网页实时文字 | 已按任务下发候选并集，保留复合指令、追问和 `_load_task_tools` 同轮补充；未知需求可能多一次模型续答 |

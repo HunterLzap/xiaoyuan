@@ -35,6 +35,7 @@ class CapabilitySettingsUpdate(BaseModel):
     personal_kb_enabled: bool = True
     weather_enabled: bool = True
     embedding_enabled: bool | None = None
+    desktop_enabled: bool | None = None
 
 
 class TTSSettingsUpdate(BaseModel):
@@ -91,6 +92,7 @@ class ConnectionsUpdate(BaseModel):
 class AssistantUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     system_prompt: str | None = Field(default=None, min_length=1, max_length=4000)
+    agent_profile: str | None = Field(default=None, max_length=2000)
     model: str = Field(default="", max_length=200)
     tts_provider: Literal["mimo", "openai", "bailian"] | None = None
     tts_model: str = Field(default="mimo-v2.5-tts", min_length=1, max_length=200)
@@ -111,6 +113,11 @@ class AssistantUpdate(BaseModel):
             if not value:
                 raise ValueError("请填写角色说明。")
         return value
+
+    @field_validator("agent_profile")
+    @classmethod
+    def validate_agent_profile(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
 
 
 class AssistantSelectionUpdate(BaseModel):
@@ -159,10 +166,12 @@ def public_settings(settings: Settings) -> dict:
         for name in SettingsUpdate.model_fields if name != "api_key"
     } | {
         "system_prompt": settings.system_prompt,
+        "agent_profile": settings.agent_profile,
         "personal_kb_enabled": settings.personal_kb_enabled,
         "embedding_enabled": settings.embedding_enabled,
         "weather_enabled": settings.weather_enabled,
         "weather_default_city": settings.weather_default_city,
+        "desktop_enabled": settings.desktop_enabled,
         "selected_tool_ids": settings.selected_tool_ids if settings.selected_tool_ids is not None else [],
         "selected_kb_ids": settings.selected_kb_ids if settings.selected_kb_ids is not None else [],
         "active_model": settings.active_model,
@@ -216,11 +225,13 @@ class SettingsStore:
         if isinstance(update, AssistantUpdate) and update.system_prompt is None:
             updates.pop("system_prompt", None)
         if isinstance(update, AssistantUpdate):
-            for extra in ("weather_enabled", "weather_default_city", "tts_provider"):
+            for extra in ("agent_profile", "weather_enabled", "weather_default_city", "tts_provider"):
                 if getattr(update, extra, None) is None:
                     updates.pop(extra, None)
-        if isinstance(update, CapabilitySettingsUpdate) and update.embedding_enabled is None:
-            updates.pop("embedding_enabled", None)
+        if isinstance(update, CapabilitySettingsUpdate):
+            for extra in ("embedding_enabled", "desktop_enabled"):
+                if getattr(update, extra, None) is None:
+                    updates.pop(extra, None)
         if isinstance(update, ConnectionsUpdate):
             for name in ("tts_base_url", "tts_use_text_connection", "asr_use_text_connection"):
                 if updates.get(name) is None:
@@ -266,7 +277,11 @@ class SettingsStore:
         if isinstance(update, AssistantUpdate) and update.system_prompt is None:
             managed.remove("system_prompt")
         if isinstance(update, AssistantUpdate):
-            for extra in ("weather_enabled", "weather_default_city", "tts_provider"):
+            for extra in ("agent_profile", "weather_enabled", "weather_default_city", "tts_provider"):
+                if getattr(update, extra, None) is None:
+                    managed.discard(extra)
+        if isinstance(update, CapabilitySettingsUpdate):
+            for extra in ("embedding_enabled", "desktop_enabled"):
                 if getattr(update, extra, None) is None:
                     managed.discard(extra)
         if isinstance(update, (ConnectionsUpdate, CapabilitySettingsUpdate, AssistantUpdate, AssistantSelectionUpdate)):

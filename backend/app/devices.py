@@ -527,9 +527,11 @@ class DeviceConnection:
                 future.set_exception(ProviderError(409, "device_disconnected", "设备已断开，指令没有确认。"))
 
 
-def create_gateway(hub: DeviceHub):
-    """LAN-facing app: only bootstrap, health and one authenticated WebSocket."""
+def create_gateway(hub: DeviceHub, desktop_hub=None):
+    """LAN-facing app: only bootstrap, health and authenticated device/desktop WebSockets."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, root_path=hub.public_base_path)
+    if desktop_hub is not None:
+        desktop_hub.mount_routes(app)
 
     @app.get("/health")
     async def health():

@@ -22,7 +22,7 @@ from .asr import transcribe_browser_wav
 from .config import ROOT, Settings
 from .llm import ChatProvider, OpenAICompatibleProvider, ProviderError
 from .realtime_text import build_chat_provider
-from .schemas import (ChatRequest, ChatResponse, KnowledgeResult, KnowledgeSearchRequest,
+from .schemas import (ApprovalDecisionRequest, ChatRequest, ChatResponse, KnowledgeResult, KnowledgeSearchRequest,
                       SessionDetail, SessionRename, SessionSummary,
                       PersonalKnowledgeSearchRequest, PersonalKnowledgeRename, InsightCorrectAnswer,
                       InsightClearFilters, LibraryCreate, LibraryRename)
@@ -45,6 +45,7 @@ from .settings_store import (SettingsStore, SettingsUpdate, public_settings, API
 from .tts import (CLONE_MODEL, PRESET_VOICES, TTSProvider, build_tts_provider,
                   shared_client, close_shared_client)
 from .voice_profiles import BUSINESS_STATE_FIELDS, VoiceProfileStore
+from .desktop import DesktopHub, mount_desktop_admin_routes
 from .devices import DeviceHub, DeviceSetup, DevicePreferences
 from .voice_transport import DeviceVoice, VoiceStreamingResponse, sse
 from .speech_bridge import SpeechRecognizer, SPEECH_PYTHON
@@ -55,7 +56,8 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                provider_factory: Callable[[Settings], ChatProvider] = build_chat_provider,
                knowledge_factory: Callable[[Settings], KnowledgeProvider] | None = None,
                device_hub: DeviceHub | None = None,
-               tts_factory: Callable[[Settings], TTSProvider] = build_tts_provider) -> FastAPI:
+               tts_factory: Callable[[Settings], TTSProvider] = build_tts_provider,
+               desktop_hub: DesktopHub | None = None) -> FastAPI:
     # Bracketed IPv6 entries in NO_PROXY make httpx fail on construction, which would
     # otherwise abort startup when the model client is built in the lifespan below.
     for name in ("no_proxy", "NO_PROXY"):
@@ -90,7 +92,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             app.state.personal_kb.initialize_if_missing()
         if config.selected_tool_ids is None or config.selected_kb_ids is None:
             defaults = [item["name"] for item in tool_catalog(config, knowledge, app.state.personal_kb,
-                        app.state.external_tools) if item["kind"] in {"official", "weather", "http"} and item["enabled"]]
+                        app.state.external_tools) if item["kind"] in {"official", "weather", "http", "desktop"} and item["enabled"]]
             kb_defaults = ([app.state.personal_kb.default_library_id()]
                            if config.selected_kb_ids is None and config.personal_kb_enabled and app.state.personal_kb is not None else [])
             if state_db_path is not None:
@@ -125,6 +127,13 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         )
         app.state.devices.voice = DeviceVoice(
             app.state.devices, app.state.service, tts_factory)
+        app.state.desktop = desktop_hub if desktop_hub is not None else DesktopHub(
+            store.path.parent / "data" / "desktop_nodes.json",
+            public_origin=config.public_origin,
+            public_base_path=config.public_base_path,
+        )
+        app.state.desktop.settings_getter = lambda: app.state.service.settings
+        app.state.desktop.lan_host_getter = lambda: (app.state.devices.setup.lan_host if app.state.devices.setup else "")
         refresh_tools()
         # Pay the TTS client's CA-load cost at startup instead of on the first turn.
         shared_client(config.tts_timeout_seconds)
@@ -142,6 +151,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                 app.state.speech_prewarm.cancel()
                 with suppress(asyncio.CancelledError):
                     await app.state.speech_prewarm
+            await app.state.desktop.disconnect()
             await app.state.devices.disconnect()
             await app.state.devices.speech.close()
             await app.state.service.close()
@@ -182,7 +192,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                     "code": "invalid_origin", "message": "请求必须来自已登录的同源管理页面。",
                 }})
         elif (request.url.path in {"/settings", "/knowledge", "/devices"}
-              or request.url.path.startswith(("/api/settings", "/api/assistant", "/api/knowledge", "/api/tools", "/api/insights", "/api/devices", "/api/voice"))):
+              or request.url.path.startswith(("/api/settings", "/api/assistant", "/api/knowledge", "/api/tools", "/api/insights", "/api/devices", "/api/voice", "/api/approvals", "/api/desktop"))):
             origin = request.headers.get("origin")
             invalid_origin = origin is not None and origin != str(request.base_url).rstrip("/")
             missing_header = request.method not in {"GET", "HEAD", "OPTIONS"} and request.headers.get("x-local-settings") != "1"
@@ -234,7 +244,15 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             "context_history_chars": service.settings.context_history_chars,
             "history_enabled": service.history_store is not None,
             "m5stack_enabled": service.settings.m5stack_enabled,
+            "desktop_enabled": service.settings.desktop_enabled,
+            "desktop_online_nodes": len(app.state.desktop.active) if getattr(app.state, "desktop", None) else 0,
         }
+
+    @app.post("/api/approvals/{approval_id}")
+    async def decide_approval(approval_id: str, body: ApprovalDecisionRequest):
+        return app.state.service.resolve_approval(approval_id, body.decision, session_id=body.session_id)
+
+    mount_desktop_admin_routes(app, lambda: app.state.desktop)
 
     @app.post("/chat", response_model=ChatResponse)
     async def chat(request: ChatRequest):
@@ -539,10 +557,11 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             service = app.state.service
             if "selected_tool_ids" in update.model_fields_set:
                 catalog = tool_catalog(service.settings, service.knowledge,
-                                       app.state.personal_kb, app.state.external_tools)
-                known = {item["name"] for item in catalog if item["kind"] in {"official", "weather", "http"}}
+                                       app.state.personal_kb, app.state.external_tools,
+                                       desktop=getattr(app.state, "desktop", None))
+                known = {item["name"] for item in catalog if item["kind"] in {"official", "weather", "http", "desktop"}}
                 if any(tool_id not in known for tool_id in update.selected_tool_ids):
-                    raise ProviderError(422, "assistant_tool_unknown", "请选择已有的天气、M5 或 HTTP API 能力。")
+                    raise ProviderError(422, "assistant_tool_unknown", "请选择已有的天气、M5、电脑控制或 HTTP API 能力。")
             if "selected_kb_ids" in update.model_fields_set and update.selected_kb_ids:
                 await asyncio.to_thread(get_personal_kb().assert_libraries, update.selected_kb_ids)
             config = store.prepare(service.settings, update)
@@ -735,12 +754,15 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
 
     def refresh_tools():
         service = app.state.service
+        desktop = getattr(app.state, "desktop", None)
         app.state.tools = build_tool_registry(service.settings, service.knowledge,
                                               app.state.personal_kb, app.state.external_tools, app.state.embedder,
-                                              devices=getattr(app.state, "devices", None), apply_setting=apply_setting)
+                                              devices=getattr(app.state, "devices", None), apply_setting=apply_setting,
+                                              desktop=desktop)
         app.state.resource_tools = build_tool_registry(service.settings, service.knowledge,
             app.state.personal_kb, app.state.external_tools, app.state.embedder,
-            devices=getattr(app.state, "devices", None), apply_setting=apply_setting, assistant_scope=False)
+            devices=getattr(app.state, "devices", None), apply_setting=apply_setting,
+            desktop=desktop, assistant_scope=False)
         service.tools = app.state.tools
         service.audit = app.state.audit
         service.tool_secrets = audit_secrets
@@ -749,7 +771,8 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     async def list_tools():
         service = app.state.service
         return {"tools": tool_catalog(service.settings, service.knowledge,
-                                      app.state.personal_kb, app.state.external_tools),
+                                      app.state.personal_kb, app.state.external_tools,
+                                      desktop=getattr(app.state, "desktop", None)),
                 "conversation_integration": True,
                 "automatic_permissions": ["read"],
                 "supported_file_types": ["txt", "md", "markdown", "docx", "pdf"]}
@@ -766,7 +789,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     @app.put("/api/tools/{name}/enabled")
     async def enable_tool(name: str, body: ToolEnabledUpdate):
         fields = {"search_m5stack": "m5stack_enabled", "search_personal_knowledge": "personal_kb_enabled",
-                  "get_weather": "weather_enabled"}
+                  "get_weather": "weather_enabled", "desktop_control": "desktop_enabled"}
         if name in fields:
             update = CapabilitySettingsUpdate(**{fields[name]: body.enabled})
             await save_grouped_settings(update)
@@ -851,7 +874,8 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     async def get_external_tool(name: str):
         if name in BUILTIN_NAMES:
             for item in tool_catalog(app.state.service.settings, app.state.service.knowledge,
-                                     app.state.personal_kb, app.state.external_tools):
+                                     app.state.personal_kb, app.state.external_tools,
+                                     desktop=getattr(app.state, "desktop", None)):
                 if item["name"] == name:
                     return item
         cfg = app.state.external_tools.items.get(name)

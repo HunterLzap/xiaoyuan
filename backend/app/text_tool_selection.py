@@ -18,6 +18,15 @@ TOOL_PURPOSES = {
     "set_speech_rate": "按用户要求调语速",
     "set_speech_pitch": "按用户要求调音调",
     "search_conversation_history": "回查本会话未带入上下文的旧原话",
+    "desktop_list_nodes": "查看已连接的 Windows / Mac 电脑节点",
+    "desktop_inspect_screen": "截取并观察电脑当前屏幕画面及坐标",
+    "desktop_clipboard": "读取电脑剪贴板内容",
+    "desktop_list_dir": "列出电脑目录中的文件",
+    "desktop_read_file": "读取电脑非敏感文本文件",
+    "desktop_set_clipboard": "设置电脑剪贴板文本",
+    "desktop_open": "在电脑上打开应用、文件或网址",
+    "desktop_gui_action": "执行电脑点击、输入、快捷键与滚轮控制",
+    "desktop_run_command": "在电脑终端执行命令",
 }
 
 
@@ -52,6 +61,9 @@ class TextToolSelection:
             (r"知识库|我的资料|上传|个人资料|文档|文件|资料里|资料中", {"search_personal_knowledge"}),
             (r"之前|刚才|最早|最初|一开始|前面|记得|说过", {"search_conversation_history"}),
             (r"(?:设备|机器人).{0,8}(?:状态|连接|在线)|(?:音量|亮度).{0,4}(?:多少|多大)", {"get_device_status"}),
+            (r"电脑|桌面|屏幕|截图|看.{0,4}屏|界面|窗口|点[一一下]?[击下]|双击|右键|快捷键|剪贴板|终端|命令行|文件夹|目录|mac|windows|pc|desktop|screen",
+             {"desktop_list_nodes", "desktop_inspect_screen", "desktop_clipboard", "desktop_list_dir",
+              "desktop_read_file", "desktop_set_clipboard", "desktop_open", "desktop_gui_action", "desktop_run_command"}),
         ]:
             if re.search(pattern, question, re.I):
                 names.update(tools)

@@ -225,7 +225,11 @@ WEATHER_SPEC = ToolSpec("get_weather",
      "additionalProperties": False}, permission="read")
 BUILTIN_NAMES = {M5STACK_SPEC.name, PERSONAL_KB_SPEC.name,
                  DEVICE_VOLUME_SPEC.name, SPEECH_RATE_SPEC.name, SPEECH_PITCH_SPEC.name,
-                 DEVICE_STATUS_SPEC.name, WEATHER_SPEC.name}
+                 DEVICE_STATUS_SPEC.name, WEATHER_SPEC.name,
+                 "desktop_control", "desktop_list_nodes", "desktop_inspect_screen",
+                 "desktop_clipboard", "desktop_list_dir", "desktop_read_file",
+                 "desktop_set_clipboard", "desktop_open", "desktop_gui_action",
+                 "desktop_run_command"}
 
 
 class ExternalToolStore:
@@ -548,12 +552,12 @@ class ToolRegistry:
 
 
 def build_tool_registry(settings, knowledge, personal_kb, external=None, embedder=None,
-                        devices=None, apply_setting=None, *, assistant_scope=True):
+                        devices=None, apply_setting=None, desktop=None, *, assistant_scope=True):
     tools = []
     selected = set(settings.selected_tool_ids if settings.selected_tool_ids is not None else [])
     if not assistant_scope:
         # 人工资源调用只受资源启停/权限约束；不改变对话注册表及知识库范围。
-        selected = {"search_m5stack", "get_weather"}
+        selected = {"search_m5stack", "get_weather", "desktop_control"}
         if external:
             selected.update(cfg.name for cfg in external.items.values())
     kb_ids = settings.selected_kb_ids if settings.selected_kb_ids is not None else []
@@ -563,6 +567,9 @@ def build_tool_registry(settings, knowledge, personal_kb, external=None, embedde
         tools.append(PersonalKnowledgeTool(personal_kb, embedder, settings.embedding_enabled, kb_ids))
     if "get_weather" in selected and getattr(settings, "weather_enabled", False):
         tools.append(WeatherTool(settings))
+    if "desktop_control" in selected and getattr(settings, "desktop_enabled", False) and desktop is not None:
+        from .desktop_tools import build_desktop_tools
+        tools.extend(build_desktop_tools(desktop))
     if external:
         tools.extend(HttpTool(cfg) for cfg in external.items.values() if cfg.enabled and cfg.name in selected)
     if devices is not None:
@@ -574,11 +581,13 @@ def build_tool_registry(settings, knowledge, personal_kb, external=None, embedde
     return ToolRegistry(tools)
 
 
-def tool_catalog(settings, knowledge, personal_kb, external=None):
+def tool_catalog(settings, knowledge, personal_kb, external=None, desktop=None):
+    from .desktop_tools import DESKTOP_CAPABILITY_SPEC
     result = [
         {**M5STACK_SPEC.public(settings.m5stack_enabled and knowledge is not None), "kind": "official"},
         {**PERSONAL_KB_SPEC.public(settings.personal_kb_enabled and personal_kb is not None), "kind": "personal"},
         {**WEATHER_SPEC.public(getattr(settings, "weather_enabled", False)), "kind": "weather"},
+        {**DESKTOP_CAPABILITY_SPEC.public(getattr(settings, "desktop_enabled", False) and desktop is not None), "kind": "desktop"},
     ]
     if external:
         result.extend(external.public(cfg) for cfg in external.items.values())
