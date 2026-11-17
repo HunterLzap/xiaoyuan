@@ -89,6 +89,13 @@ class ConnectionsUpdate(BaseModel):
     m5stack_enabled: bool = True
     personal_kb_enabled: bool = True
     tts_timeout_seconds: float = Field(default=60, gt=0, le=120)
+    desktop_vision_model: str | None = Field(default=None, max_length=200)
+    desktop_planner_model: str | None = Field(default=None, max_length=200)
+
+    @field_validator("desktop_vision_model", "desktop_planner_model")
+    @classmethod
+    def strip_desktop_model(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
 
 
 class AssistantUpdate(BaseModel):
@@ -237,7 +244,13 @@ class SettingsStore:
                 if getattr(update, extra, None) is None:
                     updates.pop(extra, None)
         if isinstance(update, ConnectionsUpdate):
-            for name in ("tts_base_url", "tts_use_text_connection", "asr_use_text_connection"):
+            for name in (
+                "tts_base_url",
+                "tts_use_text_connection",
+                "asr_use_text_connection",
+                "desktop_vision_model",
+                "desktop_planner_model",
+            ):
                 if updates.get(name) is None:
                     updates.pop(name, None)
         values.update(updates)
@@ -291,7 +304,17 @@ class SettingsStore:
         if isinstance(update, (ConnectionsUpdate, CapabilitySettingsUpdate, AssistantUpdate, AssistantSelectionUpdate)):
             managed &= update.model_fields_set
         if isinstance(update, ConnectionsUpdate):
-            managed -= {name for name in ("tts_base_url", "tts_use_text_connection", "asr_use_text_connection") if getattr(update, name) is None}
+            managed -= {
+                name
+                for name in (
+                    "tts_base_url",
+                    "tts_use_text_connection",
+                    "asr_use_text_connection",
+                    "desktop_vision_model",
+                    "desktop_planner_model",
+                )
+                if getattr(update, name) is None
+            }
         for key_name in ("api_key", "tts_api_key", "rt_api_key", "asr_api_key"):
             if key_name in managed and getattr(update, key_name) is None:
                 managed.remove(key_name)

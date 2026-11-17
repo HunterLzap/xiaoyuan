@@ -173,6 +173,15 @@ class OpenAICompatibleProvider:
             options = self._request_options()
             if tools:
                 options["tools"] = tools
+                if (
+                    self.settings.model.lower().startswith("qwen3.5")
+                    and "aliyuncs.com" in (self.settings.base_url or "").lower()
+                    and any(
+                        str((t.get("function") or t).get("name") or "").startswith("desktop_")
+                        for t in tools if isinstance(t, dict)
+                    )
+                ):
+                    options["extra_body"] = {"enable_thinking": False}
             stream = await self.client.chat.completions.create(
                 model=self.settings.model, messages=messages,
                 stream=True, **options,

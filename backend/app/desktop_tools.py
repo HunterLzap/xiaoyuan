@@ -204,11 +204,18 @@ class DesktopInspectScreenTool(_DesktopBaseTool):
             "请简明描述当前前台窗口最主要的界面结构、可见菜单/搜索结果卡片/联系人列表与输入框，"
             "并对关键可点击目标给出坐标框 [x1, y1, x2, y2]。"
         )
-        return await self.hub.inspect_screen(
+        direct_vision = bool(isinstance(trace, dict) and trace.get("direct_vision"))
+        result = await self.hub.inspect_screen(
             node_id=arguments.get("node_id"),
-            question=q,
-            analyze_vision=True,
+            question="" if direct_vision else q,
+            analyze_vision=not direct_vision,
+            include_som=True,
         )
+        if direct_vision and isinstance(trace, dict):
+            frame = self.hub.latest_vision_frame(result.get("node_id"))
+            if frame is not None:
+                trace["vision_image"] = frame
+        return result
 
 
 class DesktopClipboardGetTool(_DesktopBaseTool):

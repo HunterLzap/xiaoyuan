@@ -12,7 +12,7 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from .config import Settings
-from .desktop import build_desktop_planner_config
+from .desktop import build_desktop_planner_config, supports_native_vision
 from .llm import ChatProvider, Completion, OpenAICompatibleProvider, ProviderError
 from .history_store import HistoryStore
 from .conversation_memory import active_context, ConversationHistoryTool
@@ -532,6 +532,10 @@ class ChatService:
                     provider = turn_planner
                     config = planner_cfg
                     using_shared_provider = False
+            if tool_context.allowed & DESKTOP_TOOL_NAMES:
+                tool_context.direct_vision = bool(
+                    config.voice_mode != "realtime" and supports_native_vision(config.model)
+                )
             messages = [{"role": "system", "content": config.system_prompt}]
             messages += session.messages
             messages.append({"role": "user", "content": request.message})

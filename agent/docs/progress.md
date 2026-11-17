@@ -1,6 +1,19 @@
 # 当前进度与证据
 
-更新：2026-11-17。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
+更新时间：2026-11-17。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
+
+## 多模态直连 Computer Use（SoM 标号方框 + 统一模型中心，2026-11-17）
+
+- **解决的问题与方案**：针对“看图二传盲跑”准确率低、耗时翻倍，以及语音/文字/电脑模型配置分散的问题，完成两项核心升级与统一模型配置：
+  1. **Set-of-Mark（SoM）视觉标框（`desktop_node/som.py`、`client.py`、`desktop.py`）**：利用 `ui_tree` 真实中心点与宽高，在桌端截图时同步生成带彩色边框及 `[0]`, `[1]`… 编号徽章的高亮标注图（macOS 原生 Swift CoreGraphics ~50ms 热绘制 + Windows .NET `System.Drawing` / Pillow，零云端新增依赖），并与 `ui_elements[].index` 一一对应。
+  2. **原生多模态直连循环 + 百炼高性价比默认路由（`desktop.py`、`desktop_tools.py`、`tool_dialogue.py`、`service.py`、`llm.py`）**：查询百炼官方文档确认 `qwen3.5-plus`（0–128K 原价 ¥0.8 / ¥4.8 百万Token）与 `qwen3.5-flash`（¥0.2 / ¥2.0 百万Token）原生支持 `image_url` 与 `tools` Function Calling 且成本低于 `qwen3-vl-plus`（¥1.0 / ¥10.0）。已配置百炼 Key 时未手动指定桌面规划模型将自动路由至百炼 `qwen3.5-plus`；`ToolConversation` 直接将最新 SoM 截图作为 `user` 多模态帧喂给模型，自动裁剪前序轮次历史截图保持每轮仅 1 张图，同时跳过 `_analyze_screenshot` 二次看图调用；对 `qwen3.5*` 桌面工具回合传入 `extra_body={"enable_thinking": False}` 避免每步长思维链延迟与费用。手动填回 `qwen-plus` / `deepseek-*` 等纯文字模型仍自动兼容两步看图路径。
+  3. **统一模型配置中心（`app.html`、`app.js`、`app.css`、`settings_store.py`）**：点击顶栏当前模型直接进入「模型与连接」；新增「当前生效模型一览」与常驻可见的「电脑操控模型（Computer Use）」卡片（内置 `qwen3.5-plus` / `qwen3.5-flash` / `qwen3-vl-plus` 与手动预设，显示实时路由与凭据复用状态），移除「技能与知识」里埋在折叠框内的重复输入框。
+- **本机最终代码后验证（Mac Darwin / `.venv` Python 3.12.13）**：
+  - macOS Swift SoM 真实截图渲染：编译缓存生成真实带 `[0]`、`[12]` 正向文字与对齐边框的 JPEG（热耗时 ~50.8ms，`read_file` 目视确认方向与标框准确）。
+  - `node --check backend/app/app.js && node --check backend/app/voice.js`、`.venv/bin/python -m py_compile desktop_node/*.py`、`.venv/bin/python scripts/lint_incremental.py`（`ruff=18, pyright=119, baseline=146, new=0`）：通过。
+  - 单元测试实跑结果：`tests/test_desktop_bridge.py`（16，含多模态直连与旧帧裁剪、百炼 `qwen3.5*` `enable_thinking=False`、SoM 编号映射/Mac 渲染、统一模型配置接口）+ `test_personal_kb_isolation.py` + `test_realtime_failures.py` + `test_voice_compat.py` + `test_voices.py` **43 passed（4.09s）**；`tests/test_gateway_trace.py` + `tests/test_knowledge.py -k "not chat_uses and not retrieval_failure"` **13 passed, 2 deselected（0.79s）**；`tests/test_voice_chat.py` 子集 **3 passed, 3 deselected（0.51s）**；`tests/test_settings_workflow.py` 分组设置子集 **7 passed, 4 deselected（0.83s）**；`tests/test_devices.py -k "not real_socket"` **4 passed, 4 deselected（30.99s）**。
+- **尚未验证 / 留待后续确认（不宣称已实机验收）**：
+  - 百炼在线 API 真实 `qwen3.5-plus` 端到端操控 Mac/Windows 飞书窗口并打开 Friday 对话框输入“你好”，以及 Windows .NET `System.Drawing` SoM 真实渲染，需推云部署并重启桌端节点后实测确认。
 
 ## 桌面规划模型百炼端点混用修正（2026-11-17，继 `d29cf1d` 填入 `qwen-plus` 报 400 后修复）
 

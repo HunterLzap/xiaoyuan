@@ -128,8 +128,15 @@
           </section>
 </fieldset><div class="settings-actions assistant-save"><span id="role-dirty-state">设置已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="assistant-reset" type="button" class="secondary-button">取消</button><button id="tts-save" type="submit" class="primary-button" disabled>保存</button></div></div></form>
       </div></section>
-      <section id="connections-view" class="page-view" aria-label="API接入" hidden><div class="page-content">
+      <section id="connections-view" class="page-view" aria-label="模型与连接" hidden><div class="page-content">
         <form id="config-form"><fieldset id="config-fields" class="compact-api" disabled>
+          <section class="api-panel model-overview-panel" id="model-overview-panel" aria-label="当前生效模型一览">
+            <h2 class="api-panel-title">当前生效模型一览</h2>
+            <div class="model-overview-grid">
+              <div class="model-overview-item"><span class="model-overview-role">语音 / 日常对话</span><strong id="overview-chat-model">—</strong><small id="overview-chat-meta" class="small-note"></small></div>
+              <div class="model-overview-item"><span class="model-overview-role">电脑操控（Computer Use）</span><strong id="overview-desktop-model">—</strong><small id="overview-desktop-meta" class="small-note"></small></div>
+            </div>
+          </section>
           <section class="api-panel api-routing">
 <div class="api-segments" role="radiogroup" aria-label="接入模式">
 <label><input type="radio" name="voice-route" value="realtime" checked><span>实时对话</span></label>
@@ -141,6 +148,7 @@
 <div class="settings-row" id="rt-custom-row"><label for="rt_endpoint">接口地址</label><input id="rt_endpoint" placeholder="wss://" maxlength="500"></div>
 <div class="settings-row" id="rt-workspace-row"><div><label for="rt_workspace">业务空间 ID</label> <a class="text-button" href="https://help.aliyun.com/zh/model-studio/obtain-the-app-id-and-workspace-id" target="_blank" rel="noopener noreferrer" aria-label="查看业务空间 ID 获取位置">在哪看</a></div><input id="rt_workspace" aria-label="北京业务空间 ID" placeholder="粘贴 Workspace ID" pattern="[a-z0-9][a-z0-9\-]{0,62}" title="请粘贴业务空间 ID，不是空间名称" maxlength="63" autocomplete="off"></div>
 <div class="settings-row"><label for="rt_api_key">API Key</label><div class="api-secret"><input id="rt_api_key" type="password" autocomplete="new-password" spellcheck="false"><small id="rt-key-state" role="status"></small></div></div>
+<div class="settings-row"><label for="rt_model">实时对话模型</label><input id="rt_model" list="rt-models" maxlength="200"><datalist id="rt-models"><option value="qwen3.8-omni-flash-realtime"><option value="gpt-realtime"><option value="gpt-4o-realtime-preview"></datalist></div>
 <div class="settings-row"><label id="rt-voice-label" for="rt-voice-picker">音色</label><div class="voice-inline">
 <select id="rt-voice-picker"><option value="Tina" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/qxmfgt/f6009_%E7%94%9C%E7%94%9C_Tina.wav">甜甜</option>
 <option value="Cindy" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/qjtgkt/f1003_b_%E6%9E%97%E6%AC%A3%E5%AE%9C_Cindy.wav">林欣宜</option>
@@ -201,7 +209,6 @@
 </div></div><p id="rt-sample-error" class="small-note" role="status" hidden></p>
 <audio id="rt-sample" preload="none" hidden></audio></div>
 <details class="api-disclosure"><summary>高级设置</summary><div class="api-group">
-<div class="settings-row"><label for="rt_model">实时模型</label><input id="rt_model" list="rt-models" maxlength="200"><datalist id="rt-models"><option value="qwen3.8-omni-flash-realtime"><option value="gpt-realtime"><option value="gpt-4o-realtime-preview"></datalist></div>
 <div class="settings-row" id="rt-asr-row"><label for="rt_asr_model">转录模型</label><input id="rt_asr_model" maxlength="200" placeholder="whisper-1（百炼默认 qwen3-asr）"></div>
 </div></details></section>
           <section class="api-text-settings" id="text-services" hidden><h2 id="text-services-title" hidden>分模型</h2><section class="api-panel">
@@ -235,6 +242,30 @@
             <div class="settings-row voice-row"><label for="tts_model">模型</label><div class="voice-inline"><select id="tts_model" aria-label="声音模型"><option value="mimo-v2.5-tts">mimo-v2.5-tts</option><option value="mimo-v2.5-tts-voicedesign">mimo-v2.5-tts-voicedesign</option><option value="mimo-v2.5-tts-voiceclone">mimo-v2.5-tts-voiceclone</option><option value="__manual__">手动填写模型 ID…</option></select><input id="tts_model_custom" maxlength="200" autocomplete="off" placeholder="例如：tts-1 / qwen3-tts-flash-realtime" hidden><button id="fetch-speech-models" type="button" class="secondary-button" disabled>刷新</button></div></div>
             <div class="settings-row voice-row" id="voice-pick-row"><label for="tts_voice">音色</label><div class="voice-inline"><select id="tts_voice" aria-label="音色"><option value="mimo_default">默认</option></select><input id="tts_voice_custom" maxlength="80" autocomplete="off" placeholder="填写目标音色 ID" hidden><button id="clone-new" type="button" class="secondary-button">新建复刻</button><button id="delete-clone" type="button" class="secondary-button" hidden>删除</button></div></div>
           </section></section>
+          <section class="api-panel" id="desktop-model-panel" aria-label="电脑操控模型配置">
+            <h2 class="api-panel-title">电脑操控模型（Computer Use）<span id="desktop-model-mode-tag" class="connection-label"></span></h2>
+            <div class="api-group">
+              <div class="settings-row">
+                <div><label for="desktop-planner-preset">主控执行模型</label><p>原生多模态可直接看带方框标号的屏幕截图并操作，无需两次转发。</p></div>
+                <div class="desktop-model-stack">
+                  <select id="desktop-planner-preset" aria-label="电脑操控主控模型">
+                    <option value="">自动推荐（百炼 Key 默认 qwen3.5-plus）</option>
+                    <option value="qwen3.5-plus">qwen3.5-plus · 百炼性价比推荐（看图+工具，¥0.8/¥4.8）</option>
+                    <option value="qwen3.5-flash">qwen3.5-flash · 百炼极致省钱（看图+工具，¥0.2/¥2.0）</option>
+                    <option value="qwen3-vl-plus">qwen3-vl-plus · 视觉坐标专精（¥1.0/¥10.0）</option>
+                    <option value="__manual__">手动填写其他模型 ID…</option>
+                  </select>
+                  <input id="desktop_planner_model" maxlength="200" autocomplete="off" placeholder="例如：qwen3.5-plus / qwen3.5-flash / deepseek-chat" hidden>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div><label for="desktop_vision_model">纯视觉辅助模型</label><p>仅当主控选了纯文字模型（如 DeepSeek）时用于兜底看图；主控为 qwen3.5/VL 时自动跳过。</p></div>
+                <input id="desktop_vision_model" list="desktop-vision-models" maxlength="200" autocomplete="off" placeholder="留空默认 qwen3-vl-plus">
+                <datalist id="desktop-vision-models"><option value="qwen3-vl-plus"><option value="qwen3.5-plus"><option value="qwen-vl-max"></datalist>
+              </div>
+            </div>
+            <p id="desktop-model-summary" class="small-note desktop-model-summary" role="status"></p>
+          </section>
           <section class="api-panel api-common"><button type="button" class="text-button" data-view="capabilities">管理技能、电脑操控与知识库 →</button><input id="m5stack_enabled" type="checkbox" checked hidden></section>
         </fieldset><div class="settings-actions"><span id="dirty-state">接入已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="settings-api-cancel" type="button" class="secondary-button">取消</button><button id="save" type="submit" class="primary-button" disabled>保存并关闭</button></div></div></form>
       </div></section>

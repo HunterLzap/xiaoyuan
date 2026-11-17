@@ -79,6 +79,7 @@ class DesktopNodeConnection:
     last_seen_at: str = field(default_factory=_utc_now)
     pending: dict[str, asyncio.Future] = field(default_factory=dict)
     last_screenshot: dict | None = None
+    last_som_screenshot: dict | None = None
     last_ui_elements: list[dict] = field(default_factory=list)
 
     def public(self) -> dict:
@@ -409,11 +410,24 @@ class DesktopHub:
                 await conn.ws.close(code=1001)
         self.active.clear()
 
-    async def inspect_screen(self, node_id: str | None = None, question: str = "", analyze_vision: bool = True) -> dict:
+    async def inspect_screen(
+        self,
+        node_id: str | None = None,
+        question: str = "",
+        analyze_vision: bool = True,
+        include_som: bool = True,
+    ) -> dict:
         conn = self.resolve_node(node_id)
-        shot = await conn.rpc("screenshot", {"max_width": 1280, "max_height": 800, "quality": 80}, timeout=25.0)
+        shot = await conn.rpc(
+            "screenshot",
+            {"max_width": 1280, "max_height": 800, "quality": 80, "som": include_som},
+            timeout=25.0,
+        )
         b64 = shot.get("image_base64") or ""
         mime = str(shot.get("mime_type") or "image/jpeg")
+        som_b64 = shot.get("som_image_base64") or ""
+        som_mime = str(shot.get("som_mime_type") or mime)
+        som_annotated = bool(shot.get("som_annotated") and som_b64)
         img_w = int(shot.get("image_width") or shot.get("width") or 0)
         img_h = int(shot.get("image_height") or shot.get("height") or 0)
         scr_w = int(shot.get("screen_width") or conn.screen.get("width") or img_w or 0)
@@ -432,7 +446,7 @@ class DesktopHub:
                 cy = int(elem["y"])
             except (KeyError, TypeError, ValueError):
                 continue
-            clean_elements.append({
+            item = {
                 "index": len(clean_elements),
                 "role": str(elem.get("role") or "")[:32],
                 "name": str(elem.get("name") or "")[:64],
@@ -440,7 +454,12 @@ class DesktopHub:
                 "x": cx,
                 "y": cy,
                 "focused": bool(elem.get("focused")),
-            })
+            }
+            if elem.get("width") is not None and elem.get("height") is not None:
+                with suppress(TypeError, ValueError):
+                    item["width"] = int(elem["width"])
+                    item["height"] = int(elem["height"])
+            clean_elements.append(item)
         conn.last_ui_elements = clean_elements
         captured_at = _utc_now()
         if b64:
@@ -456,6 +475,20 @@ class DesktopHub:
                     "active_window": active_window,
                     "captured_at": captured_at,
                 }
+        vision_b64 = som_b64 or b64
+        vision_mime = som_mime if som_b64 else mime
+        if vision_b64:
+            conn.last_som_screenshot = {
+                "data_url": f"data:{vision_mime};base64,{vision_b64}",
+                "width": img_w,
+                "height": img_h,
+                "screen_width": scr_w,
+                "screen_height": scr_h,
+                "som_annotated": som_annotated,
+                "captured_at": captured_at,
+            }
+        else:
+            conn.last_som_screenshot = None
         out: dict = {
             "node_id": conn.node_id,
             "node_name": conn.name,
@@ -465,27 +498,38 @@ class DesktopHub:
             "screen": {"width": scr_w, "height": scr_h},
             "image": {"width": img_w, "height": img_h, "mime_type": mime},
             "captured_at": captured_at,
+            "som_annotated": som_annotated,
             "screenshot_url": f"/api/desktop/nodes/{conn.node_id}/screenshot",
         }
         if clean_elements:
             out["ui_elements"] = clean_elements
             out["targeting_hint"] = (
-                "已获取当前窗口控件树 ui_elements：如果目标按钮/搜索框/联系人出现在 ui_elements 中，"
+                "已获取当前窗口控件树 ui_elements"
+                + ("（截图上已绘制对应 [index] 高亮方框 Set-of-Mark）" if som_annotated else "")
+                + "：如果目标按钮/搜索框/联系人出现在 ui_elements 中，"
                 "调用 desktop_gui_action 时直接传 element_index=<index>（精准度 100%，无需估算坐标）；"
-                "列表中未覆盖的自绘区域再用 suggested_screen_coords 或图像坐标。"
+                "列表中未覆盖的自绘区域再用图像坐标或 suggested_screen_coords。"
             )
         if img_w and img_h and scr_w and scr_h:
             out["coordinate_hint"] = (
                 f"当前截图尺寸为 {img_w}x{img_h}，对应逻辑屏幕坐标 {scr_w}x{scr_h}。"
             )
         clean_q = (question or "").strip()
-        if analyze_vision and b64 and clean_q:
+        if analyze_vision and vision_b64 and clean_q:
             vision = await self._analyze_screenshot(
-                b64=b64, mime=mime, question=clean_q,
+                b64=vision_b64, mime=vision_mime, question=clean_q,
                 img_w=img_w, img_h=img_h, scr_w=scr_w, scr_h=scr_h, os_name=conn.os_name,
             )
             out.update(vision)
         return out
+
+    def latest_vision_frame(self, node_id: str | None) -> dict | None:
+        if not node_id:
+            return None
+        conn = self.active.get(node_id)
+        if conn is None or not conn.last_som_screenshot:
+            return None
+        return dict(conn.last_som_screenshot)
 
     async def _analyze_screenshot(
         self, *, b64: str, mime: str, question: str,
@@ -709,7 +753,7 @@ def mount_desktop_admin_routes(app: FastAPI, get_hub, record_audit=None) -> None
 
     @app.post("/api/desktop/nodes/{node_id}/screenshot")
     async def desktop_refresh_screenshot(node_id: str):
-        return await get_hub().inspect_screen(node_id=node_id, question="", analyze_vision=False)
+        return await get_hub().inspect_screen(node_id=node_id, question="", analyze_vision=False, include_som=False)
 
     @app.get("/api/desktop/nodes/{node_id}/screenshot")
     async def desktop_latest_screenshot(node_id: str):
@@ -722,6 +766,30 @@ def mount_desktop_admin_routes(app: FastAPI, get_hub, record_audit=None) -> None
             media_type=shot.get("mime_type") or "image/jpeg",
             headers={"Cache-Control": "no-store"},
         )
+
+
+def supports_native_vision(model_name: str) -> bool:
+    """Models supporting multimodal image_url input alongside OpenAI tool calls."""
+    lowered = (model_name or "").strip().lower()
+    if not lowered:
+        return False
+    return lowered.startswith((
+        "qwen3.5",
+        "qwen3-vl",
+        "qwen2.5-vl",
+        "qwen-vl",
+        "qvq",
+        "gpt-4o",
+        "gpt-4.1",
+        "gpt-5",
+        "o1",
+        "o3",
+        "o4",
+        "gemini",
+        "claude-3",
+        "claude-4",
+        "kimi-latest",
+    ))
 
 
 def _is_bailian_model_name(model_name: str) -> bool:
@@ -756,16 +824,21 @@ def _bailian_planner_copy(config: Settings, model_name: str) -> Settings:
 
 
 def build_desktop_planner_config(config: Settings) -> Settings | None:
-    """Returns OpenAI-compatible text-model Settings for multi-step desktop planning, or None to keep default."""
+    """Returns OpenAI-compatible multimodal/text-model Settings for desktop control, or None to keep default."""
     planner = (getattr(config, "desktop_planner_model", "") or "").strip()
     has_text = bool(config.model.strip() and config.api_key.get_secret_value().strip() and config.base_url.strip())
     if _has_bailian_key(config):
-        if planner and _is_bailian_model_name(planner) and "aliyuncs.com" not in config.base_url.lower():
+        if planner and _is_bailian_model_name(planner) and (
+                "aliyuncs.com" not in config.base_url.lower()
+                or not has_text
+                or config.voice_mode == "realtime"):
             return _bailian_planner_copy(config, planner)
-        if config.voice_mode == "realtime" and not has_text:
-            return _bailian_planner_copy(config, planner or "qwen-plus")
+        if not planner and config.voice_mode == "realtime" and (not has_text or not supports_native_vision(config.model)):
+            return _bailian_planner_copy(config, "qwen3.5-plus")
     if config.voice_mode != "realtime":
         if not planner or planner == config.model.strip():
+            if not has_text and _has_bailian_key(config):
+                return _bailian_planner_copy(config, planner or "qwen3.5-plus")
             return None
         if config.api_key.get_secret_value().strip() and config.base_url.strip():
             return config.model_copy(update={"model": planner})
@@ -778,3 +851,14 @@ def build_desktop_planner_config(config: Settings) -> Settings | None:
             "output_price_per_million": None,
         })
     return None
+
+
+def desktop_planner_uses_direct_vision(config: Settings | None) -> bool:
+    """True when desktop turns run directly on a native multimodal vision+tool model."""
+    if config is None:
+        return False
+    planner_cfg = build_desktop_planner_config(config)
+    effective = planner_cfg if planner_cfg is not None else config
+    if getattr(effective, "voice_mode", "pipeline") == "realtime":
+        return False
+    return supports_native_vision(getattr(effective, "model", ""))

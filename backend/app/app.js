@@ -714,6 +714,70 @@ function realtimePayload() {
   if (el("rt_api_key").value.trim()) data.rt_api_key = el("rt_api_key").value.trim();
   return data;
 }
+const DESKTOP_PLANNER_PRESETS = ["", "qwen3.5-plus", "qwen3.5-flash", "qwen3-vl-plus"];
+function isNativeVisionModel(modelName) {
+  const lowered = (modelName || "").trim().toLowerCase();
+  if (!lowered) return false;
+  return ["qwen3.5","qwen3-vl","qwen2.5-vl","qwen-vl","qvq","gpt-4o","gpt-4.1","gpt-5","o1","o3","o4","gemini","claude-3","claude-4","kimi-latest"].some(p => lowered.startsWith(p));
+}
+function desktopModelsPayload() {
+  return {
+    desktop_planner_model: el("desktop_planner_model").value.trim(),
+    desktop_vision_model: el("desktop_vision_model").value.trim(),
+  };
+}
+function syncDesktopPlannerPreset(value) {
+  const clean = (value || "").trim();
+  el("desktop_planner_model").value = clean;
+  const preset = el("desktop-planner-preset");
+  if (DESKTOP_PLANNER_PRESETS.includes(clean)) {
+    preset.value = clean;
+    el("desktop_planner_model").hidden = true;
+  } else {
+    preset.value = "__manual__";
+    el("desktop_planner_model").hidden = false;
+  }
+}
+function resolveDesktopModelState() {
+  const rtMode = el("voice_mode").value === "realtime";
+  const hasBailianKey = el("rt_provider").value === "bailian" && (Boolean(savedConfig?.rt_key_configured) || Boolean(el("rt_api_key").value.trim()));
+  const textModel = el("model").value.trim();
+  const hasText = Boolean(textModel && el("base_url").value.trim() && (Boolean(savedConfig?.api_key_configured) || Boolean(el("api_key").value.trim())));
+  const planner = el("desktop_planner_model").value.trim();
+  const vision = el("desktop_vision_model").value.trim() || "qwen3-vl-plus";
+  let effectiveModel = "";
+  let routeNote = "";
+  if (hasBailianKey && planner && /^(?:qwen|qvq)/i.test(planner) && (!el("base_url").value.toLowerCase().includes("aliyuncs.com") || !hasText || rtMode)) {
+    effectiveModel = planner;
+    routeNote = "复用百炼 Key";
+  } else if (hasBailianKey && !planner && rtMode && (!hasText || !isNativeVisionModel(textModel))) {
+    effectiveModel = "qwen3.5-plus";
+    routeNote = "自动推荐 · 复用百炼 Key";
+  } else if (!rtMode) {
+    effectiveModel = planner || textModel || (hasBailianKey ? "qwen3.5-plus" : "");
+    routeNote = (!planner && !textModel && hasBailianKey) ? "复用百炼 Key" : (el("provider").value.trim() || "文字服务");
+  } else if (hasText) {
+    effectiveModel = planner || textModel;
+    routeNote = el("provider").value.trim() || "文字服务";
+  }
+  const direct = Boolean(effectiveModel) && isNativeVisionModel(effectiveModel);
+  return {effectiveModel, direct, routeNote, vision, rtMode, hasBailianKey, textModel};
+}
+function updateModelOverview() {
+  const st = resolveDesktopModelState();
+  const chatModel = st.rtMode ? (el("rt_model").value.trim() || "qwen3.8-omni-flash-realtime") : (st.textModel || "未配置");
+  const chatProvider = st.rtMode ? (el("rt_provider").value === "bailian" ? "阿里云百炼实时语音/对话" : "自定义 Omni 实时接口") : `${el("provider").value.trim() || "文字服务"} · 分模型`;
+  el("overview-chat-model").textContent = chatModel;
+  el("overview-chat-meta").textContent = chatProvider;
+  el("overview-desktop-model").textContent = st.effectiveModel ? `${st.effectiveModel}${st.direct ? " · 直连看图" : " · 两步转发"}` : "尚未配置可用模型";
+  el("overview-desktop-meta").textContent = st.effectiveModel ? `${st.routeNote} · 含 SoM 编号框` : "请先配置百炼 API Key 或文字模型服务";
+  el("desktop-model-mode-tag").textContent = st.direct ? "原生看图 + SoM 方框" : (st.effectiveModel ? "纯文字 + 视觉两步" : "未就绪");
+  el("desktop-model-summary").textContent = !st.effectiveModel
+    ? "请先配置阿里云百炼 API Key（或分模型文字服务），电脑操控即可自动启用。"
+    : st.direct
+      ? `当前生效：${st.effectiveModel}（${st.routeNote}）—— 模型直接读取带 [0][1] 标号方框的截图并执行点击/输入，已跳过多余看图转发（省时省费）。`
+      : `当前生效：${st.effectiveModel}（${st.routeNote}）+ 辅助视觉 ${st.vision} 两步看图；建议主控选择 qwen3.5-plus（¥0.8/¥4.8）或 qwen3.5-flash（¥0.2/¥2.0）一步直连。`;
+}
 function selectedSpeechModel() {
   const picked = el("tts_model").value;
   if (picked === MANUAL) return el("tts_model_custom").value.trim();
@@ -811,7 +875,7 @@ el("tts_provider").addEventListener("change", () => {
   if (provider === "bailian") loadBailianTtsVoices();
   updateConnectionMode(); updateTtsMode(); assistantDirty(); dirty();
 });
-function fingerprint() { const payload = {...connectionPayload(), model:el("model").value.trim(),
+function fingerprint() { const payload = {...connectionPayload(), ...desktopModelsPayload(), model:el("model").value.trim(),
   tts_provider:el("tts_provider").value, tts_model:selectedSpeechModel(), tts_voice:selectedSpeechVoice()}; Object.assign(payload,realtimePayload()); delete payload.rt_api_key; delete payload.api_key; delete payload.tts_api_key; delete payload.asr_api_key; return JSON.stringify(payload); }
 function dirty() { el("dirty-state").textContent = fingerprint() !== savedFingerprint || el("rt_api_key").value || el("api_key").value || el("tts_api_key").value || el("asr_api_key").value ? "有未保存的修改" : ""; }
 function voiceChoice() {
@@ -1017,6 +1081,8 @@ function applyConfig(data, preserve = false) {
   }
   savedConfig = data; state.configured = data.configured;
   applyWeatherSettings(data);
+  syncDesktopPlannerPreset(data.desktop_planner_model || "");
+  el("desktop_vision_model").value = data.desktop_vision_model || "";
   capabilityState.selectionSupported = Array.isArray(data.selected_tool_ids) || Array.isArray(data.selected_kb_ids);
   capabilityState.selectedTools = Array.isArray(data.selected_tool_ids) ? data.selected_tool_ids.slice() : [];
   capabilityState.selectedKbs = Array.isArray(data.selected_kb_ids) ? data.selected_kb_ids.slice() : [];
@@ -1251,6 +1317,7 @@ function updateConnectionMode() {
   const separate = !rt && !ttsBailian && el("tts-separate-service").checked;
   el("tts-separate-fields").hidden = !separate; el("shared-service-note").hidden = separate;
   for (const id of ["tts_base_url", "tts_api_key", "tts-show-key"]) el(id).disabled = !separate;
+  updateModelOverview();
 }
 el("asr-show-key").addEventListener("click", () => {
   const show = el("asr_api_key").type === "password"; el("asr_api_key").type = show ? "text" : "password";
@@ -1419,14 +1486,26 @@ el("message").addEventListener("input", fitComposer);
 el("message").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(el("message").value); } });
 el("chat-form").addEventListener("submit", event => { event.preventDefault(); sendMessage(el("message").value); });
 document.querySelectorAll("[data-prompt]").forEach(button => button.addEventListener("click", () => { el("message").value = button.dataset.prompt; fitComposer(); el("message").focus(); }));
-for (const id of ["model-button", "configure-link"]) el(id).addEventListener("click", () => navigate("settings"));
+for (const id of ["model-button", "configure-link"]) el(id).addEventListener("click", () => navigate("connections"));
+el("desktop-planner-preset").addEventListener("change", () => {
+  const picked = el("desktop-planner-preset").value;
+  if (picked === "__manual__") {
+    el("desktop_planner_model").hidden = false;
+    if (DESKTOP_PLANNER_PRESETS.includes(el("desktop_planner_model").value.trim())) el("desktop_planner_model").value = "";
+    el("desktop_planner_model").focus();
+  } else {
+    el("desktop_planner_model").value = picked;
+    el("desktop_planner_model").hidden = true;
+  }
+  updateModelOverview(); dirty(); notice();
+});
 el("show-key").addEventListener("click", () => { const show = el("api_key").type === "password"; el("api_key").type = show ? "text" : "password"; el("show-key").textContent = show ? "隐藏" : "显示"; el("show-key").setAttribute("aria-pressed", String(show)); });
 el("config-form").addEventListener("input", event => { updateConnectionMode(); updateTtsMode(); stopTtsPreview(); el("test-panel").hidden = true; if (["base_url", "api_key", "models_protocol"].includes(event.target.id)) { resetModelList(); } dirty(); notice(); });
 el("model-options").addEventListener("change", () => {
   const value = el("model-options").value;
   if (value === MANUAL) { el("model").value = ""; el("model").hidden = false; el("model").focus(); }
   else { el("model").value = value; el("model").hidden = true; }
-  dirty(); notice(); el("test-panel").hidden = true;
+  updateModelOverview(); dirty(); notice(); el("test-panel").hidden = true;
 });
 async function refreshModelChoices() {
   if (state.busy || !state.loaded || !savedConfig) return;
@@ -1470,7 +1549,7 @@ el("config-form").addEventListener("submit", async event => {
   if (!confirmVoiceSchemeChange(rt.voice_mode, rt.rt_provider, rt.rt_model, el("tts_provider").value, speechModel)) return;
   busy(true);
   try {
-    const data = await request("/api/settings/api", "PUT", {...connectionPayload(), ...rt,
+    const data = await request("/api/settings/api", "PUT", {...connectionPayload(), ...rt, ...desktopModelsPayload(),
       model:el("model").value.trim(), tts_model:speechModel, tts_voice:voiceChoice().tts_voice});
     applyConfig(data.text, true); applyTtsConfig(data.tts, true); stopTtsPreview(); el("test-panel").hidden = true;
     closeSettings(); notice("配置已保存。", "success");
@@ -1729,43 +1808,26 @@ function desktopToolCard(tool) {
     });
   });
   toggleLabel.append(toggle, toggleText); header.append(toggleLabel);
-  const details = node("details", "weather-city-config"), summary = node("summary", "", "规划与视觉模型 · 可选（Computer Use）");
-  const fieldsWrap = node("div", "desktop-model-fields");
-  const plannerRow = node("label", "weather-city-row", "桌面规划模型（多步操作用）"), plannerInput = node("input");
-  plannerInput.id = "desktop_planner_model"; plannerInput.maxLength = 200;
-  plannerInput.value = savedConfig?.desktop_planner_model || "";
-  plannerInput.placeholder = "留空默认：百炼实时自动用 qwen-plus，否则用主文字模型";
-  const visionRow = node("label", "weather-city-row", "看图视觉模型（截屏找坐标用）"), visionInput = node("input");
-  visionInput.id = "desktop_vision_model"; visionInput.maxLength = 200;
-  visionInput.value = savedConfig?.desktop_vision_model || "";
-  visionInput.placeholder = "留空默认：百炼实时自动用 qwen3-vl-plus，否则用主模型";
-  const saveDesktopModel = async (inputEl, fieldKey, label) => {
-    const value = inputEl.value.trim();
-    if (value === (savedConfig?.[fieldKey] || "")) return;
-    inputEl.disabled = true;
-    try {
-      const data = await request("/api/settings/capabilities", "PUT", {[fieldKey]: value});
-      if (data && data.text) { savedConfig = data.text; savedTtsConfig = data.tts; }
-      capabilityNotice(value ? `${label}已设为：${value}` : `已恢复默认${label}。`);
-    } catch (error) {
-      inputEl.value = savedConfig?.[fieldKey] || "";
-      capabilityNotice(error.message, true);
-    } finally { inputEl.disabled = false; }
-  };
-  visionInput.addEventListener("change", () => saveDesktopModel(visionInput, "desktop_vision_model", "屏幕视觉模型"));
-  visionInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); saveDesktopModel(visionInput, "desktop_vision_model", "屏幕视觉模型"); } });
-  plannerInput.addEventListener("change", () => saveDesktopModel(plannerInput, "desktop_planner_model", "桌面规划模型"));
-  plannerInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); saveDesktopModel(plannerInput, "desktop_planner_model", "桌面规划模型"); } });
-  plannerRow.append(plannerInput); visionRow.append(visionInput);
-  fieldsWrap.append(plannerRow, visionRow); details.append(summary, fieldsWrap);
+  const st = resolveDesktopModelState();
+  const modelNote = node(
+    "p",
+    "small-note",
+    st.effectiveModel
+      ? `当前操控模型：${st.effectiveModel}（${st.direct ? "原生多模态直连 + SoM方框" : "两步转发看图"} · ${st.routeNote}）`
+      : "当前操控模型：自动按「模型与连接」凭据分配（有百炼 Key 时默认 qwen3.5-plus）。"
+  );
   card.append(
     header,
     node("p", "small-note", tool.description || "跨平台连接个人 Windows / macOS 电脑，支持截屏观察（Computer Use）、读取文件/剪贴板，并在你确认后点击界面、打开应用或执行命令。"),
-    details,
+    modelNote,
   );
   const actions = node("div", "capability-item-actions");
+  const goModels = capabilityButton("在「模型与连接」配置模型 →", () => {
+    navigate("connections");
+    requestAnimationFrame(() => el("desktop-planner-preset")?.focus());
+  });
   const goDevices = capabilityButton("连接或查看电脑节点 →", () => navigate("devices"));
-  actions.append(goDevices);
+  actions.append(goModels, goDevices);
   card.append(actions);
   return card;
 }

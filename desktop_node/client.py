@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ import time
 
 from .overlay import ScreenOverlayHUD
 from .platform_base import DesktopAdapter, DesktopRpcError
+from .som import annotate_screenshot_som
 
 logger = logging.getLogger("desktop_node")
 
@@ -43,11 +45,29 @@ def execute_rpc(
     allow_gui: bool = True,
 ) -> dict:
     if action == "screenshot":
-        return adapter.capture_screenshot(
+        shot = adapter.capture_screenshot(
             max_width=int(params.get("max_width") or 1280),
             max_height=int(params.get("max_height") or 800),
             quality=int(params.get("quality") or 80),
         )
+        if params.get("som", True) and shot.get("image_base64") and shot.get("ui_elements"):
+            try:
+                raw_bytes = base64.b64decode(shot["image_base64"])
+                som_bytes, annotated = annotate_screenshot_som(
+                    raw_bytes,
+                    shot["ui_elements"],
+                    image_width=int(shot.get("image_width") or shot.get("width") or 0),
+                    image_height=int(shot.get("image_height") or shot.get("height") or 0),
+                    screen_width=int(shot.get("screen_width") or 0),
+                    screen_height=int(shot.get("screen_height") or 0),
+                )
+                if annotated:
+                    shot["som_image_base64"] = base64.b64encode(som_bytes).decode("ascii")
+                    shot["som_mime_type"] = "image/jpeg"
+                    shot["som_annotated"] = True
+            except Exception as err:
+                logger.debug("som_annotate_skipped err=%s", type(err).__name__)
+        return shot
     if action == "clipboard_get":
         return adapter.clipboard_get()
     if action == "clipboard_set":

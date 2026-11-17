@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import subprocess
+import sys
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -12,7 +14,13 @@ import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from backend.app.config import Settings
-from backend.app.desktop import DesktopHub, build_desktop_planner_config, is_sensitive_path
+from backend.app.desktop import (
+    DesktopHub,
+    build_desktop_planner_config,
+    desktop_planner_uses_direct_vision,
+    is_sensitive_path,
+    supports_native_vision,
+)
 from backend.app.desktop_tools import (
     DesktopGuiActionTool,
     DesktopInspectScreenTool,
@@ -994,28 +1002,46 @@ def test_desktop_planner_routing_in_realtime_mode(tmp_path):
     planner_cfg = build_desktop_planner_config(rt_cfg)
     assert planner_cfg is not None
     assert planner_cfg.voice_mode == "pipeline"
-    assert planner_cfg.model == "qwen-plus"
+    assert planner_cfg.model == "qwen3.5-plus"
     assert planner_cfg.base_url == "https://ws-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    assert desktop_planner_uses_direct_vision(rt_cfg) is True
+
+    # Even when a text-only daily model (deepseek-flash-latest) is configured alongside Bailian realtime,
+    # leaving desktop_planner_model blank auto-routes desktop tasks to Bailian qwen3.5-plus.
+    from pydantic import SecretStr
+    mixed_default_cfg = rt_cfg.model_copy(update={
+        "provider": "tokendance",
+        "base_url": "https://tokendance.space/gateway/v1",
+        "api_key": SecretStr("td-secret"),
+        "model": "deepseek-flash-latest",
+        "desktop_planner_model": "",
+    })
+    mixed_default = build_desktop_planner_config(mixed_default_cfg)
+    assert mixed_default is not None
+    assert mixed_default.provider == "bailian"
+    assert mixed_default.model == "qwen3.5-plus"
+    assert desktop_planner_uses_direct_vision(mixed_default_cfg) is True
 
     override_cfg = rt_cfg.model_copy(update={"desktop_planner_model": "qwen-max"})
     assert build_desktop_planner_config(override_cfg).model == "qwen-max"  # type: ignore[union-attr]
+    assert desktop_planner_uses_direct_vision(override_cfg) is False
 
-    # When main text model points to tokendance/deepseek while desktop_planner_model is qwen-plus,
-    # it must route qwen-plus to Bailian compatible-mode + rt_api_key rather than tokendance.
-    from pydantic import SecretStr
+    # When main text model points to tokendance/deepseek while desktop_planner_model is qwen3.5-flash,
+    # it must route qwen3.5-flash to Bailian compatible-mode + rt_api_key rather than tokendance.
     mixed_cfg = rt_cfg.model_copy(update={
         "provider": "tokendance",
         "base_url": "https://tokendance.space/gateway/v1",
         "api_key": SecretStr("td-secret"),
         "model": "deepseek-flash-latest",
-        "desktop_planner_model": "qwen-plus",
+        "desktop_planner_model": "qwen3.5-flash",
     })
     mixed_plan = build_desktop_planner_config(mixed_cfg)
     assert mixed_plan is not None
     assert mixed_plan.provider == "bailian"
     assert mixed_plan.base_url == "https://ws-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
     assert mixed_plan.api_key.get_secret_value() == "rt-secret"
-    assert mixed_plan.model == "qwen-plus"
+    assert mixed_plan.model == "qwen3.5-flash"
+    assert desktop_planner_uses_direct_vision(mixed_cfg) is True
 
     base_calls = []
     planner_calls = []
@@ -1064,11 +1090,255 @@ def test_desktop_planner_routing_in_realtime_mode(tmp_path):
         assert "普通聊天" in r_plain.reply
         assert len(base_calls) == 1 and len(planner_calls) == 0
 
-        # Desktop task automatically routes to planner_factory (`qwen-plus`) and closes it cleanly
+        # Desktop task automatically routes to planner_factory (`qwen3.5-plus`) and closes it cleanly
         r_desk = await service.chat(ChatRequest(message="打开飞书找张三聊天"))
-        assert r_desk.model == "qwen-plus"
+        assert r_desk.model == "qwen3.5-plus"
         assert "强规划" in r_desk.reply
         assert len(planner_calls) == 1
         assert created_planners[0].closed is True
 
     asyncio.run(_run())
+
+
+def test_direct_vision_som_injects_image_and_prunes_prior_frames(tmp_path, monkeypatch):
+    from backend.app.desktop_tools import build_desktop_tools
+    from backend.app.llm import Completion
+    from backend.app.schemas import ChatRequest
+    from backend.app.service import ChatService
+    from backend.app.tools import ToolRegistry
+
+    # Fail loudly if two-hop VLM fallback _analyze_screenshot were ever called in direct_vision mode.
+    async def _forbid_vlm(*args, **kwargs):
+        raise AssertionError("_analyze_screenshot must not run when direct_vision=True")
+
+    hub = DesktopHub(path=tmp_path / "desktop_nodes.json")
+    monkeypatch.setattr(hub, "_analyze_screenshot", _forbid_vlm)
+
+    rt_cfg = Settings(
+        _env_file=None,
+        voice_mode="realtime",
+        rt_provider="bailian",
+        rt_api_key="rt-secret",
+        model="",
+        desktop_enabled=True,
+        usage_log_path=None,
+        history_db_path=tmp_path / "conv.sqlite3",
+        assistant_db_path=tmp_path / "state.sqlite3",
+    )
+
+    class _DummyWS:
+        async def send_json(self, _data):
+            return None
+
+        async def close(self, code=1000):
+            return None
+
+    from backend.app.desktop import DesktopNodeConnection
+    conn = DesktopNodeConnection(
+        ws=_DummyWS(), hub=hub, node_id="macos-test", name="MacBook",
+        os_name="macos", screen={"width": 1440, "height": 900},
+    )
+    frame_no = {"n": 0}
+
+    async def _fake_rpc(action, params=None, timeout=15.0):
+        assert action == "screenshot"
+        assert params and params.get("som") is True
+        frame_no["n"] += 1
+        raw_b64 = base64.b64encode(b"raw-jpeg").decode("ascii")
+        som_b64 = base64.b64encode(f"som-frame-{frame_no['n']}".encode("ascii")).decode("ascii")
+        return {
+            "image_base64": raw_b64,
+            "mime_type": "image/jpeg",
+            "som_image_base64": som_b64,
+            "som_mime_type": "image/jpeg",
+            "som_annotated": True,
+            "image_width": 1280,
+            "image_height": 800,
+            "screen_width": 1440,
+            "screen_height": 900,
+            "active_window": {"app": "Feishu", "title": "Feishu"},
+            "ui_elements": [
+                {"index": 0, "role": "AXTextField", "name": "搜索", "x": 180, "y": 42, "width": 220, "height": 28},
+                {"index": 1, "role": "AXGroup", "name": "Friday", "x": 200, "y": 145, "width": 260, "height": 48},
+            ],
+        }
+
+    monkeypatch.setattr(conn, "rpc", _fake_rpc)
+    hub.active["macos-test"] = conn
+
+    captured_rounds: list[list[dict]] = []
+
+    class _MultimodalPlanner:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        async def complete_stream(self, messages, tools=None):
+            # Snapshot deep copies of messages seen at each round
+            captured_rounds.append(json.loads(json.dumps(messages)))
+            step = len(captured_rounds)
+            if step == 1:
+                yield Completion(
+                    reply=None, usage=None, finish_reason="tool_calls",
+                    tool_calls=[{"id": "c1", "type": "function", "function": {"name": "desktop_inspect_screen", "arguments": "{}"}}],
+                )
+                return
+            if step == 2:
+                yield Completion(
+                    reply=None, usage=None, finish_reason="tool_calls",
+                    tool_calls=[{"id": "c2", "type": "function", "function": {"name": "desktop_inspect_screen", "arguments": "{}"}}],
+                )
+                return
+            yield "已在 SoM 截图中定位 Friday 并准备就绪。"
+            yield Completion(reply="已在 SoM 截图中定位 Friday 并准备就绪。", usage=None, finish_reason="stop")
+
+        async def close(self):
+            return None
+
+    class _DummyBase:
+        async def close(self):
+            return None
+
+    service = ChatService(rt_cfg, _DummyBase(), planner_factory=_MultimodalPlanner)
+    service.tools = ToolRegistry(build_desktop_tools(hub))
+
+    async def _run():
+        resp = await service.chat(ChatRequest(message="看下屏幕上的飞书界面"))
+        assert resp.model == "qwen3.5-plus"
+        assert "Friday" in resp.reply
+
+    asyncio.run(_run())
+    assert len(captured_rounds) == 3
+
+    # Round 2 sees annotated frame 1 directly via user multimodal message
+    round2_images = [
+        part["image_url"]["url"]
+        for m in captured_rounds[1]
+        if isinstance(m.get("content"), list)
+        for part in m["content"]
+        if isinstance(part, dict) and part.get("type") == "image_url"
+    ]
+    assert len(round2_images) == 1
+    assert base64.b64encode(b"som-frame-1").decode("ascii") in round2_images[0]
+
+    # Round 3 has pruned frame 1 to text stub and sends ONLY frame 2 (O(1) image tokens)
+    round3_images = [
+        part["image_url"]["url"]
+        for m in captured_rounds[2]
+        if isinstance(m.get("content"), list)
+        for part in m["content"]
+        if isinstance(part, dict) and part.get("type") == "image_url"
+    ]
+    assert len(round3_images) == 1
+    assert base64.b64encode(b"som-frame-2").decode("ascii") in round3_images[0]
+    assert any(
+        isinstance(m.get("content"), str) and "已省略更早一轮截图" in m["content"]
+        for m in captured_rounds[2]
+    )
+
+
+def test_bailian_qwen35_disables_thinking_for_desktop_tools_and_som_boxes(tmp_path):
+    from desktop_node.som import annotate_screenshot_som, build_som_boxes
+    from backend.app.llm import OpenAICompatibleProvider
+
+    # 1. Verify OpenAICompatibleProvider sets extra_body={"enable_thinking": False} only when desktop tools active
+    cfg = Settings(
+        _env_file=None,
+        provider="bailian",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key="sk-test",
+        model="qwen3.5-plus",
+        usage_log_path=None,
+    )
+    provider = OpenAICompatibleProvider(cfg)
+    recorded_kwargs = []
+
+    class _FakeStream:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    async def _fake_create(**kwargs):
+        recorded_kwargs.append(kwargs)
+        return _FakeStream()
+
+    provider.client.chat.completions.create = _fake_create  # type: ignore[method-assign]
+
+    async def _check_calls():
+        async for _ in provider.complete_stream(
+            [{"role": "user", "content": "hi"}],
+            tools=[{"type": "function", "function": {"name": "desktop_inspect_screen", "parameters": {}}}],
+        ):
+            pass
+        async for _ in provider.complete_stream(
+            [{"role": "user", "content": "hi"}],
+            tools=[{"type": "function", "function": {"name": "get_weather", "parameters": {}}}],
+        ):
+            pass
+        await provider.close()
+
+    asyncio.run(_check_calls())
+    assert recorded_kwargs[0].get("extra_body") == {"enable_thinking": False}
+    assert "extra_body" not in recorded_kwargs[1]
+    assert supports_native_vision("qwen3.5-plus") and supports_native_vision("qwen3.5-flash")
+    assert not supports_native_vision("qwen-plus") and not supports_native_vision("deepseek-flash-latest")
+
+    # 2. Verify SoM box projection preserves exact indices even when huge container elements are skipped
+    elements = [
+        {"index": 0, "x": 720, "y": 450, "width": 1430, "height": 890},  # full-screen backdrop -> skipped
+        {"index": 3, "x": 180, "y": 90, "width": 200, "height": 40},    # valid control -> keeps idx=3
+    ]
+    boxes = build_som_boxes(elements, image_width=1280, image_height=800, screen_width=1440, screen_height=900)
+    assert len(boxes) == 1
+    assert boxes[0]["idx"] == 3
+    assert boxes[0]["left"] < 160 < boxes[0]["left"] + boxes[0]["width"]
+
+    if sys.platform == "darwin":
+        ppm = tmp_path / "t.ppm"
+        jpg = tmp_path / "t.jpg"
+        ppm.write_bytes(b"P6\n160 100\n255\n" + b"\xee\xee\xee" * (160 * 100))
+        subprocess.run(["sips", "-s", "format", "jpeg", str(ppm), "--out", str(jpg)], check=True, capture_output=True)
+        out_jpg, ok = annotate_screenshot_som(
+            jpg.read_bytes(),
+            [{"index": 3, "x": 60, "y": 40, "width": 60, "height": 24}],
+            image_width=160, image_height=100, screen_width=160, screen_height=100,
+        )
+        assert ok is True and out_jpg.startswith(b"\xff\xd8")
+
+
+def test_unified_connections_saves_desktop_models(tmp_path):
+    cfg = _base_settings(tmp_path)
+    app = create_app(cfg, settings_store=SettingsStore(tmp_path / ".env"))
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        resp = client.put(
+            "/api/settings/connections",
+            json={
+                "voice_mode": "realtime",
+                "rt_provider": "bailian",
+                "rt_workspace": "",
+                "rt_model": "qwen3.8-omni-flash-realtime",
+                "rt_voice": "Tina",
+                "rt_api_key": "rt-k",
+                "base_url": cfg.base_url,
+                "provider": cfg.provider,
+                "desktop_planner_model": "qwen3.5-flash",
+                "desktop_vision_model": "qwen3-vl-plus",
+            },
+            headers=HEADERS,
+        )
+        assert resp.status_code == 200
+        body = resp.json()["text"]
+        assert body["desktop_planner_model"] == "qwen3.5-flash"
+        assert body["desktop_vision_model"] == "qwen3-vl-plus"
+        fetched = client.get("/api/settings").json()
+        assert fetched["desktop_planner_model"] == "qwen3.5-flash"
+        assert fetched["desktop_vision_model"] == "qwen3-vl-plus"
+        page = client.get("/").text
+        assert "model-overview-panel" in page and "desktop-model-panel" in page

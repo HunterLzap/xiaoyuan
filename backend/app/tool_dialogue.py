@@ -131,8 +131,8 @@ def build_tool_instructions(tool_names=None, channel="text", compact=False):
             "\n电脑操控与 Computer Use 规则：只能操作已在线的 Windows / Mac 个人电脑节点（可用 desktop_list_nodes 查询节点及平台）。"
             "读取屏幕、剪贴板、目录与文件可直接调用；"
             "执行 desktop_gui_action 前，先调用 desktop_inspect_screen 获取最新窗口控件树(ui_elements)与画面坐标："
-            "① 若目标按钮/搜索框/联系人出现在 ui_elements 中，优先直接传 element_index=<index>（100% 精准）；"
-            "② 若 ui_elements 未覆盖（如部分自绘列表），再用 suggested_screen_coords + coord_space='screen'；"
+            "① 若截图中已画有 Set-of-Mark 数字方框 `[0]`, `[1]`… 且目标出现在 ui_elements 中，直接传 element_index=<index>（100% 精准）；禁止把整条结果列表容器框选为具体联系人；"
+            "② 若 ui_elements 未覆盖（如部分自绘列表），再用直接观察到的图像坐标（注意核对 image 与 screen 尺寸换算）或 suggested_screen_coords；"
             "③ 点击并向输入框写内容优先直接用 action='click_and_type'（支持中文粘贴），搜索确认加 submit=true，聊天框留草稿则 submit=false。"
             "设置剪贴板、打开应用/网址、点击/输入/快捷键、执行终端命令均有副作用：发起调用前不要先输出“这就帮你打开/正在打开”之类的承诺句，直接调用工具；"
             "如工具返回 confirmation_required，必须清晰复述拟执行工具、目标电脑与核心参数，请用户口头/打字确认或点击界面确认卡片后再执行，未真实成功前不得声称已完成。"
@@ -483,6 +483,8 @@ class TurnTools:
         self.calls, self.snapshots, self.parse_errors = [], [], []
         self.outputs = {}
         self.pending_approval: dict | None = None
+        self.direct_vision: bool = False
+        self.pending_vision_images: list[dict] = []
         self.on_progress: Callable[[dict], None] | None = None
         self.started = perf_counter()
         self.finished = False
@@ -578,13 +580,18 @@ class TurnTools:
                 )
         return "\n".join(parts)
 
+    def consume_vision_images(self) -> list[dict]:
+        frames = list(self.pending_vision_images)
+        self.pending_vision_images.clear()
+        return frames
+
     async def execute(self, name, arguments, call_id):
         if call_id in self.outputs:
             return self.outputs[call_id]
         call = {"call_id": call_id, "tool_name": name, "request": None, "response": None,
                 "status": "error", "error_code": None, "sent_to_model": False, "http_status": None, "detail": ""}
         self.calls.append(call)
-        trace = {}
+        trace = {"direct_vision": True} if self.direct_vision else {}
         started = perf_counter()
         result = None
         emit_progress = self.on_progress is not None and name != TOOL_LOADING_NAME
@@ -668,6 +675,9 @@ class TurnTools:
                     match["original_url"] = ("/api/knowledge/personal/" + quote(match["document_id"], safe="")
                         + "/original?version=" + quote(match["document_version"], safe=""))
                     self.snapshots.append({**match, "call_id": call_id, "sent_to_model": False, "cited": None})
+            vision_frame = trace.pop("vision_image", None)
+            if isinstance(vision_frame, dict) and vision_frame.get("data_url"):
+                self.pending_vision_images.append(vision_frame)
             call["status"] = "ok"
             output = result
         except OrderConfirmationRequired as error:
@@ -886,6 +896,50 @@ def combine_usage(results):
 
 
 _DSML_RE = re.compile(r"<\s*[|｜]\s*DSML\s*[|｜][\s\S]*$")
+_DESKTOP_VISION_TAG = "[桌面视觉帧]"
+
+
+def _prune_prior_desktop_images(messages: list[dict]) -> None:
+    """Keep only lightweight text placeholders for older screenshots to avoid O(N^2) image token growth."""
+    for idx, msg in enumerate(messages):
+        if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
+            continue
+        texts = [
+            part.get("text")
+            for part in msg["content"]
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        if any(isinstance(t, str) and t.startswith(_DESKTOP_VISION_TAG) for t in texts):
+            messages[idx] = {
+                "role": "user",
+                "content": f"{_DESKTOP_VISION_TAG}（已省略更早一轮截图，请以最新截图与 ui_elements 为准）",
+            }
+
+
+def _build_desktop_vision_user_message(frame: dict) -> dict:
+    w = frame.get("width") or 0
+    h = frame.get("height") or 0
+    sw = frame.get("screen_width") or 0
+    sh = frame.get("screen_height") or 0
+    som_note = (
+        "截图已用彩色方框标出带数字序号的控件 `[0]`, `[1]`…，编号与刚才 desktop_inspect_screen 返回的 ui_elements[].index 一一对应；"
+        if frame.get("som_annotated")
+        else "请结合画面图像与刚才 desktop_inspect_screen 返回的 ui_elements 列表定位界面元素；"
+    )
+    return {
+        "role": "user",
+        "content": [
+            {"type": "image_url", "image_url": {"url": frame["data_url"]}},
+            {
+                "type": "text",
+                "text": (
+                    f"{_DESKTOP_VISION_TAG} 最新电脑屏幕截图（图像 {w}x{h}，逻辑屏幕 {sw}x{sh}）。"
+                    f"{som_note}优先传 desktop_gui_action(element_index=<序号>) 精确操作，"
+                    "列表未覆盖的自绘区域可直接根据画面坐标估算并指定 coord_space='image'。"
+                ),
+            },
+        ],
+    }
 
 
 def _strip_dsml(text: str) -> str:
@@ -969,3 +1023,8 @@ class ToolConversation:
                 output = await self.context.execute(function["name"], function["arguments"], call["id"])
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": function_call_output_payload(output)})
                 pending.append(call["id"])
+            consume_frames = getattr(self.context, "consume_vision_images", None)
+            frames = consume_frames() if callable(consume_frames) else []
+            if isinstance(frames, list) and frames:
+                _prune_prior_desktop_images(messages)
+                messages.append(_build_desktop_vision_user_message(frames[-1]))
