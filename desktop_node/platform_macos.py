@@ -123,6 +123,34 @@ class MacOSDesktopAdapter(DesktopAdapter):
     def __init__(self):
         self._cg = None
 
+    @staticmethod
+    def _has_accessibility_access() -> bool:
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return True
+        try:
+            lib = ctypes.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+            lib.AXIsProcessTrusted.restype = ctypes.c_bool
+            return bool(lib.AXIsProcessTrusted())
+        except OSError:
+            return True
+
+    @staticmethod
+    def _has_screen_recording_access() -> bool:
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return True
+        try:
+            cg_fw = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+            cg_fw.CGPreflightScreenCaptureAccess.restype = ctypes.c_bool
+            return bool(cg_fw.CGPreflightScreenCaptureAccess())
+        except OSError:
+            return True
+
+    def check_permissions(self) -> dict[str, bool]:
+        return {
+            "accessibility": self._has_accessibility_access(),
+            "screen_recording": self._has_screen_recording_access(),
+        }
+
     def _cg_lib(self):
         if self._cg is None:
             self._cg = _load_cg()
@@ -154,6 +182,17 @@ class MacOSDesktopAdapter(DesktopAdapter):
         return {"app": app, "title": title}
 
     def capture_screenshot(self, max_width: int = 1280, max_height: int = 800, quality: int = 80) -> dict[str, Any]:
+        if not self._has_screen_recording_access():
+            try:
+                cg_fw = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+                cg_fw.CGRequestScreenCaptureAccess.restype = ctypes.c_bool
+                cg_fw.CGRequestScreenCaptureAccess()
+            except OSError:
+                pass
+            raise DesktopRpcError(
+                "screen_capture_denied",
+                "macOS 未授予当前终端「录屏与系统录音」权限，截屏看不到飞书/浏览器等窗口；请在 系统设置 → 隐私与安全性 → 录屏与系统录音 开启终端后重跑 desktop_node。",
+            )
         screen = self.screen_size()
         active = self.active_window()
         tmp_path: Path | None = None
@@ -340,12 +379,12 @@ class MacOSDesktopAdapter(DesktopAdapter):
             if resolved_bundle:
                 proc2 = subprocess.run(["open", resolved_bundle], capture_output=True, text=True, timeout=10)
                 if proc2.returncode == 0:
-                    time.sleep(0.7)
+                    time.sleep(1.0)
                     return {"ok": True, "opened": resolved_bundle, "requested": clean}
         if proc.returncode != 0:
             raise DesktopRpcError("open_failed", proc.stderr.strip() or f"打开失败：{clean}")
         if kind == "app" or not is_url:
-            time.sleep(0.6)
+            time.sleep(0.9)
         return {"ok": True, "opened": clean}
 
     def gui_action(
@@ -358,6 +397,11 @@ class MacOSDesktopAdapter(DesktopAdapter):
         keys: list[str] | None = None,
         scroll_y: int = 0,
     ) -> dict[str, Any]:
+        if not self._has_accessibility_access():
+            raise DesktopRpcError(
+                "accessibility_denied",
+                "macOS 未授予当前终端「辅助功能」权限，点击/快捷键/输入会被系统丢弃；请在 系统设置 → 隐私与安全性 → 辅助功能 中开启当前终端后重跑 desktop_node。",
+            )
         cg = self._cg_lib()
         if action in {"click", "double_click", "right_click", "move"}:
             if x is None or y is None:
@@ -380,6 +424,7 @@ class MacOSDesktopAdapter(DesktopAdapter):
             elif action == "right_click":
                 self._post_mouse(cg, _kCGEventRightMouseDown, pt, _kCGMouseButtonRight)
                 self._post_mouse(cg, _kCGEventRightMouseUp, pt, _kCGMouseButtonRight)
+            time.sleep(0.12)
             return {"ok": True, "action": action, "x": int(x), "y": int(y)}
         if action == "scroll":
             if x is not None and y is not None:
@@ -387,23 +432,28 @@ class MacOSDesktopAdapter(DesktopAdapter):
             ev = cg.CGEventCreateScrollWheelEvent(None, _kCGScrollEventUnitLine, 1, int(scroll_y))
             cg.CGEventPost(_kCGHIDEventTap, ev)
             cg.CFRelease(ev)
+            time.sleep(0.08)
             return {"ok": True, "action": "scroll", "scroll_y": int(scroll_y)}
         if action == "type_text":
             if not text:
                 raise DesktopRpcError("invalid_args", "type_text 需要输入文本。")
             utf16 = text.encode("utf-16-le")
             units = [int.from_bytes(utf16[i:i + 2], "little") for i in range(0, len(utf16), 2)]
-            for start in range(0, len(units), 16):
-                chunk = units[start:start + 16]
+            for start in range(0, len(units), 8):
+                chunk = units[start:start + 8]
                 buf = (ctypes.c_uint16 * len(chunk))(*chunk)
                 down = cg.CGEventCreateKeyboardEvent(None, 0, True)
+                cg.CGEventSetFlags(down, 0)
                 cg.CGEventKeyboardSetUnicodeString(down, len(chunk), buf)
                 cg.CGEventPost(_kCGHIDEventTap, down)
                 cg.CFRelease(down)
                 up = cg.CGEventCreateKeyboardEvent(None, 0, False)
+                cg.CGEventSetFlags(up, 0)
                 cg.CGEventKeyboardSetUnicodeString(up, len(chunk), buf)
                 cg.CGEventPost(_kCGHIDEventTap, up)
                 cg.CFRelease(up)
+                time.sleep(0.015)
+            time.sleep(0.08)
             return {"ok": True, "action": "type_text", "length": len(text)}
         if action == "hotkey":
             if not keys:
@@ -429,6 +479,7 @@ class MacOSDesktopAdapter(DesktopAdapter):
             cg.CGEventPost(_kCGHIDEventTap, up)
             cg.CFRelease(down)
             cg.CFRelease(up)
+            time.sleep(0.14)
             return {"ok": True, "action": "hotkey", "keys": list(keys)}
         raise DesktopRpcError("unsupported_action", f"不支持的 GUI 动作：{action}")
 

@@ -18,7 +18,7 @@ import AppKit
 import Foundation
 
 final class BorderOverlayView: NSView {
-    var statusText: String = "小安正在操作电脑" {
+    var statusText: String = "小圆正在操作电脑" {
         didSet { needsDisplay = true }
     }
     var pulseOn: Bool = true {
@@ -160,7 +160,7 @@ DispatchQueue.global(qos: .userInitiated).async {
         DispatchQueue.main.async {
             switch cmd {
             case "show":
-                let text = (obj["text"] as? String) ?? "小安正在操作电脑"
+                let text = (obj["text"] as? String) ?? "小圆正在操作电脑"
                 controller.show(text: text)
             case "hide":
                 controller.hide()
@@ -270,7 +270,7 @@ def _run_windows_tk_worker() -> int:
         pass
 
     root.withdraw()
-    pulse_state = {"on": True, "visible": False, "text": "小安正在操作电脑"}
+    pulse_state = {"on": True, "visible": False, "text": "小圆正在操作电脑"}
 
     def _draw():
         canvas.delete("all")
@@ -301,7 +301,7 @@ def _run_windows_tk_worker() -> int:
                     pulse_state["visible"] = False
                     root.withdraw()
                 elif cmd == "show":
-                    pulse_state["text"] = str(msg.get("text") or "小安正在操作电脑")[:72]
+                    pulse_state["text"] = str(msg.get("text") or "小圆正在操作电脑")[:72]
                     pulse_state["visible"] = True
                     root.deiconify()
                     root.lift()
@@ -384,7 +384,7 @@ class ScreenOverlayHUD:
             self._hide_timer = None
 
     def show(self, label: str, detail: str = "") -> None:
-        text = f"小安正在操作电脑 · {label}" if label else "小安正在操作电脑"
+        text = f"小圆正在操作电脑 · {label}" if label else "小圆正在操作电脑"
         clean_detail = (detail or "").strip()
         if clean_detail:
             text = f"{text}（{clean_detail[:32]}）"

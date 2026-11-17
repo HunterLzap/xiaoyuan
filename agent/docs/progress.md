@@ -2,7 +2,24 @@
 
 更新：2026-11-17。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
-## 全链路执行感知（SSE + 桌面悬浮边框 HUD）与多步连贯操控升级（2026-11-17，继 `69ea876` 后 Mac 本机完成）
+## 视觉坐标校准、macOS 权限显式校验与「小圆」品牌统一（2026-11-17，继 `13410ab` 真实飞书截图排查后修复）
+
+- **真实排查发现（来自用户「打开飞书 → Friday 对话框 → 输入你好」实机截图）**：
+  - `desktop_node/overlay.py` 误写了「小安正在操作电脑」，已全部统一为 **「小圆正在操作电脑」**（`client.py` / `__init__.py` 同步改为 `Xiaoyuan`）。
+  - Qwen3-VL（`qwen3-vl-plus`）按百炼官方规范默认在 `0..1000` 归一化空间输出坐标，原按 `1280×800` 图像像素比例放大导致点击偏移 20% 以上；`app.html` 静态脚本缺版本号在浏览器热刷新场景可能沿用旧缓存；`platform_macos.py` 在终端缺少 macOS 录屏或辅助功能权限时 `screencapture` 仅拍壁纸、`CGEventPost` 被静默忽略却返回 `ok=True`；`CGEventKeyboardSetUnicodeString` 在 `hotkey` 后未显式清零修饰键；`desktop_gui_action` 缺屏幕核实提醒，导致 `qwen3.8-omni-flash-realtime` 仅执行 2 次 GUI 动作就提前宣称“已输入”。
+- **本轮改动**：
+  - `backend/app/desktop.py` & `desktop_tools.py` & `tool_dialogue.py` & `app.html` & `main.py` & `app.js`：Qwen-VL 看图改用 `0..1000` 坐标指令并提取边界框/中心点预换算为 `suggested_screen_coords`，新增 `coord_space='norm1000'`；`desktop_gui_action` 返回 `verified_on_screen=False` 与强制复核指引；`TurnTools.summaries()` 保留桌面参数（隐藏输入正文）与关键结果，展开「调用了 N 次工具 · 查看」可见实际点击坐标与看图描述；静态前端资源增加 `__ASSET_VERSION__` 与 `Cache-Control: no-cache`。
+  - `desktop_node/overlay.py` & `client.py` & `platform_macos.py` & `platform_windows.py`：统一 HUD 文案为「小圆正在操作电脑」；Mac 启动检查并提示「录屏与系统录音」「辅助功能」权限，截屏/点击无权限时立即报错 `screen_capture_denied` / `accessibility_denied`；`type_text` 清零 `CGEventSetFlags` 并分片间隔输入，`open_target` / `click` / `hotkey` 增加聚焦等待。
+- **本机最终代码后验证（Mac Darwin / `.venv` Python 3.12.13）**：
+  - Mac 原生 Swift HUD 重新编译缓存：`/Users/ryan/.cache/xiaodan/desktop-hud-9e393a3bc03c`。
+  - `node --check backend/app/app.js && node --check backend/app/voice.js`、`.venv/bin/python -m py_compile desktop_node/*.py`：通过。
+  - `.venv/bin/python scripts/lint_incremental.py`：`ruff=18, pyright=119, baseline=146, new=0`。
+  - `.venv/bin/pytest tests/test_desktop_bridge.py tests/test_gateway_trace.py tests/test_personal_kb_isolation.py tests/test_realtime_failures.py tests/test_voice_compat.py tests/test_voices.py -v`：**41 passed, 0 failed（3.24s）**。
+  - `.venv/bin/pytest tests/test_devices.py -k "not real_socket" -v`：**4 passed, 4 deselected（30.94s）**；`.venv/bin/pytest tests/test_knowledge.py -k "not chat_uses and not retrieval_failure" -v`：**10 passed, 2 deselected（0.78s）**；`.venv/bin/pytest tests/test_voice_chat.py -k "not voice_routes and not reset_invalidates and not http_disconnect" -v`：**3 passed, 3 deselected（0.52s）**。
+- **尚未验证 / 留待后续确认（不宣称已实机验收）**：
+  - 用户机端运行 `desktop_node` 的 `Terminal` 是否已在 Mac 系统设置勾选「录屏与系统录音」与「辅助功能」，以及部署本轮后实际目视确认飞书搜索 `Friday` 并输入「你好」与 Windows 端真机视觉操控仍待下一轮真机实测。
+
+## 全链路执行感知（SSE + 桌面悬浮边框 HUD）与多步连贯操控升级（2026-11-17，`13410ab` 已推送）
 
 - **解决的实际问题**：
   - 用户反馈“如何知道他在执行”且电脑操作期间需要在本机屏幕边缘与顶部看到正在操作的视觉感知；同时反馈“打开飞书并打开某人的对话框”做到打开飞书即停下。

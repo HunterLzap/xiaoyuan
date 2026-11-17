@@ -1,4 +1,4 @@
-"""WebSocket client connecting a personal Windows or macOS computer to Xiaodan Agent."""
+"""WebSocket client connecting a personal Windows or macOS computer to Xiaoyuan Agent."""
 from __future__ import annotations
 
 import argparse
@@ -188,6 +188,20 @@ async def run_node(
         raise RuntimeError("缺少依赖 websockets：请运行 pip install -r desktop_node/requirements-desktop.txt") from error
 
     adapter = build_adapter()
+    check_perms = getattr(adapter, "check_permissions", None)
+    if callable(check_perms):
+        perms = check_perms()
+        if isinstance(perms, dict):
+            missing = []
+            if perms.get("screen_recording") is False:
+                missing.append("录屏与系统录音")
+            if perms.get("accessibility") is False:
+                missing.append("辅助功能")
+            if missing:
+                logger.warning(
+                    "macOS 缺少权限 [%s]！请前往 系统设置 → 隐私与安全性 授权当前终端，否则无法看清应用窗口或点击输入。",
+                    "、".join(missing),
+                )
     hud = ScreenOverlayHUD(enabled=show_hud)
     hostname = socket.gethostname()
     resolved_id = (node_id or default_node_id(adapter.os_name, hostname)).strip()
@@ -253,7 +267,7 @@ async def run_node(
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    parser = argparse.ArgumentParser(description="Xiaodan Personal Computer Node (Windows & macOS)")
+    parser = argparse.ArgumentParser(description="Xiaoyuan Personal Computer Node (Windows & macOS)")
     parser.add_argument("--server", default=os.environ.get("DESKTOP_SERVER_URL", ""), help="WebSocket URL, e.g. wss://host/assistant/desktop/v1/")
     parser.add_argument("--token", default=os.environ.get("DESKTOP_GATEWAY_TOKEN", ""), help="Desktop gateway bearer token from 终端节点 page")
     parser.add_argument("--node-id", default=os.environ.get("DESKTOP_NODE_ID", ""), help="Optional custom node id")

@@ -346,11 +346,13 @@ class WindowsDesktopAdapter(DesktopAdapter):
                 user32.mouse_event(_MOUSEEVENTF_LEFTDOWN | _MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
             elif action == "right_click":
                 user32.mouse_event(_MOUSEEVENTF_RIGHTDOWN | _MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+            time.sleep(0.12)
             return {"ok": True, "action": action, "x": int(x), "y": int(y)}
         if action == "scroll":
             if x is not None and y is not None:
                 user32.SetCursorPos(int(x), int(y))
             user32.mouse_event(_MOUSEEVENTF_WHEEL, 0, 0, int(scroll_y) * 120, 0)
+            time.sleep(0.08)
             return {"ok": True, "action": "scroll", "scroll_y": int(scroll_y)}
         if action == "type_text":
             if not text:
@@ -365,6 +367,7 @@ class WindowsDesktopAdapter(DesktopAdapter):
                     events.append(ev)
             arr = (_INPUT * len(events))(*events)
             user32.SendInput(len(events), arr, ctypes.sizeof(_INPUT))
+            time.sleep(0.08)
             return {"ok": True, "action": "type_text", "length": len(text)}
         if action == "hotkey":
             if not keys:
@@ -392,5 +395,6 @@ class WindowsDesktopAdapter(DesktopAdapter):
                 events.append(ev)
             arr = (_INPUT * len(events))(*events)
             user32.SendInput(len(events), arr, ctypes.sizeof(_INPUT))
+            time.sleep(0.14)
             return {"ok": True, "action": "hotkey", "keys": list(keys)}
         raise DesktopRpcError("unsupported_action", f"不支持的 GUI 动作：{action}")

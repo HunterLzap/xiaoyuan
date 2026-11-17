@@ -398,8 +398,15 @@ function renderMessageReferences(article,message) {
     for (const call of message.tool_calls) {
       const entry = node("li");
       entry.append(node("span","",`${toolDisplayName(call.tool_name || call.name)} (${call.tool_name || call.name || "tool"})`));
-      const bits = [call.status || (call.http_status != null ? `HTTP ${call.http_status}` : ""), call.elapsed_ms != null ? `${call.elapsed_ms} ms` : "", call.error_code || ""].filter(Boolean);
+      const bits = [call.detail || "", call.status || (call.http_status != null ? `HTTP ${call.http_status}` : ""), call.elapsed_ms != null ? `${call.elapsed_ms} ms` : "", call.error_code || ""].filter(Boolean);
       if (bits.length) entry.append(node("span","metadata",bits.join(" · ")));
+      const resp = call.response || {};
+      const extra = [];
+      if (call.request?.arguments && (call.tool_name || "").startsWith("desktop_")) extra.push(`参数：${JSON.stringify(call.request.arguments)}`);
+      if (resp.screen_coords) extra.push(`点击坐标：(${resp.screen_coords.x}, ${resp.screen_coords.y})`);
+      if (resp.vision_analysis) extra.push(`看图：${resp.vision_analysis}`);
+      if (resp.vision_error || resp.message) extra.push(`返回：${resp.vision_error || resp.message}`);
+      if (extra.length) entry.append(node("div", "metadata", extra.join(" ｜ ")));
       list.append(entry);
     }
     details.append(list); article.append(details);

@@ -170,9 +170,22 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     app = FastAPI(title="AtomS3R AI Assistant", version="0.2.0", lifespan=lifespan,
                   root_path=startup_config.public_base_path)
 
+    def _asset_version() -> str:
+        base = Path(__file__).parent
+        stamps = [
+            int((base / name).stat().st_mtime)
+            for name in ("app.html", "app.css", "paths.js", "app.js", "voice.js")
+            if (base / name).exists()
+        ]
+        return str(max(stamps) if stamps else 1)
+
     def app_page():
         content = Path(__file__).with_name("app.html").read_text(encoding="utf-8")
-        return HTMLResponse(content.replace("__APP_BASE_PATH__", startup_config.public_base_path))
+        html = (
+            content.replace("__APP_BASE_PATH__", startup_config.public_base_path)
+            .replace("__ASSET_VERSION__", _asset_version())
+        )
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
     allowed_hosts = ["localhost", "127.0.0.1", "[::1]"]
     if startup_config.public_origin:
         allowed_hosts.append(urllib.parse.urlsplit(startup_config.public_origin).hostname)
@@ -523,19 +536,19 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     @app.get("/settings.js", include_in_schema=False)
     @app.get("/app.js", include_in_schema=False)
     async def settings_script():
-        return FileResponse(Path(__file__).with_name("app.js"), media_type="text/javascript")
+        return FileResponse(Path(__file__).with_name("app.js"), media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
     @app.get("/paths.js", include_in_schema=False)
     async def paths_script():
-        return FileResponse(Path(__file__).with_name("paths.js"), media_type="text/javascript")
+        return FileResponse(Path(__file__).with_name("paths.js"), media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
     @app.get("/voice.js", include_in_schema=False)
     async def voice_script():
-        return FileResponse(Path(__file__).with_name("voice.js"), media_type="text/javascript")
+        return FileResponse(Path(__file__).with_name("voice.js"), media_type="text/javascript", headers={"Cache-Control": "no-cache"})
 
     @app.get("/app.css", include_in_schema=False)
     async def app_styles():
-        return FileResponse(Path(__file__).with_name("app.css"), media_type="text/css")
+        return FileResponse(Path(__file__).with_name("app.css"), media_type="text/css", headers={"Cache-Control": "no-cache"})
 
     def settings_payload(config: Settings) -> dict:
         return {**public_settings(config), "voice_profiles": app.state.voice_profiles.all_profiles()}

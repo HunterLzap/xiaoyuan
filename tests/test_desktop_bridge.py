@@ -557,7 +557,7 @@ def test_realtime_bailian_vision_fallback_and_app_alias(tmp_path, monkeypatch):
             captured_requests.append((url, headers, json))
             return SimpleNamespace(
                 status_code=200,
-                json=lambda: {"choices": [{"message": {"content": "屏幕左上角看到飞书搜索框"}}]},
+                json=lambda: {"choices": [{"message": {"content": "屏幕左上角看到飞书搜索框 [500, 250, 700, 350]"}}]},
             )
 
     monkeypatch.setattr("backend.app.desktop.httpx.AsyncClient", _FakeHttpClient)
@@ -572,6 +572,11 @@ def test_realtime_bailian_vision_fallback_and_app_alias(tmp_path, monkeypatch):
         os_name="macos",
     ))
     assert "飞书搜索框" in vision_out["vision_analysis"]
+    assert vision_out["vision_coord_space"] == "norm1000"
+    assert vision_out["suggested_screen_coords"][0]["screen_x"] == 882
+    assert vision_out["suggested_screen_coords"][0]["screen_y"] == 287
+    fake_conn = SimpleNamespace(last_screenshot={"image_width": 1280, "image_height": 800, "screen_width": 1470, "screen_height": 956}, screen={"width": 1470, "height": 956})
+    assert hub.convert_coordinates(fake_conn, 600, 300, coord_space="norm1000") == (882, 287)  # type: ignore[arg-type]
     assert captured_requests[0][0] == "https://ws-test.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"
     assert captured_requests[0][2]["model"] == "qwen3-vl-plus"
 
@@ -830,3 +835,16 @@ def test_desktop_node_hud_description_and_handle_request():
     assert events[0] == ("show", "观察电脑屏幕", "")
     assert events[1][0] == "schedule_hide"
     assert ws.sent[0]["ok"] is True
+
+    # Verify HUD branding uses "小圆正在操作电脑" (no legacy "小安")
+    sent_payloads = []
+    from desktop_node.overlay import ScreenOverlayHUD
+    hud = ScreenOverlayHUD(enabled=False)
+
+    def _capture(payload):
+        sent_payloads.append(payload)
+
+    hud._send = _capture  # type: ignore[method-assign]
+    hud.show("打开应用或链接", "飞书")
+    assert sent_payloads[0]["text"].startswith("小圆正在操作电脑")
+    assert "小安" not in sent_payloads[0]["text"]

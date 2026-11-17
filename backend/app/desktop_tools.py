@@ -135,8 +135,8 @@ DESKTOP_GUI_ACTION_SPEC = ToolSpec(
             "y": {"type": "integer", "minimum": 0, "maximum": 16000, "description": "点击/移动/滚轮的目标纵坐标。"},
             "coord_space": {
                 "type": "string",
-                "enum": ["image", "screen"],
-                "description": "坐标来源：image 表示来自最近一次 desktop_inspect_screen 截图中的像素坐标（默认，服务端自动按分辨率缩放）；screen 表示物理/逻辑屏幕坐标。",
+                "enum": ["image", "screen", "norm1000"],
+                "description": "坐标来源：screen 直接用 inspect_screen 返回的 suggested_screen_coords（最推荐）；norm1000 为视觉模型 0-1000 归一化坐标；image 为截图图像像素坐标（默认）。",
             },
             "text": {"type": "string", "minLength": 1, "maxLength": 2000, "description": "当 action=type_text 时要输入的文本。"},
             "keys": {
@@ -267,7 +267,13 @@ class DesktopOpenTool(_DesktopBaseTool):
             {"target": target, "kind": arguments.get("kind") or "auto"},
             timeout=15.0,
         )
-        return {"node_id": conn.node_id, "node_name": conn.name, "os": conn.os_name, **res}
+        return {
+            "node_id": conn.node_id,
+            "node_name": conn.name,
+            "os": conn.os_name,
+            **res,
+            "next_step_note": "应用/目标已触发启动，请调用 desktop_inspect_screen 确认其窗口已真实前置并定位输入框或按钮，不要只打开应用就停下。",
+        }
 
 
 class DesktopGuiActionTool(_DesktopBaseTool):
@@ -303,6 +309,11 @@ class DesktopGuiActionTool(_DesktopBaseTool):
             "os": conn.os_name,
             "screen_coords": {"x": scr_x, "y": scr_y} if scr_x is not None and scr_y is not None else None,
             **res,
+            "verified_on_screen": False,
+            "next_step_note": (
+                "底层键鼠信号已发送，但系统无法保证焦点正确或文本已真的上屏。"
+                "在向用户说‘已找到/已输入/已完成’之前，必须先调用 desktop_inspect_screen 截图核实画面是否真的达到目标；看不到就继续补救或如实说明。"
+            ),
         }
 
 

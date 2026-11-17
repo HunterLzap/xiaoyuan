@@ -130,11 +130,13 @@ def build_tool_instructions(tool_names=None, channel="text", compact=False):
         parts.append(
             "\n电脑操控与 Computer Use 规则：只能操作已在线的 Windows / Mac 个人电脑节点（可用 desktop_list_nodes 查询节点及平台）。"
             "读取屏幕、剪贴板、目录与文件可直接调用；"
-            "执行 desktop_gui_action 前，先调用 desktop_inspect_screen 获取当前分辨率与画面判断目标坐标。"
+            "执行 desktop_gui_action 前，先调用 desktop_inspect_screen 获取当前分辨率与画面，优先直接使用返回的 suggested_screen_coords 并配合 coord_space='screen'。"
             "设置剪贴板、打开应用/网址、点击/输入/快捷键、执行终端命令均有副作用：发起调用前不要先输出“这就帮你打开/正在打开”之类的承诺句，直接调用工具；"
             "如工具返回 confirmation_required，必须清晰复述拟执行工具、目标电脑与核心参数，请用户口头/打字确认或点击界面确认卡片后再执行，未真实成功前不得声称已完成。"
-            "多步电脑任务（如“打开某应用并打开某人的对话框/搜索某内容”）在已有授权或 3 分钟桌面免问期间，必须主动连续完成全部步骤，不要只打开应用就停下："
-            "打开应用后接着调用 desktop_inspect_screen 确认界面前置，再用 desktop_gui_action（如点击搜索框或 hotkey 搜索、输入名称、回车并再次截屏核实列表并点击目标）完成最后一步，最后截屏确认画面无误后再向用户答复。"
+            "多步电脑任务（例如“打开飞书，找某人打开对话框并输入文字”）在已有授权或 3 分钟桌面免问期间，必须主动连续推进全部步骤并每步截屏核实："
+            "① desktop_open 打开应用；② desktop_inspect_screen 确认窗口前置与搜索框位置；③ desktop_gui_action 点击搜索框或按快捷键搜索并输入联系人名字；"
+            "④ desktop_inspect_screen 确认出现搜索结果后点击目标联系人；⑤ 再截屏确认已进入对应对话框，必要时点击底部消息输入框后再 type_text（除非用户要求发送，否则仅输入不发送）；"
+            "⑥ desktop_gui_action 返回 ok 只代表信号已发，绝对禁止跳过最后的 desktop_inspect_screen 截屏核实就声称‘已找到/已输入’！若截图看不到预期变化，如实说明卡在哪一步。"
         )
     return "".join(parts)
 MAX_TOOL_CALLS = 8
@@ -771,6 +773,23 @@ class TurnTools:
             if call["tool_name"] in CONTROL_TOOLS:
                 item["request"] = call.get("request")
                 item["response"] = call.get("response")
+            elif call["tool_name"] in DESKTOP_TOOL_NAMES:
+                req = call.get("request") or {}
+                args = dict(req.get("arguments") or {}) if isinstance(req, dict) else {}
+                if "text" in args and isinstance(args["text"], str):
+                    args["text"] = f"({len(args['text'])} 字)"
+                item["request"] = {"arguments": args}
+                resp = call.get("response")
+                if isinstance(resp, dict):
+                    brief = {}
+                    for k in ("opened", "action", "x", "y", "screen_coords", "active_window", "vision_error", "error", "message", "suggested_screen_coords"):
+                        if resp.get(k) is not None:
+                            brief[k] = resp.get(k)
+                    if resp.get("vision_analysis"):
+                        va = str(resp["vision_analysis"]).strip()
+                        brief["vision_analysis"] = va[:180] + ("..." if len(va) > 180 else "")
+                    if brief:
+                        item["response"] = brief
             summaries.append(item)
         return summaries
 

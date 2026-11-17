@@ -11,6 +11,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import secrets
 import socket
 import tempfile
@@ -160,6 +161,41 @@ class DesktopNodeConnection:
             if not future.done():
                 future.set_exception(ProviderError(409, "desktop_disconnected", "电脑节点已断开，操作未确认完成。"))
         self.pending.clear()
+
+
+_VISION_BRACKET_RE = re.compile(
+    r"\[\s*(\d{1,4})\s*,\s*(\d{1,4})(?:\s*,\s*(\d{1,4})\s*,\s*(\d{1,4}))?\s*\]"
+)
+
+
+def _extract_vision_screen_coords(
+    text: str, *, norm_1000: bool, img_w: int, img_h: int, scr_w: int, scr_h: int,
+) -> list[dict]:
+    if not text or scr_w <= 0 or scr_h <= 0:
+        return []
+    out: list[dict] = []
+    for match in _VISION_BRACKET_RE.finditer(text):
+        nums = [int(g) for g in match.groups() if g is not None]
+        if len(nums) == 4:
+            cx = (nums[0] + nums[2]) / 2.0
+            cy = (nums[1] + nums[3]) / 2.0
+        elif len(nums) == 2:
+            cx, cy = float(nums[0]), float(nums[1])
+        else:
+            continue
+        if norm_1000 and max(nums) <= 1000:
+            sx = round(cx * scr_w / 1000.0)
+            sy = round(cy * scr_h / 1000.0)
+        elif img_w > 0 and img_h > 0:
+            sx = round(cx * scr_w / img_w)
+            sy = round(cy * scr_h / img_h)
+        else:
+            continue
+        if 0 <= sx <= scr_w and 0 <= sy <= scr_h:
+            out.append({"screen_x": sx, "screen_y": sy, "source": match.group(0)})
+            if len(out) >= 6:
+                break
+    return out
 
 
 class DesktopHub:
@@ -444,12 +480,18 @@ class DesktopHub:
             model = configured_model or settings.model.strip()
         if not base_url or not api_key or not model:
             return {"vision_analysis": None, "vision_note": "未配置支持视觉的模型接口，已返回窗口信息与截图尺寸。"}
+        is_qwen_vl = "qwen" in model.lower()
+        coord_guide = (
+            "如果需要给出按钮或输入框坐标，请严格使用你原生的 0..1000 归一化坐标系（左上角 [0, 0]，右下角 [1000, 1000]），"
+            "以边界框 [x1, y1, x2, y2] 或中心点 [x, y] 格式标注，不要自行换算像素。"
+            if is_qwen_vl
+            else f"如果需要定位或点击某按钮/输入框，请给出它在图像坐标系（x: 0..{img_w}, y: 0..{img_h}）中的中心点坐标 [x, y]。"
+        )
         prompt = (
             f"这是 {os_name} 电脑当前屏幕截图（图像尺寸 {img_w}x{img_h}，逻辑屏幕 {scr_w}x{scr_h}）。\n"
             f"用户/代理观察问题：{question}\n"
-            "请简明准确地描述画面中可见的内容，回答问题；如果需要定位或点击某按钮/输入框，"
-            f"请给出它在图像坐标系（x: 0..{img_w}, y: 0..{img_h}）中的中心点像素坐标 [x, y]。"
-            "只报告图像中真实看到的元素，看不到时明确说明。"
+            f"请简明准确地描述画面中实际可见的窗口和元素（特别是前景窗口、搜索框、联系人或输入框文字），回答问题；{coord_guide}"
+            "只报告截图里真实看到的文字与元素，看不到时明确说明。"
         )
         payload = {
             "model": model,
@@ -481,8 +523,17 @@ class DesktopHub:
                 }
             data = resp.json()
             choice = (data.get("choices") or [{}])[0]
-            content = ((choice.get("message") or {}).get("content")) or ""
-            return {"vision_analysis": str(content).strip()}
+            content = str(((choice.get("message") or {}).get("content")) or "").strip()
+            result: dict = {
+                "vision_analysis": content,
+                "vision_coord_space": "norm1000" if is_qwen_vl else "image",
+            }
+            suggested = _extract_vision_screen_coords(
+                content, norm_1000=is_qwen_vl, img_w=img_w, img_h=img_h, scr_w=scr_w, scr_h=scr_h,
+            )
+            if suggested:
+                result["suggested_screen_coords"] = suggested
+            return result
         except (httpx.HTTPError, ValueError, KeyError, IndexError) as error:
             err_msg = f"屏幕视觉解析请求失败：{type(error).__name__}"
             self.record_error("desktop_vision_error", err_msg, detail={"model": model})
@@ -493,13 +544,13 @@ class DesktopHub:
     ) -> tuple[int | None, int | None]:
         if x is None or y is None or coord_space == "screen":
             return x, y
-        shot = conn.last_screenshot
-        if not shot:
-            return x, y
+        shot = conn.last_screenshot or {}
         img_w = shot.get("image_width") or 0
         img_h = shot.get("image_height") or 0
-        scr_w = shot.get("screen_width") or 0
-        scr_h = shot.get("screen_height") or 0
+        scr_w = shot.get("screen_width") or conn.screen.get("width") or 0
+        scr_h = shot.get("screen_height") or conn.screen.get("height") or 0
+        if coord_space == "norm1000" and scr_w > 0 and scr_h > 0:
+            return round(x * scr_w / 1000.0), round(y * scr_h / 1000.0)
         if img_w > 0 and img_h > 0 and scr_w > 0 and scr_h > 0:
             return round(x * scr_w / img_w), round(y * scr_h / img_h)
         return x, y
