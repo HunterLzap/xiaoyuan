@@ -894,11 +894,20 @@ def test_ui_tree_element_index_and_click_and_type(tmp_path, monkeypatch):
             }
 
     hub.active["mac-ui"] = _FakeNode()  # type: ignore[assignment]
+    vision_called = []
+
+    async def _fake_vision(**kw):
+        vision_called.append(kw["question"])
+        return {"vision_analysis": "搜索下拉列表显示 Friday [40, 220, 220, 260]"}
+
+    monkeypatch.setattr(hub, "_analyze_screenshot", _fake_vision)
 
     async def _run():
         inspected = await DesktopInspectScreenTool(hub).run({})
+        assert vision_called and "联系人列表" in vision_called[0]
         assert inspected["ui_elements"][0]["name"] == "搜索（⌘＋K）"
         assert "element_index" in inspected["targeting_hint"]
+        assert rpc_calls[-1][0] == "screenshot"
 
         gui = DesktopGuiActionTool(hub)
         res = await gui.run({"action": "click_and_type", "element_index": 0, "text": "Friday", "submit": True})
@@ -910,6 +919,21 @@ def test_ui_tree_element_index_and_click_and_type(tmp_path, monkeypatch):
         with pytest.raises(ProviderError) as err:
             await gui.run({"action": "click", "element_index": 5})
         assert err.value.code == "invalid_element_index"
+
+        # Verify key_press + string keys coercion via TurnTools + ToolGateway and DSML cleanup
+        from backend.app.tool_dialogue import TurnTools, _strip_dsml
+        from backend.app.tool_gateway import ToolGateway
+        assert _strip_dsml("已完成部分。\n<｜DSML｜calls>\n</｜DSML｜calls>") == "已完成部分。"
+        gw = ToolGateway()
+        sid, tid = uuid4(), uuid4()
+        tt = TurnTools(ToolRegistry([gui]), None, (), sid, tid, "text", tool_gateway=gw)
+        blocked_out = await tt.execute("desktop_gui_action", '{"action":"key_press","keys":"Escape"}', "call-esc-ask")
+        assert blocked_out["error"] == "confirmation_required"
+        gw.confirmations.decide(blocked_out["approval_id"], "approve_desktop_lease", session_id=sid)
+        out_esc = await tt.execute("desktop_gui_action", '{"action":"key_press","keys":"Escape"}', "call-esc-ok")
+        assert out_esc["ok"] is True
+        assert rpc_calls[-1][1]["action"] == "hotkey"
+        assert rpc_calls[-1][1]["keys"] == ["Escape"]
 
     asyncio.run(_run())
 

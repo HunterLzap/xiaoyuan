@@ -2,7 +2,24 @@
 
 更新：2026-11-17。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
-## 控件树精准定位、剪贴板复合输入与强规划模型路由（2026-11-17，继 `167600e` 后参考 `open-computer-use` 核心机制落地）
+## 飞书实测截屏盲点、DSML 上限泄露与控件卡补全修复（2026-11-17，继 `83ed03c` 飞书搜索停顿排查后修复）
+
+- **真实排查发现（来自用户「打开飞书，找 Friday 并输入你好」与 `deepseek-flash-latest` 实测截图）**：
+  - `83ed03c` 成功点击 `#1 搜索（⌘＋K）` 并向 `#21` 粘贴写入 `Friday`，但随后误点了顶部「消息」筛选标签并在第 10 轮后在聊天窗输出原始 `<｜DSML｜calls>` 文本。
+  - 实查 4 处根因：① 后 4 次 `desktop_inspect_screen` 因模型省略 `question` 参数导致 `analyze_vision=False`（仅 684ms 未调 `qwen3-vl-plus`），规划模型完全看不到截图内容；② macOS `ui_tree.py` 过滤了带标签的 `AXGroup` Electron 列表卡片；③ 模型传 `action="key_press"` 与字符串 `"keys": "Escape"` 触发参数校验失败浪费 1 轮，第 10 轮 `tools=[]` 时 `deepseek-flash-latest` 吐出原始 DSML 标签；④ 搜索结果指引未强调区分联系人列表与顶部「消息」筛选标签。
+- **本轮改动**：
+  - `backend/app/desktop_tools.py`：`DesktopInspectScreenTool.run` 默认补齐综合看图描述与坐标问题并始终开启 `analyze_vision=True`。
+  - `desktop_node/ui_tree.py`：在 macOS `AXUIElement` 扫描器补充保留带非空名称且为列表卡片尺寸（`24..760 × 18..160`）的 `AXGroup`。
+  - `backend/app/tool_dialogue.py`：桌面上限扩至 `16` 轮 / `28` 次调用；`TurnTools.execute` 在 schema 校验前兼容 `key_press`/`press_key`/`press` 与字符串 `key`/`keys`；满轮收尾向模型追加禁 XML/DSML 提示并由 `_strip_dsml` 在流与 `complete()` 出口统一清洗；`DESKTOP_TOOL_NAMES` 显式区分下拉联系人卡片与顶部「消息」筛选按钮。
+- **本机最终代码后验证（Mac Darwin / `.venv` Python 3.12.13）**：
+  - `node --check backend/app/app.js && node --check backend/app/voice.js`、`.venv/bin/python -m py_compile desktop_node/*.py`：通过。
+  - `.venv/bin/python scripts/lint_incremental.py`：`ruff=18, pyright=119, baseline=146, new=0`。
+  - `.venv/bin/pytest tests/test_desktop_bridge.py tests/test_gateway_trace.py tests/test_personal_kb_isolation.py tests/test_realtime_failures.py tests/test_voice_compat.py tests/test_voices.py -v`：**43 passed, 0 failed（3.52s）**（含 `DesktopInspectScreenTool` 默认触发视觉、`TurnTools + ToolGateway` 校验 `key_press` + 字符串 `keys` 兼容、以及 `_strip_dsml` 清洗测试）。
+  - `.venv/bin/pytest tests/test_devices.py -k "not real_socket" -v`：**4 passed, 4 deselected（30.94s）**；`.venv/bin/pytest tests/test_knowledge.py -k "not chat_uses and not retrieval_failure" -v`：**10 passed, 2 deselected（0.61s）**；`.venv/bin/pytest tests/test_voice_chat.py -k "not voice_routes and not reset_invalidates and not http_disconnect" -v`：**3 passed, 3 deselected（0.49s）**。
+- **尚未验证 / 留待后续确认（不宣称已实机验收）**：
+  - 推云部署本版后，在登录解锁状态的 Mac 飞书窗口实测「打开飞书 → 搜 Friday → 点联系人进入聊天窗 → 输入你好」。
+
+## 控件树精准定位、剪贴板复合输入与强规划模型路由（2026-11-17，`83ed03c` 已推送）
 
 - **改动范围**：
   - **跨平台系统辅助功能控件树与回读校验（`desktop_node/ui_tree.py`、`platform_base.py`、`platform_macos.py`、`platform_windows.py`）**：macOS 使用原生 Swift `AXUIElement`（开启 `AXManualAccessibility` / `AXEnhancedUserInterface` 以探测 Electron 控件，遍历多窗口并提取精确中心点坐标与聚焦元素）；Windows 使用标准库 PowerShell .NET `UIAutomationClient` 枚举前窗控件与 `BoundingRectangle` 中心。`capture_screenshot` 同步返回 `ui_elements` 与 `focused_element`；`gui_action` 完成后附带轻量 `post_action_readback`（聚焦控件角色/名称/文本值）。Mac 本机真实运行中的「飞书」窗口实测首次编绎含缓存提取出 18 个精确控件（含 `AXButton '搜索（⌘＋K）' (34, 143)`），热运行耗时约 83ms。

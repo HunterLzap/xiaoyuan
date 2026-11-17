@@ -112,7 +112,8 @@ if let app = NSWorkspace.shared.frontmostApplication {
             let rawName = [title, desc, ph].first(where: { !$0.isEmpty }) ?? val
             if let r = rectAttr(cur), r.width >= 6 && r.height >= 6 && r.width < 1400 && r.height < 900 && r.midX > 0 && r.midY > 0 {
                 let isInput = role.contains("Text") || role.contains("Search") || role == "AXComboBox"
-                if interactive.contains(role) && (!rawName.isEmpty || isInput) {
+                let isLabeledCard = role == "AXGroup" && !rawName.isEmpty && r.width >= 24 && r.height >= 18 && r.width <= 760 && r.height <= 160
+                if (interactive.contains(role) || isLabeledCard) && (!rawName.isEmpty || isInput) {
                     let cx = Int(r.midX)
                     let cy = Int(r.midY)
                     let shortName = String(rawName.replacingOccurrences(of: "\n", with: " ").prefix(64))

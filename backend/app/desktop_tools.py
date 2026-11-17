@@ -200,10 +200,14 @@ class DesktopInspectScreenTool(_DesktopBaseTool):
     spec = DESKTOP_INSPECT_SCREEN_SPEC
 
     async def run(self, arguments, *, trace=None):
+        q = (arguments.get("question") or "").strip() or (
+            "请简明描述当前前台窗口最主要的界面结构、可见菜单/搜索结果卡片/联系人列表与输入框，"
+            "并对关键可点击目标给出坐标框 [x1, y1, x2, y2]。"
+        )
         return await self.hub.inspect_screen(
             node_id=arguments.get("node_id"),
-            question=arguments.get("question", ""),
-            analyze_vision=bool((arguments.get("question") or "").strip()),
+            question=q,
+            analyze_vision=True,
         )
 
 

@@ -137,14 +137,16 @@ def build_tool_instructions(tool_names=None, channel="text", compact=False):
             "设置剪贴板、打开应用/网址、点击/输入/快捷键、执行终端命令均有副作用：发起调用前不要先输出“这就帮你打开/正在打开”之类的承诺句，直接调用工具；"
             "如工具返回 confirmation_required，必须清晰复述拟执行工具、目标电脑与核心参数，请用户口头/打字确认或点击界面确认卡片后再执行，未真实成功前不得声称已完成。"
             "多步电脑任务（例如“打开飞书，找某人打开对话框并输入文字”）在已有授权或 3 分钟桌面免问期间，必须主动连续推进全部步骤并在每步核对："
-            "打开应用后先 desktop_inspect_screen 看清窗口/控件；搜索联系人可用 element_index 或 click_and_type(submit=true)；"
-            "再截屏确认已进入对应对话框；最后再 click_and_type 或 paste_text 输入文字并用 desktop_inspect_screen + focused_element 亲眼确认文字已出现后才能答复完成！"
+            "① 打开应用后先 desktop_inspect_screen 看清窗口/控件；"
+            "② 在飞书/微信搜人时，点击或快捷键打开搜索后，先输入联系人名字（尽量设 submit=false，不要瞎按回车或点顶部的‘消息/筛选’按钮！），然后调用 desktop_inspect_screen(question='找出下拉搜索结果中该联系人的头像或行坐标')；"
+            "③ 从 ui_elements 或视觉坐标点击下拉结果里的目标联系人头像/行进入聊天窗口（绝对不要点成‘消息’筛选标签！）；"
+            "④ 再截屏确认顶部标题已变成目标联系人对话窗口，点击底部消息输入框输入文字，最后再用 desktop_inspect_screen + focused_element 亲眼确认文字已在输入框内后再回复完成。"
         )
     return "".join(parts)
 MAX_TOOL_CALLS = 8
 MAX_TOOL_ROUNDS = 4
-MAX_DESKTOP_TOOL_CALLS = 20
-MAX_DESKTOP_TOOL_ROUNDS = 10
+MAX_DESKTOP_TOOL_CALLS = 28
+MAX_DESKTOP_TOOL_ROUNDS = 16
 TOOL_LOADING_NAME = "_load_task_tools"
 
 
@@ -598,6 +600,14 @@ class TurnTools:
             args = json.loads(arguments or "{}")
             if not isinstance(args, dict):
                 raise ProviderError(422, "tool_arguments", "模型工具参数必须是 JSON 对象。")
+            if name == "desktop_gui_action":
+                if args.get("action") in ("key_press", "press_key", "press"):
+                    args["action"] = "hotkey"
+                if "key" in args and not args.get("keys"):
+                    raw_key = args.pop("key")
+                    args["keys"] = [raw_key] if isinstance(raw_key, str) else list(raw_key or [])
+                elif isinstance(args.get("keys"), str):
+                    args["keys"] = [args["keys"]]
             call["request"] = {"arguments": args}
             call["detail"] = _progress_detail(name, args)
             if emit_progress and self.on_progress is not None:
@@ -875,6 +885,16 @@ def combine_usage(results):
     return TokenUsage(**counts)
 
 
+_DSML_RE = re.compile(r"<\s*[|｜]\s*DSML\s*[|｜][\s\S]*$")
+
+
+def _strip_dsml(text: str) -> str:
+    if "<｜DSML｜" in text or "<|DSML|" in text:
+        cleaned = _DSML_RE.sub("", text).strip()
+        return cleaned or "本轮桌面操作步数已达上限，未完全执行完毕，请补充指令继续。"
+    return text
+
+
 class ToolConversation:
     def __init__(self, provider, context):
         self.provider, self.context = provider, context
@@ -889,7 +909,7 @@ class ToolConversation:
                 else:
                     result = item
         result = result or Completion(None, None, None)
-        result.reply = reply
+        result.reply = _strip_dsml(reply)
         return result
 
     async def complete_stream(self, messages):
@@ -911,9 +931,18 @@ class ToolConversation:
         max_rounds, _ = turn_limits(self.context.allowed)
         for round_index in range(max_rounds + 1):
             definitions = selection.definitions(nested=True) if selection is not None else self.context.definitions(nested=True)
+            req_messages = messages
+            if round_index == max_rounds:
+                req_messages = [
+                    *messages,
+                    {
+                        "role": "user",
+                        "content": "（系统提示：本轮工具调用次数已达上限，当前不提供任何工具。禁止输出 DSML / XML 工具标签，请直接用简洁中文向用户汇报已完成和未完成的步骤。）",
+                    },
+                ]
             text, result = "", None
             try:
-                async with aclosing(self.provider.complete_stream(messages, tools=definitions if round_index < max_rounds else [])) as stream:
+                async with aclosing(self.provider.complete_stream(req_messages, tools=definitions if round_index < max_rounds else [])) as stream:
                     async for item in stream:
                         self.context.mark_sent(pending)
                         if isinstance(item, Completion):
@@ -922,6 +951,7 @@ class ToolConversation:
                             text += item
                             yield item
             finally:
+                text = _strip_dsml(text)
                 result = result or Completion(text, None, None)
                 result.reply = text
                 self.results.append(result)
