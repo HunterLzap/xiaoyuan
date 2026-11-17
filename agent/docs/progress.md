@@ -2,7 +2,13 @@
 
 更新：2026-11-17。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
-## 飞书实测截屏盲点、DSML 上限泄露与控件卡补全修复（2026-11-17，继 `83ed03c` 飞书搜索停顿排查后修复）
+## 桌面规划模型百炼端点混用修正（2026-11-17，继 `d29cf1d` 填入 `qwen-plus` 报 400 后修复）
+
+- **问题原因**：主文字接口同时配了非百炼网关（`tokendance.space` + `deepseek-flash-latest`）而语音配了百炼（`rt_provider="bailian"`）时，填入 `desktop_planner_model="qwen-plus"` 误把 `qwen-plus` 发往主文字 `base_url` 导致模型服务拒绝请求。
+- **改动**：`backend/app/desktop.py` 抽取 `_is_bailian_model_name` / `_has_bailian_key` / `_bailian_compatible_base_url` / `_bailian_planner_copy`，视觉看图与桌面规划共用统一分流：当 `desktop_planner_model` 为 `qwen*`/`qvq*` 且主文字 `base_url` 不含 `aliyuncs.com`、已配百炼密钥时，自动走百炼 `compatible-mode/v1` + `rt_api_key`。
+- **本机代码后验证**：`lint_incremental` `new=0`；`tests/test_desktop_bridge.py` + 核心套件 **43 passed（3.73s）**（含新增混合配置分流用例）；`test_devices -k "not real_socket"` **4 passed（31.13s）**；`test_knowledge` **10 passed（0.80s）**；`test_voice_chat` **3 passed（0.58s）**。云端真实 `qwen-plus` 端到端飞书实测待部署后验证。
+
+## 飞书实测截屏盲点、DSML 上限泄露与控件卡补全修复（2026-11-17，`d29cf1d` 已推送）
 
 - **真实排查发现（来自用户「打开飞书，找 Friday 并输入你好」与 `deepseek-flash-latest` 实测截图）**：
   - `83ed03c` 成功点击 `#1 搜索（⌘＋K）` 并向 `#21` 粘贴写入 `Friday`，但随后误点了顶部「消息」筛选标签并在第 10 轮后在聊天窗输出原始 `<｜DSML｜calls>` 文本。

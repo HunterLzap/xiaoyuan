@@ -1000,6 +1000,23 @@ def test_desktop_planner_routing_in_realtime_mode(tmp_path):
     override_cfg = rt_cfg.model_copy(update={"desktop_planner_model": "qwen-max"})
     assert build_desktop_planner_config(override_cfg).model == "qwen-max"  # type: ignore[union-attr]
 
+    # When main text model points to tokendance/deepseek while desktop_planner_model is qwen-plus,
+    # it must route qwen-plus to Bailian compatible-mode + rt_api_key rather than tokendance.
+    from pydantic import SecretStr
+    mixed_cfg = rt_cfg.model_copy(update={
+        "provider": "tokendance",
+        "base_url": "https://tokendance.space/gateway/v1",
+        "api_key": SecretStr("td-secret"),
+        "model": "deepseek-flash-latest",
+        "desktop_planner_model": "qwen-plus",
+    })
+    mixed_plan = build_desktop_planner_config(mixed_cfg)
+    assert mixed_plan is not None
+    assert mixed_plan.provider == "bailian"
+    assert mixed_plan.base_url == "https://ws-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+    assert mixed_plan.api_key.get_secret_value() == "rt-secret"
+    assert mixed_plan.model == "qwen-plus"
+
     base_calls = []
     planner_calls = []
 

@@ -495,14 +495,10 @@ class DesktopHub:
         if settings is None:
             return {"vision_analysis": None, "vision_note": "未加载模型设置，已返回窗口信息与截图尺寸。"}
         configured_model = (getattr(settings, "desktop_vision_model", "") or "").strip()
-        if (getattr(settings, "rt_provider", "") == "bailian"
-                and settings.rt_api_key.get_secret_value().strip()
-                and (settings.voice_mode == "realtime" or not settings.model.strip() or configured_model.startswith("qwen"))):
-            ws_id = (settings.rt_workspace or "").strip()
-            base_url = (
-                f"https://{ws_id}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-                if ws_id else "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            )
+        if _has_bailian_key(settings) and (
+                settings.voice_mode == "realtime" or not settings.model.strip()
+                or (_is_bailian_model_name(configured_model) and "aliyuncs.com" not in settings.base_url.lower())):
+            base_url = _bailian_compatible_base_url(settings)
             api_key = settings.rt_api_key.get_secret_value().strip()
             model = configured_model or "qwen3-vl-plus"
         else:
@@ -728,49 +724,56 @@ def mount_desktop_admin_routes(app: FastAPI, get_hub, record_audit=None) -> None
         )
 
 
+def _is_bailian_model_name(model_name: str) -> bool:
+    return (model_name or "").strip().lower().startswith(("qwen", "qvq"))
+
+
+def _has_bailian_key(settings: Settings) -> bool:
+    return (
+        getattr(settings, "rt_provider", "") == "bailian"
+        and bool(settings.rt_api_key.get_secret_value().strip())
+    )
+
+
+def _bailian_compatible_base_url(settings: Settings) -> str:
+    ws_id = (getattr(settings, "rt_workspace", "") or "").strip()
+    return (
+        f"https://{ws_id}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+        if ws_id else "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
+
+
+def _bailian_planner_copy(config: Settings, model_name: str) -> Settings:
+    return config.model_copy(update={
+        "voice_mode": "pipeline",
+        "provider": "bailian",
+        "base_url": _bailian_compatible_base_url(config),
+        "api_key": config.rt_api_key,
+        "model": model_name,
+        "input_price_per_million": None,
+        "output_price_per_million": None,
+    })
+
+
 def build_desktop_planner_config(config: Settings) -> Settings | None:
     """Returns OpenAI-compatible text-model Settings for multi-step desktop planning, or None to keep default."""
     planner = (getattr(config, "desktop_planner_model", "") or "").strip()
+    has_text = bool(config.model.strip() and config.api_key.get_secret_value().strip() and config.base_url.strip())
+    if _has_bailian_key(config):
+        if planner and _is_bailian_model_name(planner) and "aliyuncs.com" not in config.base_url.lower():
+            return _bailian_planner_copy(config, planner)
+        if config.voice_mode == "realtime" and not has_text:
+            return _bailian_planner_copy(config, planner or "qwen-plus")
     if config.voice_mode != "realtime":
         if not planner or planner == config.model.strip():
             return None
         if config.api_key.get_secret_value().strip() and config.base_url.strip():
             return config.model_copy(update={"model": planner})
-        if config.rt_provider == "bailian" and config.rt_api_key.get_secret_value().strip():
-            ws_id = (config.rt_workspace or "").strip()
-            base_url = (
-                f"https://{ws_id}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-                if ws_id else "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            )
-            return config.model_copy(update={
-                "voice_mode": "pipeline",
-                "provider": "bailian",
-                "base_url": base_url,
-                "api_key": config.rt_api_key,
-                "model": planner,
-                "input_price_per_million": None,
-                "output_price_per_million": None,
-            })
-        return None
-    if config.model.strip() and config.api_key.get_secret_value().strip() and config.base_url.strip():
+        return _bailian_planner_copy(config, planner) if _has_bailian_key(config) else None
+    if has_text:
         return config.model_copy(update={
             "voice_mode": "pipeline",
             "model": planner or config.model.strip(),
-            "input_price_per_million": None,
-            "output_price_per_million": None,
-        })
-    if config.rt_provider == "bailian" and config.rt_api_key.get_secret_value().strip():
-        ws_id = (config.rt_workspace or "").strip()
-        base_url = (
-            f"https://{ws_id}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-            if ws_id else "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        )
-        return config.model_copy(update={
-            "voice_mode": "pipeline",
-            "provider": "bailian",
-            "base_url": base_url,
-            "api_key": config.rt_api_key,
-            "model": planner or "qwen-plus",
             "input_price_per_million": None,
             "output_price_per_million": None,
         })
