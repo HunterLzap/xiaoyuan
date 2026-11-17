@@ -12,12 +12,14 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from .config import Settings
-from .llm import ChatProvider, Completion, ProviderError
+from .desktop import build_desktop_planner_config
+from .llm import ChatProvider, Completion, OpenAICompatibleProvider, ProviderError
 from .history_store import HistoryStore
 from .conversation_memory import active_context, ConversationHistoryTool
 from .tools import ToolRegistry
 from .knowledge import KnowledgeProvider
 from .community import ConnectionHandler
+from .text_tool_selection import is_desktop_task_turn
 from .tool_dialogue import DESKTOP_TOOL_NAMES, ToolConversation, TurnTools, combine_usage
 from .tool_gateway import ToolGateway, TurnTraceSummary
 from .order_confirmation import OrderConfirmationStore
@@ -45,8 +47,10 @@ class Session:
 
 class ChatService:
     def __init__(self, settings: Settings, provider: ChatProvider | None,
-                 history_store: HistoryStore | None = None, knowledge: KnowledgeProvider | None = None):
+                 history_store: HistoryStore | None = None, knowledge: KnowledgeProvider | None = None,
+                 planner_factory: Callable[[Settings], ChatProvider] | None = None):
         self.settings, self.provider = settings, provider
+        self.planner_factory = planner_factory
         self.sessions: dict[UUID, Session] = {}
         self.usage = UsageTotals()
         self.history_store = history_store
@@ -515,13 +519,22 @@ class ChatService:
                 raise ProviderError(503, "not_configured", "请先配置对话模型。")
             # 统一系统提示：realtime 模式交给 RealtimeTextProvider 组装（避免重复），
             # pipeline 模式在这里用 prompt_builder 组装。
-            messages = [{"role": "system", "content": config.system_prompt}]
             self.rebuild_context(session, config.history_turns)
-            messages += session.messages
-            messages.append({"role": "user", "content": request.message})
             identity = turn_id or uuid4()
             tool_context = self.tool_context(session_id, identity, source, request.message)
             tool_context.begin_order_turn(request.message, session.history)
+            turn_planner: ChatProvider | None = None
+            using_shared_provider = True
+            if (tool_context.allowed & DESKTOP_TOOL_NAMES) and is_desktop_task_turn(request.message, session.history):
+                planner_cfg = build_desktop_planner_config(self.settings)
+                if planner_cfg is not None:
+                    turn_planner = (self.planner_factory or OpenAICompatibleProvider)(planner_cfg)
+                    provider = turn_planner
+                    config = planner_cfg
+                    using_shared_provider = False
+            messages = [{"role": "system", "content": config.system_prompt}]
+            messages += session.messages
+            messages.append({"role": "user", "content": request.message})
             merged_q: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
             tool_context.on_progress = lambda ev: merged_q.put_nowait(("tool", ev))
             tool_provider = None
@@ -551,7 +564,8 @@ class ChatService:
             self.persist(session_id)
             session.active_task = asyncio.current_task()
             session.active_turn_id = identity
-            self.provider_users[id(provider)] = self.provider_users.get(id(provider), 0) + 1
+            if using_shared_provider:
+                self.provider_users[id(provider)] = self.provider_users.get(id(provider), 0) + 1
             started = perf_counter()
             success = False
             error_code = "interrupted"
@@ -702,7 +716,10 @@ class ChatService:
                     ),
                     secrets=tool_context.secrets,
                 )
-                await self.release_provider(provider)
+                if using_shared_provider:
+                    await self.release_provider(provider)
+                elif turn_planner is not None:
+                    await turn_planner.close()
             response = ChatResponse(
                 session_id=session_id, reply=answer.content, provider=config.provider,
                 model=config.model, finish_reason=answer.finish_reason, usage=answer.usage,

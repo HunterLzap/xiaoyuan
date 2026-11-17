@@ -130,13 +130,15 @@ def build_tool_instructions(tool_names=None, channel="text", compact=False):
         parts.append(
             "\n电脑操控与 Computer Use 规则：只能操作已在线的 Windows / Mac 个人电脑节点（可用 desktop_list_nodes 查询节点及平台）。"
             "读取屏幕、剪贴板、目录与文件可直接调用；"
-            "执行 desktop_gui_action 前，先调用 desktop_inspect_screen 获取当前分辨率与画面，优先直接使用返回的 suggested_screen_coords 并配合 coord_space='screen'。"
+            "执行 desktop_gui_action 前，先调用 desktop_inspect_screen 获取最新窗口控件树(ui_elements)与画面坐标："
+            "① 若目标按钮/搜索框/联系人出现在 ui_elements 中，优先直接传 element_index=<index>（100% 精准）；"
+            "② 若 ui_elements 未覆盖（如部分自绘列表），再用 suggested_screen_coords + coord_space='screen'；"
+            "③ 点击并向输入框写内容优先直接用 action='click_and_type'（支持中文粘贴），搜索确认加 submit=true，聊天框留草稿则 submit=false。"
             "设置剪贴板、打开应用/网址、点击/输入/快捷键、执行终端命令均有副作用：发起调用前不要先输出“这就帮你打开/正在打开”之类的承诺句，直接调用工具；"
             "如工具返回 confirmation_required，必须清晰复述拟执行工具、目标电脑与核心参数，请用户口头/打字确认或点击界面确认卡片后再执行，未真实成功前不得声称已完成。"
-            "多步电脑任务（例如“打开飞书，找某人打开对话框并输入文字”）在已有授权或 3 分钟桌面免问期间，必须主动连续推进全部步骤并每步截屏核实："
-            "① desktop_open 打开应用；② desktop_inspect_screen 确认窗口前置与搜索框位置；③ desktop_gui_action 点击搜索框或按快捷键搜索并输入联系人名字；"
-            "④ desktop_inspect_screen 确认出现搜索结果后点击目标联系人；⑤ 再截屏确认已进入对应对话框，必要时点击底部消息输入框后再 type_text（除非用户要求发送，否则仅输入不发送）；"
-            "⑥ desktop_gui_action 返回 ok 只代表信号已发，绝对禁止跳过最后的 desktop_inspect_screen 截屏核实就声称‘已找到/已输入’！若截图看不到预期变化，如实说明卡在哪一步。"
+            "多步电脑任务（例如“打开飞书，找某人打开对话框并输入文字”）在已有授权或 3 分钟桌面免问期间，必须主动连续推进全部步骤并在每步核对："
+            "打开应用后先 desktop_inspect_screen 看清窗口/控件；搜索联系人可用 element_index 或 click_and_type(submit=true)；"
+            "再截屏确认已进入对应对话框；最后再 click_and_type 或 paste_text 输入文字并用 desktop_inspect_screen + focused_element 亲眼确认文字已出现后才能答复完成！"
         )
     return "".join(parts)
 MAX_TOOL_CALLS = 8
@@ -159,14 +161,23 @@ def _progress_detail(name: str, args: dict) -> str:
         return str(args.get("question") or "")[:40]
     if name == "desktop_gui_action":
         sub = str(args.get("action") or "").strip()
+        target_ref = (
+            f"#{args.get('element_index')}"
+            if args.get("element_index") is not None
+            else (f"({args.get('x')}, {args.get('y')})" if args.get("x") is not None and args.get("y") is not None else "")
+        )
         if sub in {"click", "double_click", "right_click", "move"}:
-            return f"{sub} ({args.get('x')}, {args.get('y')})"
+            return f"{sub} {target_ref}".strip()
+        if sub == "click_and_type":
+            count = len(str(args.get("text") or ""))
+            return f"点 {target_ref} 输入 {count} 字".strip()
         if sub == "hotkey":
             keys = args.get("keys")
             return "+".join(str(k) for k in keys[:4]) if isinstance(keys, list) else "hotkey"
-        if sub == "type_text":
+        if sub in {"type_text", "paste_text"}:
             count = len(str(args.get("text") or ""))
-            return f"输入 {count} 字" if count else "输入文字"
+            verb = "粘贴" if sub == "paste_text" else "输入"
+            return f"{verb} {count} 字" if count else verb
         return sub
     if name in {"desktop_list_dir", "desktop_read_file"}:
         raw = str(args.get("path") or "").rstrip("/\\")

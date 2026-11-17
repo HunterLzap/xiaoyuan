@@ -17,8 +17,8 @@ ToolRegistry / TurnTools
  ├─ 天气、M5Stack官方资料、硬件声音控制、自定义HTTP API
  ├─ 所选个人知识库检索 & 当前会话历史检索
  └─ DesktopHub (/desktop/v1/ WSS) ↔ Windows / macOS 桌面节点 (desktop_node)
-     ├─ 只读：列出节点、截屏与视觉观察(Computer Use)、剪贴板/目录/非敏感文件读取
-     └─ 受确认保护：写剪贴板、打开应用/链接、GUI鼠标键盘(自适应分辨率)、终端命令
+     ├─ 只读：列出节点、截屏+系统控件树(`AXUIElement`/`UIA`)+视觉观察(`norm1000`预换算)、剪贴板/目录/文件读取
+     └─ 受确认保护：写剪贴板、打开应用/链接、GUI鼠标键盘(支持`element_index`/`click_and_type`/剪贴板粘贴/回读校验)、终端命令
                  ↓
 服务端私有配置、SQLite历史/资料/向量/洞察与异常日志(system_errors)、desktop_nodes.json
 ```

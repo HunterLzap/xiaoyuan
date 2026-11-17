@@ -12,7 +12,7 @@ import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from backend.app.config import Settings
-from backend.app.desktop import DesktopHub, is_sensitive_path
+from backend.app.desktop import DesktopHub, build_desktop_planner_config, is_sensitive_path
 from backend.app.desktop_tools import (
     DesktopGuiActionTool,
     DesktopInspectScreenTool,
@@ -24,7 +24,10 @@ from backend.app.llm import Completion, ProviderError
 from backend.app.main import create_app
 from backend.app.prompt_builder import build_system_prompt
 from backend.app.realtime import RealtimeTurn
+from backend.app.schemas import ChatRequest
+from backend.app.service import ChatService
 from backend.app.settings_store import SettingsStore
+from backend.app.tools import ToolRegistry
 from backend.app.text_tool_selection import TextToolSelection
 from backend.app.tool_gateway import SideEffectConfirmationStore
 from desktop_node.client import _describe_rpc_for_hud, _handle_request, default_node_id, execute_rpc
@@ -848,3 +851,183 @@ def test_desktop_node_hud_description_and_handle_request():
     hud.show("打开应用或链接", "飞书")
     assert sent_payloads[0]["text"].startswith("小圆正在操作电脑")
     assert "小安" not in sent_payloads[0]["text"]
+
+
+def test_ui_tree_element_index_and_click_and_type(tmp_path, monkeypatch):
+    hub = DesktopHub(path=tmp_path / "desktop_nodes.json")
+    rpc_calls = []
+
+    class _FakeNode:
+        node_id = "mac-ui"
+        name = "My Mac"
+        os_name = "macos"
+        hostname = "mac"
+        arch = "arm64"
+        capabilities = ["screenshot", "open", "gui", "shell"]
+        screen = {"width": 1470, "height": 956}
+        connected_at = "2026-11-17T00:00:00+00:00"
+        last_seen_at = "2026-11-17T00:00:00+00:00"
+        last_screenshot = None
+        last_ui_elements = []
+
+        async def rpc(self, action, params=None, timeout=25.0):
+            rpc_calls.append((action, params))
+            if action == "screenshot":
+                return {
+                    "image_base64": base64.b64encode(b"img").decode("ascii"),
+                    "mime_type": "image/jpeg",
+                    "image_width": 1280,
+                    "image_height": 800,
+                    "screen_width": 1470,
+                    "screen_height": 956,
+                    "active_window": {"app": "飞书", "title": "飞书"},
+                    "focused_element": {"role": "AXTextField", "name": "搜索", "value": ""},
+                    "ui_elements": [
+                        {"index": 0, "role": "AXButton", "name": "搜索（⌘＋K）", "value": "", "x": 34, "y": 143, "focused": False},
+                    ],
+                }
+            return {
+                "ok": True,
+                "action": params["action"],
+                "active_window": {"app": "飞书", "title": "飞书"},
+                "focused_element": {"role": "AXTextField", "name": "搜索", "value": "Friday"},
+            }
+
+    hub.active["mac-ui"] = _FakeNode()  # type: ignore[assignment]
+
+    async def _run():
+        inspected = await DesktopInspectScreenTool(hub).run({})
+        assert inspected["ui_elements"][0]["name"] == "搜索（⌘＋K）"
+        assert "element_index" in inspected["targeting_hint"]
+
+        gui = DesktopGuiActionTool(hub)
+        res = await gui.run({"action": "click_and_type", "element_index": 0, "text": "Friday", "submit": True})
+        assert res["screen_coords"] == {"x": 34, "y": 143}
+        assert res["matched_element"]["name"] == "搜索（⌘＋K）"
+        assert res["focused_element"]["value"] == "Friday"
+        assert rpc_calls[-1][1]["submit"] is True
+
+        with pytest.raises(ProviderError) as err:
+            await gui.run({"action": "click", "element_index": 5})
+        assert err.value.code == "invalid_element_index"
+
+    asyncio.run(_run())
+
+    # Test shared _paste_via_clipboard flow cleanly
+    clip_ops = []
+
+    class _FakeClipAdapter(DesktopAdapter):
+        os_name = "macos"
+
+        def __init__(self):
+            self.actions = []
+            self._clip = "old-clip"
+
+        def screen_size(self):
+            return {"width": 100, "height": 100}
+
+        def active_window(self):
+            return {"app": "飞书", "title": ""}
+
+        def capture_screenshot(self, **kw):
+            return {}
+
+        def clipboard_get(self):
+            clip_ops.append(("get", self._clip))
+            return {"text": self._clip, "truncated": "false"}
+
+        def clipboard_set(self, text):
+            clip_ops.append(("set", text))
+            self._clip = text
+            return {"ok": True}
+
+        def open_target(self, target, kind="auto"):
+            return {"ok": True}
+
+        def gui_action(self, action, *, x=None, y=None, text=None, keys=None, scroll_y=0, submit=False, _readback=True):
+            self.actions.append((action, keys))
+            return {"ok": True}
+
+    ca = _FakeClipAdapter()
+    assert ca._paste_via_clipboard("你好", ["command", "v"], "return", submit=True) is True
+    assert ca.actions == [("hotkey", ["command", "v"]), ("hotkey", ["return"])]
+    assert clip_ops == [("get", "old-clip"), ("set", "你好"), ("set", "old-clip")]
+
+
+def test_desktop_planner_routing_in_realtime_mode(tmp_path):
+    rt_cfg = Settings(
+        _env_file=None,
+        voice_mode="realtime",
+        rt_provider="bailian",
+        rt_workspace="ws-plan",
+        rt_api_key="rt-secret",
+        model="",
+        desktop_enabled=True,
+        usage_log_path=None,
+        history_db_path=tmp_path / "conv.sqlite3",
+        assistant_db_path=tmp_path / "state.sqlite3",
+    )
+    planner_cfg = build_desktop_planner_config(rt_cfg)
+    assert planner_cfg is not None
+    assert planner_cfg.voice_mode == "pipeline"
+    assert planner_cfg.model == "qwen-plus"
+    assert planner_cfg.base_url == "https://ws-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+
+    override_cfg = rt_cfg.model_copy(update={"desktop_planner_model": "qwen-max"})
+    assert build_desktop_planner_config(override_cfg).model == "qwen-max"  # type: ignore[union-attr]
+
+    base_calls = []
+    planner_calls = []
+
+    class _BaseProvider:
+        async def complete(self, messages):
+            base_calls.append(messages[-1]["content"])
+            return Completion(reply="普通聊天用默认引擎", usage=None, finish_reason="stop")
+
+        async def complete_stream(self, messages, tools=None):
+            base_calls.append(messages[-1]["content"])
+            yield "普通聊天用默认引擎"
+            yield Completion(reply="普通聊天用默认引擎", usage=None, finish_reason="stop")
+
+        async def close(self):
+            return None
+
+    class _PlannerProvider:
+        def __init__(self, cfg):
+            self.cfg = cfg
+            self.closed = False
+
+        async def complete_stream(self, messages, tools=None):
+            planner_calls.append((self.cfg.model, [t["function"]["name"] for t in (tools or [])]))
+            yield "已切换到强规划模型执行。"
+            yield Completion(reply="已切换到强规划模型执行。", usage=None, finish_reason="stop")
+
+        async def close(self):
+            self.closed = True
+
+    created_planners = []
+
+    def _planner_factory(cfg):
+        p = _PlannerProvider(cfg)
+        created_planners.append(p)
+        return p
+
+    hub = DesktopHub(path=tmp_path / "desktop_nodes.json")
+    service = ChatService(rt_cfg, _BaseProvider(), planner_factory=_planner_factory)
+    from backend.app.desktop_tools import build_desktop_tools
+    service.tools = ToolRegistry(build_desktop_tools(hub))
+
+    async def _run():
+        # Ordinary greeting keeps default realtime engine
+        r_plain = await service.chat(ChatRequest(message="你好呀"))
+        assert "普通聊天" in r_plain.reply
+        assert len(base_calls) == 1 and len(planner_calls) == 0
+
+        # Desktop task automatically routes to planner_factory (`qwen-plus`) and closes it cleanly
+        r_desk = await service.chat(ChatRequest(message="打开飞书找张三聊天"))
+        assert r_desk.model == "qwen-plus"
+        assert "强规划" in r_desk.reply
+        assert len(planner_calls) == 1
+        assert created_planners[0].closed is True
+
+    asyncio.run(_run())

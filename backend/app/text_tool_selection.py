@@ -3,8 +3,33 @@ import logging
 import re
 
 from .llm import ProviderError
-from .tool_dialogue import TOOL_LOADING_NAME, control_plan
+from .tool_dialogue import DESKTOP_TOOL_NAMES, TOOL_LOADING_NAME, control_plan
 from .tools import ToolRegistry, ToolSpec
+
+DESKTOP_INTENT_RE = re.compile(
+    r"打开.{0,14}(?:应用|软件|程序|网页|网站|链接|飞书|微信|企业微信|钉钉|腾讯会议|浏览器|chrome|safari|vscode|wps|剪映|终端|备忘录|计算器|访达|finder|音乐|网盘)|"
+    r"(?:飞书|微信|钉钉|企业微信).{0,16}(?:找|发|聊|联系|对话框|消息|群|搜索)|"
+    r"电脑|桌面|屏幕|截图|看.{0,4}屏|界面|窗口|点[一一下]?[击下]|双击|右键|快捷键|剪贴板|终端|命令行|文件夹|目录|mac|windows|pc|desktop|screen",
+    re.I,
+)
+
+
+def is_desktop_task_turn(question: str, history: list | tuple = ()) -> bool:
+    if DESKTOP_INTENT_RE.search(question or ""):
+        return True
+    for message in reversed(history):
+        role = message.get("role") if isinstance(message, dict) else getattr(message, "role", None)
+        if role == "assistant":
+            calls = message.get("tool_calls", []) if isinstance(message, dict) else (getattr(message, "tool_calls", None) or [])
+            if any((call.get("tool_name") in DESKTOP_TOOL_NAMES) for call in calls):
+                return True
+            pa = message.get("pending_approval") if isinstance(message, dict) else getattr(message, "pending_approval", None)
+            if isinstance(pa, dict) and pa.get("tool_name") in DESKTOP_TOOL_NAMES:
+                return True
+            break
+        if role == "user":
+            break
+    return False
 
 
 logger = logging.getLogger(__name__)
@@ -61,7 +86,7 @@ class TextToolSelection:
             (r"知识库|我的资料|上传|个人资料|文档|文件|资料里|资料中", {"search_personal_knowledge"}),
             (r"之前|刚才|最早|最初|一开始|前面|记得|说过", {"search_conversation_history"}),
             (r"(?:设备|机器人).{0,8}(?:状态|连接|在线)|(?:音量|亮度).{0,4}(?:多少|多大)", {"get_device_status"}),
-            (r"打开.{0,14}(?:应用|软件|程序|网页|网站|链接|飞书|微信|企业微信|钉钉|腾讯会议|浏览器|chrome|safari|vscode|wps|剪映|终端|备忘录|计算器|访达|finder|音乐|网盘)|(?:飞书|微信|钉钉|企业微信).{0,16}(?:找|发|聊|联系|对话框|消息|群|搜索)|电脑|桌面|屏幕|截图|看.{0,4}屏|界面|窗口|点[一一下]?[击下]|双击|右键|快捷键|剪贴板|终端|命令行|文件夹|目录|mac|windows|pc|desktop|screen",
+            (DESKTOP_INTENT_RE.pattern,
              {"desktop_list_nodes", "desktop_inspect_screen", "desktop_clipboard", "desktop_list_dir",
               "desktop_read_file", "desktop_set_clipboard", "desktop_open", "desktop_gui_action", "desktop_run_command"}),
         ]:

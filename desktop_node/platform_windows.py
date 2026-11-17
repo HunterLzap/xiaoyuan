@@ -175,6 +175,7 @@ class WindowsDesktopAdapter(DesktopAdapter):
         if proc.returncode != 0 or not proc.stdout.strip():
             raise DesktopRpcError("screen_capture_failed", proc.stderr.strip() or "Windows 截屏失败。")
         data = json.loads(proc.stdout.strip())
+        ui = self.ui_tree()
         return {
             "image_base64": data["b64"],
             "mime_type": "image/jpeg",
@@ -183,6 +184,8 @@ class WindowsDesktopAdapter(DesktopAdapter):
             "screen_width": screen["width"],
             "screen_height": screen["height"],
             "active_window": active,
+            "focused_element": ui.get("focused"),
+            "ui_elements": ui.get("elements") or [],
         }
 
     def clipboard_get(self) -> dict[str, str]:
@@ -332,9 +335,15 @@ class WindowsDesktopAdapter(DesktopAdapter):
         text: str | None = None,
         keys: list[str] | None = None,
         scroll_y: int = 0,
+        submit: bool = False,
+        _readback: bool = True,
     ) -> dict[str, Any]:
         user32 = ctypes.windll.user32
         _ensure_dpi_aware()
+        def _finish(res: dict[str, Any]) -> dict[str, Any]:
+            if _readback and not os.environ.get("PYTEST_CURRENT_TEST"):
+                res.update(self.post_action_readback())
+            return res
         if action in {"click", "double_click", "right_click", "move"}:
             if x is None or y is None:
                 raise DesktopRpcError("invalid_args", f"{action} 需要坐标 x 和 y。")
@@ -347,16 +356,26 @@ class WindowsDesktopAdapter(DesktopAdapter):
             elif action == "right_click":
                 user32.mouse_event(_MOUSEEVENTF_RIGHTDOWN | _MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
             time.sleep(0.12)
-            return {"ok": True, "action": action, "x": int(x), "y": int(y)}
+            return _finish({"ok": True, "action": action, "x": int(x), "y": int(y)})
+        if action == "click_and_type":
+            if x is None or y is None or not text:
+                raise DesktopRpcError("invalid_args", "click_and_type 需要坐标 x、y 以及文本 text。")
+            self.gui_action("click", x=x, y=y, _readback=False)
+            time.sleep(0.14)
+            typed = self.gui_action("paste_text", text=text, submit=submit, _readback=False)
+            return _finish({"ok": True, "action": "click_and_type", "x": int(x), "y": int(y), "length": len(text), "method": typed.get("method")})
         if action == "scroll":
             if x is not None and y is not None:
                 user32.SetCursorPos(int(x), int(y))
             user32.mouse_event(_MOUSEEVENTF_WHEEL, 0, 0, int(scroll_y) * 120, 0)
             time.sleep(0.08)
-            return {"ok": True, "action": "scroll", "scroll_y": int(scroll_y)}
-        if action == "type_text":
+            return _finish({"ok": True, "action": "scroll", "scroll_y": int(scroll_y)})
+        if action in {"type_text", "paste_text"}:
             if not text:
-                raise DesktopRpcError("invalid_args", "type_text 需要输入文本。")
+                raise DesktopRpcError("invalid_args", f"{action} 需要输入文本。")
+            if action == "paste_text" and not os.environ.get("PYTEST_CURRENT_TEST"):
+                if self._paste_via_clipboard(text, ["ctrl", "v"], "enter", submit=submit):
+                    return _finish({"ok": True, "action": action, "length": len(text), "method": "paste"})
             utf16 = text.encode("utf-16-le")
             units = [int.from_bytes(utf16[i:i + 2], "little") for i in range(0, len(utf16), 2)]
             events: list[_INPUT] = []
@@ -368,7 +387,9 @@ class WindowsDesktopAdapter(DesktopAdapter):
             arr = (_INPUT * len(events))(*events)
             user32.SendInput(len(events), arr, ctypes.sizeof(_INPUT))
             time.sleep(0.08)
-            return {"ok": True, "action": "type_text", "length": len(text)}
+            if submit:
+                self.gui_action("hotkey", keys=["enter"], _readback=False)
+            return _finish({"ok": True, "action": action, "length": len(text), "method": "unicode"})
         if action == "hotkey":
             if not keys:
                 raise DesktopRpcError("invalid_args", "hotkey 需要按键列表。")
@@ -396,5 +417,5 @@ class WindowsDesktopAdapter(DesktopAdapter):
             arr = (_INPUT * len(events))(*events)
             user32.SendInput(len(events), arr, ctypes.sizeof(_INPUT))
             time.sleep(0.14)
-            return {"ok": True, "action": "hotkey", "keys": list(keys)}
+            return _finish({"ok": True, "action": "hotkey", "keys": list(keys)})
         raise DesktopRpcError("unsupported_action", f"不支持的 GUI 动作：{action}")

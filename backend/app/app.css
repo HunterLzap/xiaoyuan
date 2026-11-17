@@ -661,6 +661,7 @@ body.voice-mode { overflow:hidden; }
 .weather-city-config > summary::before {content:"▸";display:inline-block}
 .weather-city-config[open] > summary::before {content:"▾"}
 .weather-city-row {display:flex;flex-direction:column;gap:6px;font-size:13px;max-width:420px}
+.desktop-model-fields {display:flex;flex-direction:column;gap:10px;margin-top:4px}
 .weather-city-row input {width:100%;border:1px solid var(--input-border);border-radius:8px;padding:9px 11px;background:var(--bg);color:var(--text);font:inherit}
 .capability-item-muted {opacity:.9}
 .capability-state-tag {font-size:12px;color:var(--muted);border:1px solid var(--border);border-radius:999px;padding:2px 9px;white-space:nowrap}

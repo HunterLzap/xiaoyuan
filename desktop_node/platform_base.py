@@ -5,7 +5,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import platform
 import subprocess
+import time
 from typing import Any
+
+from .ui_tree import inspect_ui_tree
 
 SENSITIVE_PATH_PARTS = frozenset({".ssh", ".gnupg", ".aws", ".kube", "keychains"})
 SENSITIVE_FILENAMES = frozenset({
@@ -83,6 +86,42 @@ class DesktopAdapter(ABC):
     def open_target(self, target: str, kind: str = "auto") -> dict[str, Any]:
         ...
 
+    def ui_tree(self, max_elements: int = 70) -> dict[str, Any]:
+        return inspect_ui_tree(os_name=self.os_name, focus_only=False, max_elements=max_elements)
+
+    def post_action_readback(self) -> dict[str, Any]:
+        ui = inspect_ui_tree(os_name=self.os_name, focus_only=True)
+        return {
+            "active_window": self.active_window(),
+            "focused_element": ui.get("focused"),
+        }
+
+    def _paste_via_clipboard(self, text: str, paste_keys: list[str], enter_key: str, *, submit: bool = False) -> bool:
+        prev: str | None = None
+        try:
+            got = self.clipboard_get()
+            raw = got.get("text")
+            if isinstance(raw, str) and len(raw) <= 2000 and got.get("truncated") != "true":
+                prev = raw
+        except DesktopRpcError:
+            prev = None
+        try:
+            self.clipboard_set(text)
+        except DesktopRpcError:
+            return False
+        time.sleep(0.05)
+        self.gui_action("hotkey", keys=paste_keys, _readback=False)
+        time.sleep(0.14)
+        if submit:
+            self.gui_action("hotkey", keys=[enter_key], _readback=False)
+            time.sleep(0.12)
+        if prev is not None:
+            try:
+                self.clipboard_set(prev)
+            except DesktopRpcError:
+                pass
+        return True
+
     @abstractmethod
     def gui_action(
         self,
@@ -93,6 +132,8 @@ class DesktopAdapter(ABC):
         text: str | None = None,
         keys: list[str] | None = None,
         scroll_y: int = 0,
+        submit: bool = False,
+        _readback: bool = True,
     ) -> dict[str, Any]:
         ...
 

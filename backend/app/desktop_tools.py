@@ -122,23 +122,30 @@ DESKTOP_OPEN_SPEC = ToolSpec(
 
 DESKTOP_GUI_ACTION_SPEC = ToolSpec(
     "desktop_gui_action",
-    "在目标电脑上执行 Computer Use 图形界面操控：鼠标移动/点击/双击/右键/滚轮，或输入文字、按下组合快捷键（需用户确认）。建议点击前先调用 desktop_inspect_screen 获取画面尺寸与坐标。",
+    "在目标电脑上执行 Computer Use 图形界面操控：鼠标移动/点击/双击/右键/滚轮、输入或粘贴文字、点击并输入(click_and_type)、或触发快捷键（需用户确认）。若 inspect_screen 返回 ui_elements，优先直接传 element_index 精确命中目标。",
     {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["click", "double_click", "right_click", "move", "type_text", "hotkey", "scroll"],
-                "description": "要执行的 GUI 动作类型。",
+                "enum": ["click", "double_click", "right_click", "move", "click_and_type", "type_text", "paste_text", "hotkey", "scroll"],
+                "description": "GUI 动作类型：click_and_type 可一步完成点击焦点+粘贴中文/文本；paste_text/type_text 支持文本输入；submit=true 可顺带回车。",
             },
-            "x": {"type": "integer", "minimum": 0, "maximum": 16000, "description": "点击/移动/滚轮的目标横坐标。"},
-            "y": {"type": "integer", "minimum": 0, "maximum": 16000, "description": "点击/移动/滚轮的目标纵坐标。"},
+            "element_index": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 500,
+                "description": "优先使用最近一次 desktop_inspect_screen 返回的 ui_elements[index] 索引（设置后自动定位元素中心坐标，无需填 x/y）。",
+            },
+            "x": {"type": "integer", "minimum": 0, "maximum": 16000, "description": "点击/移动/滚轮的目标横坐标（未指定 element_index 时使用）。"},
+            "y": {"type": "integer", "minimum": 0, "maximum": 16000, "description": "点击/移动/滚轮的目标纵坐标（未指定 element_index 时使用）。"},
             "coord_space": {
                 "type": "string",
                 "enum": ["image", "screen", "norm1000"],
                 "description": "坐标来源：screen 直接用 inspect_screen 返回的 suggested_screen_coords（最推荐）；norm1000 为视觉模型 0-1000 归一化坐标；image 为截图图像像素坐标（默认）。",
             },
-            "text": {"type": "string", "minLength": 1, "maxLength": 2000, "description": "当 action=type_text 时要输入的文本。"},
+            "text": {"type": "string", "minLength": 1, "maxLength": 2000, "description": "当 action=type_text / paste_text / click_and_type 时要输入的文本。"},
+            "submit": {"type": "boolean", "description": "可选：输入完成后是否自动按下回车键（Return/Enter），如搜索框检索联系人时可设 true，聊天框只填草稿不要设 true。"},
             "keys": {
                 "type": "array",
                 "items": {"type": "string", "minLength": 1, "maxLength": 24},
@@ -281,18 +288,24 @@ class DesktopGuiActionTool(_DesktopBaseTool):
 
     async def run(self, arguments, *, trace=None):
         action = arguments["action"]
+        element_index = arguments.get("element_index")
         x = arguments.get("x")
         y = arguments.get("y")
-        if action in {"click", "double_click", "right_click", "move"} and (x is None or y is None):
-            raise ProviderError(422, "tool_arguments", f"GUI 动作 {action} 必须同时提供 x 和 y 坐标。")
-        if action == "type_text" and not arguments.get("text"):
-            raise ProviderError(422, "tool_arguments", "type_text 必须提供 text 参数。")
+        needs_coords = action in {"click", "double_click", "right_click", "move", "click_and_type"}
+        if needs_coords and element_index is None and (x is None or y is None):
+            raise ProviderError(422, "tool_arguments", f"GUI 动作 {action} 必须提供 element_index 或 (x, y) 坐标。")
+        if action in {"type_text", "paste_text", "click_and_type"} and not arguments.get("text"):
+            raise ProviderError(422, "tool_arguments", f"{action} 必须提供 text 参数。")
         if action == "hotkey" and not arguments.get("keys"):
             raise ProviderError(422, "tool_arguments", "hotkey 必须提供 keys 按键数组。")
         conn = self.hub.resolve_node(arguments.get("node_id"))
-        coord_space = arguments.get("coord_space") or "image"
-        scr_x, scr_y = self.hub.convert_coordinates(conn, x, y, coord_space=coord_space)
-        payload = {"action": action}
+        matched_element = None
+        if element_index is not None:
+            scr_x, scr_y, matched_element = self.hub.resolve_ui_element(conn, int(element_index))
+        else:
+            coord_space = arguments.get("coord_space") or "image"
+            scr_x, scr_y = self.hub.convert_coordinates(conn, x, y, coord_space=coord_space)
+        payload: dict = {"action": action}
         if scr_x is not None and scr_y is not None:
             payload["x"] = scr_x
             payload["y"] = scr_y
@@ -302,8 +315,10 @@ class DesktopGuiActionTool(_DesktopBaseTool):
             payload["keys"] = arguments["keys"]
         if "scroll_y" in arguments:
             payload["scroll_y"] = int(arguments["scroll_y"])
+        if arguments.get("submit") is not None:
+            payload["submit"] = bool(arguments["submit"])
         res = await conn.rpc("gui_action", payload, timeout=15.0)
-        return {
+        out = {
             "node_id": conn.node_id,
             "node_name": conn.name,
             "os": conn.os_name,
@@ -311,10 +326,13 @@ class DesktopGuiActionTool(_DesktopBaseTool):
             **res,
             "verified_on_screen": False,
             "next_step_note": (
-                "底层键鼠信号已发送，但系统无法保证焦点正确或文本已真的上屏。"
-                "在向用户说‘已找到/已输入/已完成’之前，必须先调用 desktop_inspect_screen 截图核实画面是否真的达到目标；看不到就继续补救或如实说明。"
+                "底层键鼠信号已发送（focused_element 为即时回读结果）；在向用户说‘已找到/已输入/已完成’之前，"
+                "如聚焦元素尚未确认匹配，请再调用 desktop_inspect_screen 截图核实画面确实达到目标。"
             ),
         }
+        if matched_element is not None:
+            out["matched_element"] = matched_element
+        return out
 
 
 class DesktopRunCommandTool(_DesktopBaseTool):

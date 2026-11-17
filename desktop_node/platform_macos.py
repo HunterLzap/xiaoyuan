@@ -219,6 +219,7 @@ class MacOSDesktopAdapter(DesktopAdapter):
                 )
                 w, h = self._sips_size(tmp_path)
             raw = tmp_path.read_bytes()
+            ui = self.ui_tree()
             return {
                 "image_base64": base64.b64encode(raw).decode("ascii"),
                 "mime_type": "image/jpeg",
@@ -227,6 +228,8 @@ class MacOSDesktopAdapter(DesktopAdapter):
                 "screen_width": screen["width"],
                 "screen_height": screen["height"],
                 "active_window": active,
+                "focused_element": ui.get("focused"),
+                "ui_elements": ui.get("elements") or [],
             }
         finally:
             if tmp_path is not None:
@@ -396,6 +399,8 @@ class MacOSDesktopAdapter(DesktopAdapter):
         text: str | None = None,
         keys: list[str] | None = None,
         scroll_y: int = 0,
+        submit: bool = False,
+        _readback: bool = True,
     ) -> dict[str, Any]:
         if not self._has_accessibility_access():
             raise DesktopRpcError(
@@ -403,6 +408,10 @@ class MacOSDesktopAdapter(DesktopAdapter):
                 "macOS 未授予当前终端「辅助功能」权限，点击/快捷键/输入会被系统丢弃；请在 系统设置 → 隐私与安全性 → 辅助功能 中开启当前终端后重跑 desktop_node。",
             )
         cg = self._cg_lib()
+        def _finish(res: dict[str, Any]) -> dict[str, Any]:
+            if _readback and not os.environ.get("PYTEST_CURRENT_TEST"):
+                res.update(self.post_action_readback())
+            return res
         if action in {"click", "double_click", "right_click", "move"}:
             if x is None or y is None:
                 raise DesktopRpcError("invalid_args", f"{action} 需要坐标 x 和 y。")
@@ -425,7 +434,14 @@ class MacOSDesktopAdapter(DesktopAdapter):
                 self._post_mouse(cg, _kCGEventRightMouseDown, pt, _kCGMouseButtonRight)
                 self._post_mouse(cg, _kCGEventRightMouseUp, pt, _kCGMouseButtonRight)
             time.sleep(0.12)
-            return {"ok": True, "action": action, "x": int(x), "y": int(y)}
+            return _finish({"ok": True, "action": action, "x": int(x), "y": int(y)})
+        if action == "click_and_type":
+            if x is None or y is None or not text:
+                raise DesktopRpcError("invalid_args", "click_and_type 需要坐标 x、y 以及文本 text。")
+            self.gui_action("click", x=x, y=y, _readback=False)
+            time.sleep(0.14)
+            typed = self.gui_action("paste_text", text=text, submit=submit, _readback=False)
+            return _finish({"ok": True, "action": "click_and_type", "x": int(x), "y": int(y), "length": len(text), "method": typed.get("method")})
         if action == "scroll":
             if x is not None and y is not None:
                 self._post_mouse(cg, _kCGEventMouseMoved, cg.CGPoint(float(x), float(y)), _kCGMouseButtonLeft)
@@ -433,10 +449,14 @@ class MacOSDesktopAdapter(DesktopAdapter):
             cg.CGEventPost(_kCGHIDEventTap, ev)
             cg.CFRelease(ev)
             time.sleep(0.08)
-            return {"ok": True, "action": "scroll", "scroll_y": int(scroll_y)}
-        if action == "type_text":
+            return _finish({"ok": True, "action": "scroll", "scroll_y": int(scroll_y)})
+        if action in {"type_text", "paste_text"}:
             if not text:
-                raise DesktopRpcError("invalid_args", "type_text 需要输入文本。")
+                raise DesktopRpcError("invalid_args", f"{action} 需要输入文本。")
+            use_paste = action == "paste_text" or any(ord(ch) > 127 for ch in text)
+            if use_paste and not os.environ.get("PYTEST_CURRENT_TEST"):
+                if self._paste_via_clipboard(text, ["command", "v"], "return", submit=submit):
+                    return _finish({"ok": True, "action": action, "length": len(text), "method": "paste"})
             utf16 = text.encode("utf-16-le")
             units = [int.from_bytes(utf16[i:i + 2], "little") for i in range(0, len(utf16), 2)]
             for start in range(0, len(units), 8):
@@ -454,7 +474,9 @@ class MacOSDesktopAdapter(DesktopAdapter):
                 cg.CFRelease(up)
                 time.sleep(0.015)
             time.sleep(0.08)
-            return {"ok": True, "action": "type_text", "length": len(text)}
+            if submit:
+                self.gui_action("hotkey", keys=["return"], _readback=False)
+            return _finish({"ok": True, "action": action, "length": len(text), "method": "unicode"})
         if action == "hotkey":
             if not keys:
                 raise DesktopRpcError("invalid_args", "hotkey 需要按键列表。")
@@ -480,7 +502,7 @@ class MacOSDesktopAdapter(DesktopAdapter):
             cg.CFRelease(down)
             cg.CFRelease(up)
             time.sleep(0.14)
-            return {"ok": True, "action": "hotkey", "keys": list(keys)}
+            return _finish({"ok": True, "action": "hotkey", "keys": list(keys)})
         raise DesktopRpcError("unsupported_action", f"不支持的 GUI 动作：{action}")
 
     @staticmethod

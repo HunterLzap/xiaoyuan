@@ -1729,27 +1729,35 @@ function desktopToolCard(tool) {
     });
   });
   toggleLabel.append(toggle, toggleText); header.append(toggleLabel);
-  const details = node("details", "weather-city-config"), summary = node("summary", "", "看图视觉模型 · 可选（Computer Use）");
-  const row = node("label", "weather-city-row"), visionInput = node("input");
+  const details = node("details", "weather-city-config"), summary = node("summary", "", "规划与视觉模型 · 可选（Computer Use）");
+  const fieldsWrap = node("div", "desktop-model-fields");
+  const plannerRow = node("label", "weather-city-row", "桌面规划模型（多步操作用）"), plannerInput = node("input");
+  plannerInput.id = "desktop_planner_model"; plannerInput.maxLength = 200;
+  plannerInput.value = savedConfig?.desktop_planner_model || "";
+  plannerInput.placeholder = "留空默认：百炼实时自动用 qwen-plus，否则用主文字模型";
+  const visionRow = node("label", "weather-city-row", "看图视觉模型（截屏找坐标用）"), visionInput = node("input");
   visionInput.id = "desktop_vision_model"; visionInput.maxLength = 200;
   visionInput.value = savedConfig?.desktop_vision_model || "";
   visionInput.placeholder = "留空默认：百炼实时自动用 qwen3-vl-plus，否则用主模型";
-  const saveVisionModel = async () => {
-    const value = visionInput.value.trim();
-    if (value === (savedConfig?.desktop_vision_model || "")) return;
-    visionInput.disabled = true;
+  const saveDesktopModel = async (inputEl, fieldKey, label) => {
+    const value = inputEl.value.trim();
+    if (value === (savedConfig?.[fieldKey] || "")) return;
+    inputEl.disabled = true;
     try {
-      const data = await request("/api/settings/capabilities", "PUT", {desktop_vision_model: value});
+      const data = await request("/api/settings/capabilities", "PUT", {[fieldKey]: value});
       if (data && data.text) { savedConfig = data.text; savedTtsConfig = data.tts; }
-      capabilityNotice(value ? `屏幕视觉模型已设为：${value}` : "已恢复默认屏幕视觉模型。");
+      capabilityNotice(value ? `${label}已设为：${value}` : `已恢复默认${label}。`);
     } catch (error) {
-      visionInput.value = savedConfig?.desktop_vision_model || "";
+      inputEl.value = savedConfig?.[fieldKey] || "";
       capabilityNotice(error.message, true);
-    } finally { visionInput.disabled = false; }
+    } finally { inputEl.disabled = false; }
   };
-  visionInput.addEventListener("change", saveVisionModel);
-  visionInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); saveVisionModel(); } });
-  row.append(visionInput); details.append(summary, row);
+  visionInput.addEventListener("change", () => saveDesktopModel(visionInput, "desktop_vision_model", "屏幕视觉模型"));
+  visionInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); saveDesktopModel(visionInput, "desktop_vision_model", "屏幕视觉模型"); } });
+  plannerInput.addEventListener("change", () => saveDesktopModel(plannerInput, "desktop_planner_model", "桌面规划模型"));
+  plannerInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); saveDesktopModel(plannerInput, "desktop_planner_model", "桌面规划模型"); } });
+  plannerRow.append(plannerInput); visionRow.append(visionInput);
+  fieldsWrap.append(plannerRow, visionRow); details.append(summary, fieldsWrap);
   card.append(
     header,
     node("p", "small-note", tool.description || "跨平台连接个人 Windows / macOS 电脑，支持截屏观察（Computer Use）、读取文件/剪贴板，并在你确认后点击界面、打开应用或执行命令。"),

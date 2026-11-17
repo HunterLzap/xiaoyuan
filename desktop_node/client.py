@@ -72,6 +72,7 @@ def execute_rpc(
             text=params.get("text"),
             keys=params.get("keys"),
             scroll_y=int(params.get("scroll_y") or 0),
+            submit=bool(params.get("submit")),
         )
     if action == "run_command":
         if not allow_shell:
@@ -97,6 +98,12 @@ def _describe_rpc_for_hud(action: str, params: dict) -> tuple[str, str]:
         if sub == "type_text":
             count = len(str(params.get("text") or ""))
             return ("输入文字", f"{count} 字" if count else "")
+        if sub == "paste_text":
+            count = len(str(params.get("text") or ""))
+            return ("粘贴文字", f"{count} 字" if count else "")
+        if sub == "click_and_type":
+            count = len(str(params.get("text") or ""))
+            return ("点击并输入", f"{count} 字" if count else "")
         if sub == "hotkey":
             keys = params.get("keys")
             combo = "+".join(str(k) for k in keys[:4]) if isinstance(keys, list) else ""

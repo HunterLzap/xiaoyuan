@@ -25,6 +25,7 @@ BUSINESS_STATE_FIELDS = frozenset({
     "embedding_enabled",
     "desktop_enabled",
     "desktop_vision_model",
+    "desktop_planner_model",
     "tts_rate",
     "tts_pitch",
     "system_prompt",

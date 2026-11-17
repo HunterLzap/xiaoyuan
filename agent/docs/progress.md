@@ -2,7 +2,23 @@
 
 更新：2026-11-17。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
-## 视觉坐标校准、macOS 权限显式校验与「小圆」品牌统一（2026-11-17，继 `13410ab` 真实飞书截图排查后修复）
+## 控件树精准定位、剪贴板复合输入与强规划模型路由（2026-11-17，继 `167600e` 后参考 `open-computer-use` 核心机制落地）
+
+- **改动范围**：
+  - **跨平台系统辅助功能控件树与回读校验（`desktop_node/ui_tree.py`、`platform_base.py`、`platform_macos.py`、`platform_windows.py`）**：macOS 使用原生 Swift `AXUIElement`（开启 `AXManualAccessibility` / `AXEnhancedUserInterface` 以探测 Electron 控件，遍历多窗口并提取精确中心点坐标与聚焦元素）；Windows 使用标准库 PowerShell .NET `UIAutomationClient` 枚举前窗控件与 `BoundingRectangle` 中心。`capture_screenshot` 同步返回 `ui_elements` 与 `focused_element`；`gui_action` 完成后附带轻量 `post_action_readback`（聚焦控件角色/名称/文本值）。Mac 本机真实运行中的「飞书」窗口实测首次编绎含缓存提取出 18 个精确控件（含 `AXButton '搜索（⌘＋K）' (34, 143)`），热运行耗时约 83ms。
+  - **按控件索引执行与可靠剪贴板粘贴输入（`desktop.py`、`desktop_tools.py`、`platform_base.py`、`client.py`）**：`desktop_gui_action` 新增 `element_index` 参数（按最近 `ui_elements` 索引精确取屏坐）、`click_and_type`、`paste_text` 与 `submit` 选项；`_paste_via_clipboard` 在发送粘贴快捷键前先尝试备份原剪贴板、写入目标文本并粘贴后恢复原剪贴板，macOS `type_text` 含非 ASCII 文本默认走剪贴板粘贴避免 Electron/IME 丢字。
+  - **桌面多步任务强规划模型自动路由（`config.py`、`settings_store.py`、`voice_profiles.py`、`desktop.py`、`text_tool_selection.py`、`service.py`、`app.js`）**：新增可选配置项 `desktop_planner_model`（「技能与知识 → 个人电脑操控 → 规划与视觉模型」）；网页文字请求命中桌面意图或上一轮存在桌面调用/待确认时，若当前为 `realtime` 模式则通过 `build_desktop_planner_config` 自动切换至 OpenAI 兼容文本/工具模型（优先使用已配主文字模型，否则默认百炼兼容接口 `qwen-plus`）走 `ToolConversation` 连续执行并在结束后释放临时客户端，普通文字聊天与设备/网页实时语音主线完全不变。
+- **本机最终代码后验证（Mac Darwin / `.venv` Python 3.12.13）**：
+  - 真实飞书窗口 `inspect_ui_tree(os_name='macos')`：提取 18 个控件，命中 `搜索（⌘＋K）` at `(34, 143)`。
+  - `node --check backend/app/app.js && node --check backend/app/voice.js`、`.venv/bin/python -m py_compile desktop_node/*.py`：通过。
+  - `.venv/bin/python scripts/lint_incremental.py`：`ruff=18, pyright=119, baseline=146, new=0`。
+  - `.venv/bin/pytest tests/test_desktop_bridge.py tests/test_gateway_trace.py tests/test_personal_kb_isolation.py tests/test_realtime_failures.py tests/test_voice_compat.py tests/test_voices.py -v`：**43 passed, 0 failed（3.62s）**（含新增 `element_index` 解析/越界拒绝、`click_and_type`、`_paste_via_clipboard` 备份恢复及 `build_desktop_planner_config` / `ChatService` 普通聊天 vs 桌面规划路由隔离测试）。
+  - `.venv/bin/pytest tests/test_devices.py -k "not real_socket" -v`：**4 passed, 4 deselected（30.95s）**；`.venv/bin/pytest tests/test_knowledge.py -k "not chat_uses and not retrieval_failure" -v`：**10 passed, 2 deselected（0.66s）**；`.venv/bin/pytest tests/test_voice_chat.py -k "not voice_routes and not reset_invalidates and not http_disconnect" -v`：**3 passed, 3 deselected（0.55s）**。
+- **尚未验证 / 留待后续确认（不宣称已实机验收）**：
+  - Windows 端 `UIAutomationClient` `inspect_windows_ui` 脚本与真实桌面剪贴板粘贴尚未在 Windows 机器实跑。
+  - 云端发布后，由 `qwen-plus` + `ui_elements` + `qwen3-vl-plus` 协同完成 Mac 飞书搜人输入框完整端到端实测仍待用户发布重启后确认。
+
+## 视觉坐标校准、macOS 权限显式校验与「小圆」品牌统一（2026-11-17，`167600e` 已推送）
 
 - **真实排查发现（来自用户「打开飞书 → Friday 对话框 → 输入你好」实机截图）**：
   - `desktop_node/overlay.py` 误写了「小安正在操作电脑」，已全部统一为 **「小圆正在操作电脑」**（`client.py` / `__init__.py` 同步改为 `Xiaoyuan`）。

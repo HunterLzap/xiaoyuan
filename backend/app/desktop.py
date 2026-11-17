@@ -79,6 +79,7 @@ class DesktopNodeConnection:
     last_seen_at: str = field(default_factory=_utc_now)
     pending: dict[str, asyncio.Future] = field(default_factory=dict)
     last_screenshot: dict | None = None
+    last_ui_elements: list[dict] = field(default_factory=list)
 
     def public(self) -> dict:
         shot = self.last_screenshot
@@ -418,6 +419,29 @@ class DesktopHub:
         scr_w = int(shot.get("screen_width") or conn.screen.get("width") or img_w or 0)
         scr_h = int(shot.get("screen_height") or conn.screen.get("height") or img_h or 0)
         active_window = shot.get("active_window") or {}
+        raw_focused = shot.get("focused_element")
+        focused_element = raw_focused if isinstance(raw_focused, dict) else None
+        raw_ui = shot.get("ui_elements")
+        raw_elements: list = raw_ui if isinstance(raw_ui, list) else []
+        clean_elements: list[dict] = []
+        for elem in raw_elements[:70]:
+            if not isinstance(elem, dict):
+                continue
+            try:
+                cx = int(elem["x"])
+                cy = int(elem["y"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            clean_elements.append({
+                "index": len(clean_elements),
+                "role": str(elem.get("role") or "")[:32],
+                "name": str(elem.get("name") or "")[:64],
+                "value": str(elem.get("value") or "")[:60],
+                "x": cx,
+                "y": cy,
+                "focused": bool(elem.get("focused")),
+            })
+        conn.last_ui_elements = clean_elements
         captured_at = _utc_now()
         if b64:
             with suppress(ValueError, TypeError):
@@ -437,15 +461,22 @@ class DesktopHub:
             "node_name": conn.name,
             "os": conn.os_name,
             "active_window": active_window,
+            "focused_element": focused_element,
             "screen": {"width": scr_w, "height": scr_h},
             "image": {"width": img_w, "height": img_h, "mime_type": mime},
             "captured_at": captured_at,
             "screenshot_url": f"/api/desktop/nodes/{conn.node_id}/screenshot",
         }
+        if clean_elements:
+            out["ui_elements"] = clean_elements
+            out["targeting_hint"] = (
+                "已获取当前窗口控件树 ui_elements：如果目标按钮/搜索框/联系人出现在 ui_elements 中，"
+                "调用 desktop_gui_action 时直接传 element_index=<index>（精准度 100%，无需估算坐标）；"
+                "列表中未覆盖的自绘区域再用 suggested_screen_coords 或图像坐标。"
+            )
         if img_w and img_h and scr_w and scr_h:
             out["coordinate_hint"] = (
-                f"当前截图尺寸为 {img_w}x{img_h}，对应屏幕坐标 {scr_w}x{scr_h}；"
-                "调用 desktop_gui_action 时传入截图上的 (x, y) 即可（coord_space='image' 会自动换算）。"
+                f"当前截图尺寸为 {img_w}x{img_h}，对应逻辑屏幕坐标 {scr_w}x{scr_h}。"
             )
         clean_q = (question or "").strip()
         if analyze_vision and b64 and clean_q:
@@ -554,6 +585,15 @@ class DesktopHub:
         if img_w > 0 and img_h > 0 and scr_w > 0 and scr_h > 0:
             return round(x * scr_w / img_w), round(y * scr_h / img_h)
         return x, y
+
+    def resolve_ui_element(self, conn: DesktopNodeConnection, element_index: int) -> tuple[int, int, dict]:
+        elements = conn.last_ui_elements or []
+        if not elements:
+            raise ProviderError(422, "ui_tree_empty", "尚未获取当前窗口控件树或应用未导出控件，请改用坐标或重新调用 desktop_inspect_screen。")
+        if element_index < 0 or element_index >= len(elements):
+            raise ProviderError(422, "invalid_element_index", f"控件索引 element_index={element_index} 超出当前范围（0..{len(elements) - 1}）。")
+        elem = elements[element_index]
+        return int(elem["x"]), int(elem["y"]), elem
 
     def mount_routes(self, gateway_app: FastAPI) -> None:
         @gateway_app.websocket("/desktop/v1/")
@@ -686,3 +726,52 @@ def mount_desktop_admin_routes(app: FastAPI, get_hub, record_audit=None) -> None
             media_type=shot.get("mime_type") or "image/jpeg",
             headers={"Cache-Control": "no-store"},
         )
+
+
+def build_desktop_planner_config(config: Settings) -> Settings | None:
+    """Returns OpenAI-compatible text-model Settings for multi-step desktop planning, or None to keep default."""
+    planner = (getattr(config, "desktop_planner_model", "") or "").strip()
+    if config.voice_mode != "realtime":
+        if not planner or planner == config.model.strip():
+            return None
+        if config.api_key.get_secret_value().strip() and config.base_url.strip():
+            return config.model_copy(update={"model": planner})
+        if config.rt_provider == "bailian" and config.rt_api_key.get_secret_value().strip():
+            ws_id = (config.rt_workspace or "").strip()
+            base_url = (
+                f"https://{ws_id}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+                if ws_id else "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            )
+            return config.model_copy(update={
+                "voice_mode": "pipeline",
+                "provider": "bailian",
+                "base_url": base_url,
+                "api_key": config.rt_api_key,
+                "model": planner,
+                "input_price_per_million": None,
+                "output_price_per_million": None,
+            })
+        return None
+    if config.model.strip() and config.api_key.get_secret_value().strip() and config.base_url.strip():
+        return config.model_copy(update={
+            "voice_mode": "pipeline",
+            "model": planner or config.model.strip(),
+            "input_price_per_million": None,
+            "output_price_per_million": None,
+        })
+    if config.rt_provider == "bailian" and config.rt_api_key.get_secret_value().strip():
+        ws_id = (config.rt_workspace or "").strip()
+        base_url = (
+            f"https://{ws_id}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+            if ws_id else "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+        return config.model_copy(update={
+            "voice_mode": "pipeline",
+            "provider": "bailian",
+            "base_url": base_url,
+            "api_key": config.rt_api_key,
+            "model": planner or "qwen-plus",
+            "input_price_per_million": None,
+            "output_price_per_million": None,
+        })
+    return None
