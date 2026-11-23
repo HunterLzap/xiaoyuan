@@ -66,6 +66,7 @@
 - 修复 Bug 时，必须补充复现测试并运行 `slopguard verify --ablation`，确保通过 `RED -> GREEN` 消融验证。
 - 严禁使用 `git commit --no-verify` 绕过 `pre-commit` 门禁。
 - 严禁通过新增抑制注释（`# type: ignore`、`# noqa`、`@ts-ignore`、`eslint-disable`）或堆叠症状兜底来敷衍门禁；遇到 `probe:*` 告警时，按 `action_hint` 做最小根因修复或沉淀为可执行测试/Lint 规则后删掉注释。
+- 所有涉及代码改动的任务，在向用户汇报完成前，必须自动执行 `.agent/workflows/ship.md` 定义的完整闭环直至提交成功。
 <!-- slopguard:end -->
 
 ## 当前技术与数据边界
