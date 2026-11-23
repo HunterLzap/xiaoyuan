@@ -297,7 +297,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     async def decide_approval(approval_id: str, body: ApprovalDecisionRequest):
         return app.state.service.resolve_approval(approval_id, body.decision, session_id=body.session_id)
 
-    mount_desktop_admin_routes(app, lambda: app.state.desktop)
+    mount_desktop_admin_routes(app, lambda: app.state.desktop, public=bool(startup_config.public_origin))
 
     _STOP_INTENT_RE = re.compile(
         r"^(?:停|停下|停下来|停止|停止操作|别动|别动了|别操作了|取消|取消操作|住手|stop|cancel)[！!。.？?]*$",

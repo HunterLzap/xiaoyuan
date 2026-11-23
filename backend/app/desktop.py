@@ -18,7 +18,7 @@ import tempfile
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 import httpx
 
 from .config import ROOT, Settings
@@ -733,29 +733,40 @@ class DesktopHub:
                     await ws.close()
 
 
-def mount_desktop_admin_routes(app: FastAPI, get_hub, record_audit=None) -> None:
-    @app.get("/api/desktop")
+def mount_desktop_admin_routes(app: FastAPI, get_hub, *, public: bool) -> None:
+    async def require_local_desktop_admin(request: Request) -> None:
+        loopback_client = request.client is not None and request.client.host in {"127.0.0.1", "::1"}
+        loopback_host = request.url.hostname in {"localhost", "127.0.0.1", "::1"}
+        # The public proxy authenticates itself, not the visitor using it.
+        if public or not loopback_client or not loopback_host:
+            raise HTTPException(status_code=403, detail={
+                "code": "desktop_admin_local_only", "message": "桌面节点管理仅允许本机回环访问。",
+            })
+
+    router = APIRouter(prefix="/api/desktop", dependencies=[Depends(require_local_desktop_admin)])
+
+    @router.get("")
     async def desktop_status():
         return get_hub().public()
 
-    @app.post("/api/desktop/token/rotate")
+    @router.post("/token/rotate")
     async def desktop_rotate_token():
         return await get_hub().rotate_token()
 
-    @app.put("/api/desktop/default")
+    @router.put("/default")
     async def desktop_set_default(body: dict):
         node_id = str(body.get("node_id") or "") if isinstance(body, dict) else ""
         return await get_hub().set_default_node(node_id)
 
-    @app.delete("/api/desktop/nodes/{node_id}")
+    @router.delete("/nodes/{node_id}")
     async def desktop_delete_node(node_id: str):
         return await get_hub().delete_node(node_id)
 
-    @app.post("/api/desktop/nodes/{node_id}/screenshot")
+    @router.post("/nodes/{node_id}/screenshot")
     async def desktop_refresh_screenshot(node_id: str):
         return await get_hub().inspect_screen(node_id=node_id, question="", analyze_vision=False, include_som=False)
 
-    @app.get("/api/desktop/nodes/{node_id}/screenshot")
+    @router.get("/nodes/{node_id}/screenshot")
     async def desktop_latest_screenshot(node_id: str):
         conn = get_hub().active.get(node_id)
         if conn is None or conn.last_screenshot is None:
@@ -766,6 +777,8 @@ def mount_desktop_admin_routes(app: FastAPI, get_hub, record_audit=None) -> None
             media_type=shot.get("mime_type") or "image/jpeg",
             headers={"Cache-Control": "no-store"},
         )
+
+    app.include_router(router)
 
 
 def supports_native_vision(model_name: str) -> bool:
