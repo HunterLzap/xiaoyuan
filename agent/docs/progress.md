@@ -2,6 +2,14 @@
 
 更新时间：2026-11-23。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
+## Windows SlopGuard 门禁与核心回归（2026-11-23）
+
+- 使用本机 SlopGuard `da44d72` 完成项目初始化和 pre-commit 安装，`_sg_bin` 指向 `C:\Users\l\go\bin\slopguard.exe`。用 `git hook run pre-commit` 执行成功。本机配置沿用既有基线，`verify.test_cmd` 使用 `E:\xiaodan` 的现有 `.venv`，供 `--ablation` 调用。
+- 新增两个桌面管理用例，覆盖持有内部代理凭据时公网 6 个管理操作仍返回 403，以及桌面控制关闭时本机配对可用、健康接口和外部访问均不返回节点令牌。扩展既有结束意图用例，验证「退下」取消实时响应、清除设备会话、下发待机和停止播放。配置的 3 条用例和两套相关测试的 29 条用例均通过。
+- `verify --json` 退出 0、0 findings，执行新增注释探针与 Python 抑制注释基线检查。`ruff`、`pyright`、`semgrep` 因未安装而跳过，项目增量 Lint 也因缺少 Ruff 未运行完。[普通体检](E:/xiaodan/logs/slopguard-verify-20261123.json)
+- 在 `d567120` 的临时工作树重放桌面令牌修复，`verify --ablation --json` 完成 RED → GREEN，退出 0，临时 Git 工作树已移除。本轮验证覆盖接口与后端状态机，未使用真机或请求上游模型。[消融记录](E:/xiaodan/logs/slopguard-ablation-20261123.json)
+- 随后在现有 `.venv` 安装 Ruff `0.17.6`，两份回归测试文件的 Ruff 检查通过，SlopGuard 复验退出 0、0 findings。复验只跳过 `pyright` 和 `semgrep`。[Ruff 启用后的体检](E:/xiaodan/logs/slopguard-verify-with-ruff-20261123.json)
+
 ## Windows 工作树统一与本机启动验证（2026-11-23）
 
 - 运行目录完整备份至 `E:\xiaodan_backup_before_sync_20261123_214111`。Robocopy 二次比对 138,105 个文件无差异，对 `.env`、`data/`、`models/` 和两份未提交文档共 440 个文件复核 SHA-256。[备份日志](E:/xiaodan_backup_before_sync_20261123_214111.robocopy.log)

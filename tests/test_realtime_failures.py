@@ -216,15 +216,22 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
         bridge.stop_audio.assert_awaited_once_with(interrupt=True)
         bridge.show_text.assert_awaited_once_with(bridge.hub.last_error)
 
-    async def test_end_intent_cancels_active_response_and_emits_idle(self):
+    async def test_end_intent_cancels_active_response_and_sends_device_to_sleep(self):
         turn = self.make_turn()
+        bridge = self.make_bridge()
+        bridge.turn = turn
+        bridge.conn.listening = True
+        bridge.conn.voice_session_id = uuid4()
+        bridge.hub.now = monotonic
+        bridge.answer_first_audio_at = None
+        turn.emit.side_effect = bridge.emit
         turn.active_response = "resp_1"
         turn.pending_tools = {}
         turn.reply = "好的"
         turn.ws.send = AsyncMock()
         turn.ws.recv = AsyncMock(side_effect=[json.dumps({
             "type": "conversation.item.input_audio_transcription.completed",
-            "transcript": "塔菲关闭",
+            "transcript": "塔菲，退下吧。",
         })])
         await turn.receive()
         self.assertIn("resp_1", turn.ignore_responses)
@@ -233,6 +240,15 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
         self.assertIn("session.update", sent_types)
         turn.emit.assert_any_await("idle", {"reason": "end_intent"})
         self.assertTrue(turn.saved)
+        self.assertFalse(bridge.conn.listening)
+        self.assertIsNone(bridge.conn.voice_session_id)
+        self.assertTrue(bridge.conn.close_after_chat)
+        bridge.stop_audio.assert_awaited_once_with(interrupt=True)
+        self.assertEqual([item.args[0] for item in bridge.conn.send.await_args_list][-2:], [
+            {"type": "ui", "state": "sleep"},
+            {"type": "tts", "state": "stop"},
+        ])
+        bridge.conn.ws.close.assert_awaited_once()
 
     async def test_provider_finish_close_does_not_close_device(self):
         bridge = self.make_bridge()

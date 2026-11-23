@@ -84,6 +84,59 @@ def _base_settings(tmp_path) -> Settings:
     )
 
 
+def test_desktop_admin_blocks_public_proxy(tmp_path):
+    origin = "https://assistant.example.test"
+    proxy_key = "test-proxy-credential-for-desktop-admin"
+    settings = Settings.model_validate({
+        **_base_settings(tmp_path).model_dump(),
+        "public_origin": origin,
+        "admin_proxy_token": proxy_key,
+    })
+    hub = DesktopHub(path=tmp_path / "desktop_nodes.json")
+    app = create_app(settings, provider=_ScriptedLLM([]), desktop_hub=hub,
+                     settings_store=SettingsStore(tmp_path / ".env"))
+    headers = {"X-Assistant-Admin": proxy_key, "X-Local-Settings": "1", "Origin": origin}
+    routes = (
+        ("GET", "/api/desktop", None),
+        ("POST", "/api/desktop/token/rotate", None),
+        ("PUT", "/api/desktop/default", {"node_id": "offline-node"}),
+        ("DELETE", "/api/desktop/nodes/offline-node", None),
+        ("GET", "/api/desktop/nodes/offline-node/screenshot", None),
+        ("POST", "/api/desktop/nodes/offline-node/screenshot", None),
+    )
+    token = hub.gateway_token
+    with TestClient(app, base_url=origin, client=("127.0.0.1", 50000)) as client:
+        assert client.get("/health", headers=headers).status_code == 200
+        for method, path, body in routes:
+            response = client.request(method, path, headers=headers, json=body)
+            assert response.status_code == 403, (method, path)
+            assert response.json()["detail"]["code"] == "desktop_admin_local_only"
+            assert token not in response.text
+    assert hub.gateway_token == token
+
+
+def test_desktop_admin_preserves_local_pairing_without_exposing_token_elsewhere(tmp_path):
+    settings = _base_settings(tmp_path).model_copy(update={"desktop_enabled": False})
+    hub = DesktopHub(path=tmp_path / "desktop_nodes.json")
+    app = create_app(settings, provider=_ScriptedLLM([]), desktop_hub=hub,
+                     settings_store=SettingsStore(tmp_path / ".env"))
+    base_url = "http://127.0.0.1"
+    with TestClient(app, base_url=base_url, client=("127.0.0.1", 50000)) as client:
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["desktop_enabled"] is False
+        assert hub.gateway_token not in health.text
+        assert client.get("/api/desktop").json()["gateway_token"] == hub.gateway_token
+        foreign_origin = client.get("/api/desktop", headers={"Origin": "https://visitor.example.test"})
+        assert foreign_origin.status_code == 403
+        assert hub.gateway_token not in foreign_origin.text
+
+    with TestClient(app, base_url=base_url, client=("192.0.2.10", 50000)) as client:
+        response = client.get("/api/desktop")
+        assert response.status_code == 403
+        assert hub.gateway_token not in response.text
+
+
 def test_desktop_sensitive_path_guard_blocks_credentials():
     for path in (
         ".env",
