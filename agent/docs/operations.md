@@ -1,16 +1,15 @@
 # 运行与恢复手册
 
-更新：2026-11-15。以下是按具体任务及已有授权执行时的参考，不是启动、重启、部署或设备操作指令。当前只整理文档，卡顿暂缓；运行快照见 [START](../START.md)。
+更新：2026-11-23。按具体任务和已有授权使用本手册。运行快照见 [START](../START.md)。
 
 ## 1. 先分清环境
 
 | 环境 | 程序与端口 | 数据与注意事项 |
 | --- | --- | --- |
-| Windows运行副本 | `E:\xiaodan`；管理127.0.0.1:8000、设备8003 | 本机私有.env/data/logs；最后旧进程PID17156，不将其当永久PID |
-| Git工作树 | `E:\xiaodan\.cache\repo-export` | 包含未提交动画/UI/TCP/后端实验；不能整体覆盖运行副本或打包上线 |
+| Windows工作树与运行目录 | `E:\xiaodan`；管理端 `127.0.0.1:8000`，设备网关端口 `8003` | 保留本机私有 `.env`、`data/`、`logs/` 和已有虚拟环境 |
 | 云端 | `47.112.16.195`；`/opt/xiaodan/current`，内部8010/8013 | `/opt/xiaodan/shared`保存.env/data/logs/.cache，release内链接到共享数据 |
 
-真正版本管理在repo-export；文档两处同版，业务代码有意不同。根运行副本中的deploy模板可能旧于Git工作树，不能拿它直接覆盖已部署配置。
+Windows 从项目根执行 Git 操作。云端使用发布目录和已部署的配置，具体版本见 START。
 
 ## 2. 云端现状与只读查看
 
@@ -89,7 +88,7 @@ Set-Location E:\xiaodan
 .\start.ps1 -Devices
 ```
 
-或用现有项目解释器启动 `-m backend.run_devices`（同一进程管理8000/设备8003）；仅管理端可用 `-m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers`。不同时启动冲突实例，不加workers，不把本机入口裸监听公网。
+或用现有项目解释器启动 `-m backend.run_devices`（同一进程管理8000/设备8003）；仅管理端可用 `-m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --no-proxy-headers`。不同时启动冲突实例，不加workers。桌面节点管理接口仅允许本机回环，并在配置公网代理时返回 403。
 
 配置来自环境变量/私有.env，环境优先。网页保存、获取模型列表、草稿调用分开，保存不清空历史；密钥留空保留原值，更换地址必须重新输入对应密钥。准确字段与默认值以当前config/schemas为准，不在手册重复旧512输出上限。
 

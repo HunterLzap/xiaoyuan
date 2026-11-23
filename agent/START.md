@@ -1,8 +1,13 @@
 # 当前工作入口
 
-更新：2026-11-17。本文只写当前快照；历史过程与原始证据在 [progress](docs/progress.md)。
+更新：2026-11-23。本文只写当前快照；历史过程与原始证据在 [progress](docs/progress.md)。
 
-## 当前任务与暂停事项
+## Windows 本机同步（2026-11-23）
+
+- `E:\xiaodan` 已统一为 Windows 项目的 Git 工作树与运行目录。`main` 与 GitHub `origin/main` 同为 `d567120`，本机从 `local/windows-sync` 运行。旧 `.cache/repo-export` 已移出项目，11 月 16 日本机刷写记录保留在忽略文件 `LOCAL_FLASH_NOTES.md`。
+- 现有 `.venv` 已启动管理页面与 API，监听 `127.0.0.1:8000`。已读回历史、个人知识库和本机音色配置。桌面节点管理仅限本机回环，公网代理模式禁用该管理接口。启动、备份和验证范围见 [progress](docs/progress.md#windows-工作树统一与本机启动验证2026-11-23)。
+
+## 11 月 17 日开发记录与暂停事项
 
 已完成**个人 Agent 核心底座重构、Agent 优先单用户 UI 重构、Windows/macOS 跨平台桌面控制方案 A 体验增强、全系统脱敏异常日志中心（`异常日志`）**开发与 Mac 本机自动化验证：
 
@@ -20,20 +25,20 @@
    - **Agent 优先单用户 UI**：保留 Codex 灰阶主题、「Agent 与档案」「技能与知识」「终端节点（Windows/Mac + AtomS3R）」及语音面板完整功能。
 
 - 保留既有实时主线模型 `qwen3.8-omni-flash-realtime`、塔菲复刻音色与唤醒/待机/卡顿暂缓约定，不擅自更改语音服务或重置历史数据。
-- **待用户后续操作**：将本次提交推送远端后，在云端执行 `/opt/xiaodan/current/deploy/release_from_git.sh` 发布，并在 Mac/Windows 桌面节点 `git pull` 重启后实测打开应用/屏幕操控与硬件报错捕获。
+- **11 月 17 日记录的待验证范围**包含云端发布后的 Mac/Windows 桌面操控与硬件报错捕获。11 月 23 日仅更新 Windows 本机，云端当前发布待另行核对。
 
 ## 版本与位置
 
 | 对象 | 最后确认事实 | 接手注意 |
 | --- | --- | --- |
 | 稳定基线 | 历史基线 `bd639a9` / 固件与网关 `5ccb283` / 桌面首版 `82afc7c` | 追溯点；本轮提交在 `82afc7c` 之后推进 |
-| Windows 运行副本 | 夜间 Windows 端通过 Gitee `git pull` 同步测试（保留本地 `.env`/`data/`） | 原 `E:\xiaodan` PID17156 为历史参考，不代表实时在线 |
+| Windows | `E:\xiaodan`，`main` 为 `d567120`，本机启动分支为 `local/windows-sync` | 本机私有配置和数据沿用原路径 |
 | Git 开发快照 | 三端协同：Mac `main` → `git push origin main` 双推 Gitee + GitHub | 本地凭据与私钥不入库 |
-| 云端在线版本 | `/opt/xiaodan/current` → `/opt/xiaodan/releases/82afc7c-20261117-093433`（`https://ryan406.online/xiaoyuan/`） | Caddy 已配置 `/xiaoyuan/desktop/v1`；**本轮方案 A 与异常日志待发布上线** |
+| 云端发布（11 月 17 日记录） | `/opt/xiaodan/current` → `/opt/xiaodan/releases/82afc7c-20261117-093433`（`https://ryan406.online/xiaoyuan/`） | 当时 Caddy 已配置 `/xiaoyuan/desktop/v1`，方案 A 与异常日志待发布 |
 | 云端运行数据 | `/opt/xiaodan/shared` | `.env`、data、logs、缓存独立于 release；回滚代码不回滚数据库 |
 | 设备 | AtomS3R + Echo Base，固件按 `5ccb283` (`2,777,232B` app-flash，COM3) 与对应 `generated_assets.bin` | 上轮真机对话+待机动画+“退下/关闭”直接待机已实测通过；本次未改动固件 |
 
-Windows进程值来自此前检查，云端/设备实跑证据最后为11月15日21:26–21:28；文档/Git同步没有重新确认即时在线状态。实时主线保留百炼 `qwen3.8-omni-flash-realtime`、原塔菲复刻音色和末次语速1.2/音调+3。`main`的开发快照不等于该云端release；需要运行/发布时先按architecture/operations区分模块，不用“Git已提交”推断声音已验证。
+Windows 本机进程以 11 月 23 日启动日志为准。云端与设备未在这次本机同步中重查。实时主线保留百炼 `qwen3.8-omni-flash-realtime`、原塔菲复刻音色和末次语速1.2/音调+3。`main`的开发快照不等于该云端release；需要运行/发布时先按architecture/operations区分模块，不用“Git已提交”推断声音已验证。
 
 云端当前版本保留前几版文字/Token/工具优化；语音首批只在 `tool_dialogue.py`、`prompt_builder.py` 去除重复说明并复用共用校验/用量。`realtime.py`、`device_realtime.py`、`audio_fx.py`、`voice_transport.py`、`speech_text.py`、`prompt_context.py` 与前一云端稳定发布一致。工作树同名文件可能含实验改动，不能混为在线代码。
 

@@ -47,6 +47,6 @@ Python 3.11+，现有Windows环境历史使用3.12；FastAPI、Pydantic、异步
 
 ## 版本与维护
 
-原电脑Git工作树为 `E:\xiaodan\.cache\repo-export`，运行副本是 `E:\xiaodan`，云端程序在 `/opt/xiaodan/current`；新电脑以实际clone根目录为准。Git开发快照包含动画/UI/TCP试验，与线上有意不同，不整目录覆盖或直接部署；不把repo-export当缓存删除，不重新初始化Git。
+原电脑的 `E:\xiaodan` 同时用于 Git 开发和本机运行，云端程序在 `/opt/xiaodan/current`。新电脑以实际 clone 根目录为准。
 
-先参考官方与成熟项目做法，再适配现有模块；不盲堆提示或批量付费探查。维护当前文档直接修正文中过期事实，历史保留在progress/decisions；本机与工作树文档同步，不自动同步业务代码。不把文档数量和绿色状态当功能交付。
+先参考官方与成熟项目做法，再适配现有模块；不盲堆提示或批量付费探查。维护当前文档直接修正文中过期事实，历史保留在progress/decisions；本机证据留在运行目录，版本与验证范围写入对应项目文档。不把文档数量和绿色状态当功能交付。

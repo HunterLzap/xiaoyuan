@@ -7,7 +7,7 @@
 1. 读根 [AGENTS](../../AGENTS.md)、[README](../../README.md)、[统一入口](../agent.md) 和 START。
 2. 明确用户这轮要处理什么，特别留意暂停事项。当前卡顿表现已说明为整段回复随机停顿后继续，用户要求暂不解决；不再追问同一问题或自动开始采集。
 3. 按任务读 [架构](architecture.md)、[操作手册](operations.md)、[代码地图](../code/structure.md)；需追溯某项事实时才检索 [progress](progress.md) 的对应日期/主题。
-4. 区分运行副本 `E:\xiaodan`、真正 Git 工作树 `E:\xiaodan\.cache\repo-export`、云端 `/opt/xiaodan/current`。代码有意不同，文档保持同步。检查 Git 用工作树路径，不在运行目录重新初始化仓库。
+4. Windows 的 `E:\xiaodan` 同时是 Git 工作树和本机运行目录。云端从 `/opt/xiaodan/current` 运行独立发布。Windows 本机分支和只在本机保留的刷写记录见 START。
 
 ## 新电脑接手
 

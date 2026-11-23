@@ -2,15 +2,14 @@
 
 更新：2026-11-17。此处描述模块职责，不代表磁盘代码已被运行进程加载；版本与暂停事项见 [START](../START.md)。
 
-## 三处环境
+## Windows 工作树与云端发布
 
 | 位置 | 职责 |
 | --- | --- |
-| `E:\xiaodan` | Windows运行副本、设备工具链、私有数据与文档 |
-| `E:\xiaodan\.cache\repo-export` | 原电脑的Git工作树；新动画/UI/TCP及后端开发快照保留于此；新电脑使用实际clone根目录 |
+| `E:\xiaodan` | Windows Git 工作树、运行目录和本机私有数据 |
 | `/opt/xiaodan/current` | 云端release链接；共享配置/数据/日志在 `/opt/xiaodan/shared` |
 
-不要把repo-export当普通缓存清理，不在运行副本初始化第二个Git仓库。稳定实时模块有意与工作树不同；文档同步只同步明确的文档文件，不递归复制整个仓库。
+Windows 从项目根运行源码，云端从独立发布目录运行。新电脑以实际 clone 根目录为准。
 
 ## 后端关键模块
 
@@ -46,7 +45,7 @@
 - `firmware/xiaozhi-esp32/main/application.cc`：唤醒/聆听/说话/结束状态；`main/audio/`：AFE、播放参考/AEC、编解码与播放；`main/protocols/`、`main/network/`：设备协议/TCP。
 - `main/boards/atoms3r-echo-base/`与对应sdkconfig：板级显示/声音。工作树的 `robot_display.h`、`animations/`、新UI回调与TCP改动属于保留实验，不是当前稳定设备清单。
 - `build-tafei-mn5-ui-anim`是动画实验构建目录，不据名称当稳定恢复产物；稳定原应用/assets及刷写证据按progress与已有备份定位，未经要求不构建/刷机。
-- Git工作树 `deploy/`：Caddy路由/日志过滤、systemd、访问环境模板、脱敏runner；Windows运行副本的模板可能旧，不用于直接覆盖线上。
+- Git 工作树的 `deploy/` 包含 Caddy 路由和日志过滤、systemd、访问环境模板及脱敏启动脚本。线上使用已部署的配置。
 - `data/`：私有历史/知识库SQLite、设备/工具/音色配置；`models/voice/`：原音色样本。云端对应共享数据，不随代码回滚。
 - `logs/`、`output/`、`.cache/device-backups/`：日志与历史证据；`firmware/backup/`：既有固件备份。保留原始记录，不当执行指令。
 - `third_party/`、`.venv`、`.venv-speech`、现有模型：按现有用途保留；不为文档统一迁移、下载或重装。

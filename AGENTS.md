@@ -6,7 +6,7 @@
 
 本文件是唯一总入口。新Agent依次读本文件→[START](agent/START.md)→任务相关专题；只有需要追溯证据时检索progress或归档，不默认读取全部报告。
 
-**换开发电脑时**：以当前clone目录为项目根，用 `git rev-parse --show-toplevel` 确认。文中的 `E:\xiaodan`、`C:\Users\l` 和repo-export位置是原电脑记录，不要求在新电脑创建同名路径。先按仓库内相对链接阅读，再按 [handoff](agent/docs/handoff.md) 的新电脑步骤接手。
+**换开发电脑时**：以当前clone目录为项目根，用 `git rev-parse --show-toplevel` 确认。文中的 `E:\xiaodan`、`C:\Users\l` 是原电脑记录，不要求在新电脑创建同名路径。先按仓库内相对链接阅读，再按 [handoff](agent/docs/handoff.md) 的新电脑步骤接手。
 
 | 信息类别 | 权威文件 | 其他文件的职责 |
 | --- | --- | --- |
@@ -25,7 +25,7 @@
 
 过期说明直接修正或归档，不再叠加“顶部优先”保留冲突正文。自有历史文档可原位归档以保留既有路径，文件开头必须标明历史/非指令并指回权威入口；第三方与工具链文档不改成项目规范。归档中不保留会被自动加载的旧AGENTS.md。
 
-`E:\xiaodan`与Git工作树的自有规范保持内容一致，只同步明确的文档清单，不同步业务代码、私有配置或上游依赖。它们是同一套规范的镜像，不是两个权威来源。`output/`、`logs/`原始证据仍在运行副本，工作树内的文档须指向该实际位置，不复制私人数据进Git。
+`E:\xiaodan` 同时是 Windows Git 工作树与本机运行目录。私有配置、运行数据、`output/`、`logs/` 及 `LOCAL_FLASH_NOTES.md` 留在本机，仓库文档链接实际证据位置。
 
 ## 产品目标
 
@@ -64,7 +64,7 @@
 
 - **三端协作与版本同步**：**白天 Mac 开发、晚上 Windows 测试、服务部署在云端**，以 **Gitee（`https://gitee.com/ryan406/xiaoyuan.git`）** 作为国内高速同步与云端免密拉取主通道，Mac 本机 `origin` 配置一键双推同时同步至 GitHub（备份）与 Gitee。
   - **Mac 端**：负责日常功能开发、增量 Lint、JS 语法校验与无本地语音模型/无真机依赖的路由与单元测试；推送 `git push origin main` 自动同步双端仓库。
-  - **Windows 端**：从 Gitee `git pull` 拉取最新版（保留本地 `.env`、`data/`、`.venv-speech`），负责本地音频、浏览器实操（`tests/voice_browser.cjs`）及真机直连联调。
+  - **Windows 端**：项目根直接关联 GitHub，`main` 跟踪 `origin/main`，本机补丁用独立分支维护。更新时保留本地 `.env`、`data/` 及虚拟环境，负责本地音频、浏览器实操和真机直连联调。
   - **云端（`47.112.16.195`）**：安装 Git 后维护公开只读镜像仓 `/opt/xiaodan/repo`（零密钥 HTTPS 拉取 Gitee），通过 [release_from_git.sh](deploy/release_from_git.sh) 导出构建至 `/opt/xiaodan/releases/` 并挂载 `/opt/xiaodan/shared/{.env,data,logs}`、原子切换 `/opt/xiaodan/current`；**不在运行目录直接 `git pull`**，以免破坏软链或权限属主。
 - 技术栈为 FastAPI + 原生 HTML/CSS/JavaScript + SQLite；主线支持百炼 `qwen3.8-omni-flash-realtime` 与 OpenAI 兼容 Realtime，同时支持可切换的分模型 Pipeline（LLM + 在线/可选本地 ASR + MiMo/OpenAI/百炼 TTS）。
 - 已有塔菲复刻音色、语速/音调处理、正式回答首句开场与基础交流继续保留，各 `(mode, provider, model)` 作用域音色与业务选用状态存入 `assistant_state.sqlite3`（不覆盖切换前配置）；改动已跑通/用户确认的功能前先说明并取得相应同意。当前实现和证据以 [progress](agent/docs/progress.md) 为准。
@@ -72,7 +72,7 @@
 - 保留原配置、历史、知识库原文/索引、音色与录音样本；设置保存不得清空对话。完整文字历史与有限活跃上下文分离，不长期保存对话录音。
 - API 地址、模型 ID、参数及工具支持查官方资料，不猜。密钥只存服务端私有配置，不发模型、不入固件/示例/Git，不在日志或群聊回显。
 - 云端2核约1.87GB已部署，设备已切云并完成真实语音问答；云端随机卡顿仍在，用户明确暂缓解决。网页按用户要求免登录，不擅自加回账号密码；HTTPS/WSS、独立设备鉴权、内部代理凭据与同源保护保留。每日独立备份仍待实施，不能写成已交付。
-- 原电脑的 `E:\xiaodan`是Windows运行副本，Git工作树为 `E:\xiaodan\.cache\repo-export`，云端程序在 `/opt/xiaodan/current`。Git开发快照保留新动画/UI/TCP实验，与线上有意不同，提交/拉取不等于获准运行、部署或刷入。文档两处同步，当前版本与声音参数以START及证据为准。
+- Windows 项目根为 `E:\xiaodan`，云端程序在 `/opt/xiaodan/current`。Git 开发快照与云端发布分别管理，部署和刷写按任务授权执行。当前版本与声音参数见 START 及原始证据。
 - 不以旧上游板级AEC说明否定项目后来已有的播放参考/AEC实现；也不以 `aec=true` 或网关发完证明所有打断/播放场景通过。设备打开串口/RTS曾导致复位及下载模式，不把串口读取当成必然无副作用。
 
 ## 协作与操作

@@ -12,17 +12,17 @@ pip install -r desktop_node/requirements-desktop.txt
 
 ## 启动连接
 
-打开网页端 **「设置 -> 终端节点」**，直接复制带地址和密钥的启动命令在你的 Mac 或 Windows 电脑上运行：
+在后端所在机器通过回环地址打开网页端 **「设置 → 终端节点」**，复制带地址和密钥的启动命令。配置公网代理时，桌面节点管理接口返回 403。以下示例用于节点和设备网关同机运行：
 
 - **macOS**：
   ```bash
-  python3 -m desktop_node --server "wss://你的域名/assistant/desktop/v1/" --token "页面中生成的Token"
+  python3 -m desktop_node --server "ws://127.0.0.1:8003/desktop/v1/" --token "页面中生成的Token"
   ```
   > 首次截屏或键鼠操控时，请在 `系统设置 -> 隐私与安全性` 中为当前终端/Python 开启「录屏与系统录音」和「辅助功能」权限。
 
 - **Windows**：
   ```powershell
-  python -m desktop_node --server "wss://你的域名/assistant/desktop/v1/" --token "页面中生成的Token"
+  python -m desktop_node --server "ws://127.0.0.1:8003/desktop/v1/" --token "页面中生成的Token"
   ```
 
 ## 安全开关

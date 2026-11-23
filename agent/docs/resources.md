@@ -18,8 +18,7 @@
 
 | 位置 | 内容 |
 | --- | --- |
-| `E:\xiaodan` | Windows运行副本与私有运行资源 |
-| `E:\xiaodan\.cache\repo-export` | 原电脑的Git工作树，保留实验源码；不可当普通缓存清理，新电脑不必复刻此目录 |
+| `E:\xiaodan` | Windows Git 工作树与本机运行目录，含私有配置和数据 |
 | `.venv` / `.venv-speech` | 已有应用与本地语音环境，按用途保留，不整体重装 |
 | `firmware/`、`.cache/device-backups/`、`logs/` | 固件工程、已有恢复备份和操作证据；不能因目录名推断产物是稳定版 |
 | `/opt/xiaodan/current` / `releases` | 云端在线程序与保留发布 |
