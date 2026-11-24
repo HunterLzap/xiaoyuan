@@ -2,6 +2,11 @@
 
 更新时间：2026-11-24。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
+## Batch 4 配置与终端界面（2026-11-24）
+
+- Windows `E:\xiaodan`，基于 `fd786c0`，Python 3.12.0。指定五个测试文件共 60 项通过（含 3 项新增测试），2 个子测试通过，0 项跳过，1 条 Starlette 弃用警告。覆盖搜索密钥和实时选项持久化、搜索密钥公开状态、普通文字接口换地址鉴权及硬件就绪布尔值。[回归输出](E:/xiaodan/logs/batch4-pytest.log)
+- 增量 Lint 新增问题为 0。`node --check backend/app/app.js` 和 DOM ID 静态比对通过，四个示例按钮、两个终端页签及旧 DOM ID 均已核对。SlopGuard 通过，跳过 Pyright 和 Semgrep，Pyright 已由增量 Lint 执行。浏览器真机目视、真实设备连接及外网搜索仍待验收。[增量 Lint](E:/xiaodan/logs/batch4-lint.log) · [门禁结果](E:/xiaodan/logs/batch4-slopguard.log)
+
 ## Batch 3 DeepSeek 联网搜索（2026-11-24）
 
 - Windows `E:\xiaodan`，基于 `028efbd`，Python 3.12.0。指定五个测试文件共 57 项通过（含 4 项新增测试），2 个子测试通过，0 项跳过，1 条 Starlette 弃用警告。增量 Lint 新增问题为 0。SlopGuard 通过，跳过 Pyright 和 Semgrep，其中 Pyright 已由增量 Lint 执行。[回归输出](E:/xiaodan/logs/batch3-pytest.log) · [增量 Lint](E:/xiaodan/logs/batch3-lint.log) · [门禁结果](E:/xiaodan/logs/batch3-slopguard.log)

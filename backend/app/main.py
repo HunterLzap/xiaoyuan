@@ -287,6 +287,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     @app.get("/health")
     async def health():
         service = app.state.service
+        connection = getattr(app.state.devices, "connection", None)
         return {
             "status": "ok", "configured": not service.settings.missing_config,
             "missing_config": service.settings.missing_config,
@@ -297,6 +298,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             "history_enabled": service.history_store is not None,
             "m5stack_enabled": service.settings.m5stack_enabled,
             "desktop_enabled": service.settings.desktop_enabled,
+            "device_connected": bool(connection and connection.ready),
             "desktop_online_nodes": len(app.state.desktop.active) if getattr(app.state, "desktop", None) else 0,
         }
 

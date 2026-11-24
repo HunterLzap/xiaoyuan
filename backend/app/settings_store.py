@@ -15,6 +15,17 @@ from .tts import CLONE_MODEL
 from .web_search import resolve_web_search_api_key
 
 
+_CONNECTION_KEYS = ("api_key", "tts_api_key", "rt_api_key", "asr_api_key", "web_search_api_key")
+_REALTIME_ADVANCED_FIELDS = (
+    "rt_max_continuous_turns", "rt_max_continuous_seconds", "rt_silence_gate_enabled",
+    "rt_silence_gate_rms", "rt_defer_response_until_transcript",
+)
+_OPTIONAL_CONNECTION_FIELDS = (
+    "base_url", "tts_base_url", "tts_use_text_connection", "asr_use_text_connection",
+    "desktop_vision_model", "desktop_planner_model", *_REALTIME_ADVANCED_FIELDS,
+)
+
+
 class SettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     provider: str = Field(default="tokendance", min_length=1, max_length=80)
@@ -66,6 +77,11 @@ class ConnectionsUpdate(BaseModel):
     rt_voice: str = Field(default="Tina", min_length=1, max_length=80)
     rt_asr_model: str = Field(default="whisper-1", max_length=200)
     rt_api_key: SecretStr | None = None
+    rt_max_continuous_turns: int | None = Field(default=None, ge=0, le=50)
+    rt_max_continuous_seconds: int | None = Field(default=None, ge=0, le=3600)
+    rt_silence_gate_enabled: bool | None = None
+    rt_silence_gate_rms: float | None = Field(default=None, ge=10.0, le=3000.0)
+    rt_defer_response_until_transcript: bool | None = None
 
     asr_provider: Literal["openai", "bailian", "local"] = "openai"
     asr_base_url: str = Field(default="", max_length=500)
@@ -75,8 +91,9 @@ class ConnectionsUpdate(BaseModel):
     asr_language: str = Field(default="zh", max_length=20)
 
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
-    base_url: str = Field(min_length=1, max_length=500)
+    base_url: str | None = Field(default=None, min_length=1, max_length=500)
     api_key: SecretStr | None = None
+    web_search_api_key: SecretStr | None = None
     models_protocol: Literal["auto", "openai", "disabled"] = "auto"
     tts_provider: Literal["mimo", "openai", "bailian"] = "mimo"
     tts_base_url: str | None = Field(default=None, min_length=1, max_length=500)
@@ -147,7 +164,7 @@ class AssistantSelectionUpdate(BaseModel):
 
 
 class APISettingsUpdate(ConnectionsUpdate, AssistantUpdate):
-    pass
+    base_url: str = Field(min_length=1, max_length=500)
 
 
 class TTSPreview(BaseModel):
@@ -183,6 +200,7 @@ def public_settings(settings: Settings) -> dict:
         "weather_enabled": settings.weather_enabled,
         "web_search_enabled": settings.web_search_enabled,
         "web_search_configured": bool(resolve_web_search_api_key(settings)),
+        "web_search_separate_key_configured": bool(settings.web_search_api_key.get_secret_value().strip()),
         "weather_default_city": settings.weather_default_city,
         "desktop_enabled": settings.desktop_enabled,
         "desktop_vision_model": settings.desktop_vision_model,
@@ -194,6 +212,7 @@ def public_settings(settings: Settings) -> dict:
         **{k: getattr(settings, k) for k in (
             "voice_mode", "rt_provider", "rt_endpoint", "rt_workspace", "rt_model", "rt_voice", "rt_asr_model",
             "asr_provider", "asr_base_url", "asr_model", "asr_language", "tts_provider",
+            *_REALTIME_ADVANCED_FIELDS,
         )},
         "asr_use_text_connection": settings.shared_asr_connection,
         "asr_effective_base_url": settings.effective_asr_base_url,
@@ -231,7 +250,7 @@ class SettingsStore:
         if isinstance(update, AssistantSelectionUpdate):
             # 选择更新不得顺带规范化音色、样本等无关字段。
             return Settings(_env_file=None, **{**current.model_dump(), **update.model_dump(exclude_unset=True)})
-        key_names = {name for name in ("api_key", "tts_api_key", "rt_api_key", "asr_api_key") if name in type(update).model_fields}
+        key_names = {name for name in _CONNECTION_KEYS if name in type(update).model_fields}
         values = current.model_dump()
         # 均为“真正部分更新”：只应用请求里显式提交的字段；
         # APISettingsUpdate 继承 ConnectionsUpdate/AssistantUpdate，按子集处理，未提交字段保持现配置。
@@ -248,13 +267,7 @@ class SettingsStore:
                 if getattr(update, extra, None) is None:
                     updates.pop(extra, None)
         if isinstance(update, ConnectionsUpdate):
-            for name in (
-                "tts_base_url",
-                "tts_use_text_connection",
-                "asr_use_text_connection",
-                "desktop_vision_model",
-                "desktop_planner_model",
-            ):
+            for name in _OPTIONAL_CONNECTION_FIELDS:
                 if updates.get(name) is None:
                     updates.pop(name, None)
         values.update(updates)
@@ -280,7 +293,7 @@ class SettingsStore:
         if "rt_api_key" in key_names and update.rt_api_key is None and current.rt_api_key.get_secret_value() and (
             config.rt_provider != current.rt_provider or config.rt_endpoint != current.rt_endpoint):
             raise ProviderError(422, "key_required_for_new_url", "切换实时接口后，请重新输入 API Key。")
-        for key_name in key_names:
+        for key_name in key_names - {"web_search_api_key"}:
             url_name = ("rt_workspace" if key_name == "rt_api_key"
                         else "tts_base_url" if key_name == "tts_api_key"
                         else "asr_base_url" if key_name == "asr_api_key"
@@ -310,16 +323,10 @@ class SettingsStore:
         if isinstance(update, ConnectionsUpdate):
             managed -= {
                 name
-                for name in (
-                    "tts_base_url",
-                    "tts_use_text_connection",
-                    "asr_use_text_connection",
-                    "desktop_vision_model",
-                    "desktop_planner_model",
-                )
+                for name in _OPTIONAL_CONNECTION_FIELDS
                 if getattr(update, name) is None
             }
-        for key_name in ("api_key", "tts_api_key", "rt_api_key", "asr_api_key"):
+        for key_name in _CONNECTION_KEYS:
             if key_name in managed and getattr(update, key_name) is None:
                 managed.remove(key_name)
         if isinstance(update, AssistantSelectionUpdate):

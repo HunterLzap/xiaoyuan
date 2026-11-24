@@ -7,10 +7,12 @@ import json
 import sqlite3
 from contextlib import closing
 from threading import get_ident
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 import wave
 
+from dotenv import dotenv_values
 from fastapi.testclient import TestClient
 import httpx
 import pytest
@@ -527,3 +529,100 @@ def test_close_web_search_client_closes_and_releases_reused_client():
         await web_search.close_web_search_client()
 
     asyncio.run(scenario())
+
+
+_RT_CONNECTION_OPTIONS = {
+    "rt_max_continuous_turns": 0,
+    "rt_max_continuous_seconds": 900,
+    "rt_silence_gate_enabled": False,
+    "rt_silence_gate_rms": 180.0,
+    "rt_defer_response_until_transcript": True,
+}
+
+
+@pytest.fixture
+def connection_settings_client(tmp_path):
+    cfg = Settings(
+        _env_file=None, api_key="", rt_api_key="", web_search_api_key="",
+        base_url="https://api.deepseek.com/v1", web_search_enabled=True, selected_tool_ids=["web_search"],
+        assistant_db_path=tmp_path / "assistant.sqlite3",
+        history_db_path=None, personal_kb_db_path=None, usage_log_path=None, m5stack_enabled=False,
+    )
+    store = SettingsStore(tmp_path / ".env")
+    app = create_app(cfg, settings_store=store)
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        yield client, store
+
+
+def test_connections_persist_search_key_and_realtime_options_without_resetting_session(connection_settings_client):
+    client, store = connection_settings_client
+    service = client.app.state.service
+    sid = client.portal.call(service.new_session)
+    session = service.get_session(sid)
+    key = "connection-search-key-for-tests"
+    response = client.put("/api/settings/connections", headers=HEADERS,
+                          json={"web_search_api_key": key, **_RT_CONNECTION_OPTIONS})
+    assert response.status_code == 200 and key not in response.text
+    assert all(getattr(service.settings, name) == value for name, value in _RT_CONNECTION_OPTIONS.items())
+    saved_env = dotenv_values(store.path, encoding="utf-8")
+    assert saved_env["AI_WEB_SEARCH_API_KEY"] == key
+    assert all(saved_env["AI_" + name.upper()] == str(value) for name, value in _RT_CONNECTION_OPTIONS.items())
+    assert service.tools.get("web_search").settings is service.settings
+
+    response = client.put("/api/settings/connections", headers=HEADERS,
+                          json={"base_url": "https://text.example.invalid/v1", "rt_max_continuous_turns": 12,
+                                "rt_silence_gate_rms": None})
+    assert response.status_code == 200 and key not in response.text
+    assert service.settings.web_search_api_key.get_secret_value() == key
+    assert service.settings.rt_max_continuous_turns == 12
+    assert service.settings.rt_silence_gate_rms == 180.0
+    saved_env = dotenv_values(store.path, encoding="utf-8")
+    assert saved_env["AI_WEB_SEARCH_API_KEY"] == key and saved_env["AI_RT_MAX_CONTINUOUS_TURNS"] == "12"
+    assert service.get_session(sid) is session
+
+    response = client.put("/api/settings/connections", headers=HEADERS, json={"web_search_api_key": None})
+    assert response.status_code == 200 and service.settings.web_search_api_key.get_secret_value() == key
+    response = client.put("/api/settings/connections", headers=HEADERS, json={"web_search_api_key": ""})
+    assert response.status_code == 200 and not service.settings.web_search_api_key.get_secret_value()
+    assert dotenv_values(store.path, encoding="utf-8")["AI_WEB_SEARCH_API_KEY"] == ""
+
+
+def test_public_settings_report_search_key_source_and_realtime_options(connection_settings_client):
+    client, _ = connection_settings_client
+    first = client.get("/api/settings").json()
+    assert first["web_search_configured"] is False and first["web_search_separate_key_configured"] is False
+    primary = "deepseek-primary-key-for-tests"
+    response = client.put("/api/settings/connections", headers=HEADERS,
+                          json={"api_key": primary, **_RT_CONNECTION_OPTIONS})
+    assert response.status_code == 200
+    fallback = client.get("/api/settings").json()
+    assert fallback["web_search_configured"] is True and fallback["web_search_separate_key_configured"] is False
+
+    separate = "independent-search-key-for-tests"
+    response = client.put("/api/settings/connections", headers=HEADERS, json={"web_search_api_key": separate})
+    assert response.status_code == 200
+    public = client.get("/api/settings")
+    payload = public.json()
+    assert public.status_code == 200
+    assert payload["web_search_configured"] is True and payload["web_search_separate_key_configured"] is True
+    assert {name: payload[name] for name in _RT_CONNECTION_OPTIONS} == _RT_CONNECTION_OPTIONS
+    assert "web_search_api_key" not in payload and separate not in public.text and primary not in public.text
+    response = client.put("/api/settings/connections", headers=HEADERS,
+                          json={"base_url": "https://different.example.invalid"})
+    assert response.status_code == 422 and response.json()["detail"]["code"] == "key_required_for_new_url"
+
+
+def test_health_reports_hardware_ready_boolean(connection_settings_client):
+    client, _ = connection_settings_client
+    devices = client.app.state.devices
+    assert client.get("/health").json()["device_connected"] is False
+    try:
+        devices.connection = SimpleNamespace(ready=False, token="device-token-for-tests")
+        assert client.get("/health").json()["device_connected"] is False
+        devices.connection.ready = True
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json()["device_connected"] is True
+        assert "device-token-for-tests" not in response.text
+    finally:
+        devices.connection = None

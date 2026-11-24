@@ -51,16 +51,24 @@
     <main class="main-shell">
       <header class="toolbar">
         <div class="toolbar-left"><button id="open-sidebar" class="icon-button" aria-label="展开侧栏"><svg><use href="#i-panel"/></svg></button><span class="workspace-name">个人助理</span><span class="breadcrumb-divider">/</span><span id="view-title">新对话</span><form id="rename-form" hidden><label class="sr-only" for="rename-title">会话名称</label><input id="rename-title" maxlength="80" required><button type="submit" class="text-button">保存</button><button id="cancel-rename" type="button" class="text-button">取消</button></form></div>
-        <div class="toolbar-right"><button id="rename-session" class="icon-button thread-action" aria-label="重命名对话" title="重命名对话" disabled><svg><use href="#i-edit"/></svg></button><button id="export-session" class="icon-button thread-action" aria-label="导出对话" title="导出 Markdown" disabled><svg><use href="#i-download"/></svg></button><button id="delete-session" class="icon-button thread-action" aria-label="删除对话" title="删除对话" disabled><svg><use href="#i-trash"/></svg></button><button id="model-button" class="model-button" title="配置模型"><span id="model-label">未选择模型</span><svg><use href="#i-chevron"/></svg></button></div>
+        <div class="toolbar-right"><button id="rename-session" class="icon-button thread-action" aria-label="重命名对话" title="重命名对话" disabled><svg><use href="#i-edit"/></svg></button><button id="export-session" class="icon-button thread-action" aria-label="导出对话" title="导出 Markdown" disabled><svg><use href="#i-download"/></svg></button><button id="delete-session" class="icon-button thread-action" aria-label="删除对话" title="删除对话" disabled><svg><use href="#i-trash"/></svg></button><div id="runtime-status-pills" role="group" aria-label="终端连接状态">
+          <button id="runtime-hardware" class="runtime-status-pill" type="button" data-device-tab-link="hardware" aria-label="硬件：状态待确认"><span class="runtime-status-dot" aria-hidden="true"></span>硬件</button>
+          <button id="runtime-desktop" class="runtime-status-pill" type="button" data-device-tab-link="desktop" aria-label="电脑：状态待确认"><span class="runtime-status-dot" aria-hidden="true"></span>电脑</button>
+        </div><button id="model-button" class="model-button" title="配置模型"><span id="model-label">未选择模型</span><svg><use href="#i-chevron"/></svg></button></div>
       </header>
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
       <section id="chat-view" class="chat-view" aria-label="对话">
-        <div id="chat-scroll" class="chat-scroll"><div id="empty-state" class="empty-state"><div class="assistant-mark" aria-hidden="true"><svg><use href="#i-chat"/></svg></div><h1>今天想做点什么？</h1><p>输入消息、语音对话，或让 Agent 查看屏幕并操控 Windows / Mac 电脑。</p></div><div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div></div>
+        <div id="chat-scroll" class="chat-scroll"><div id="empty-state" class="empty-state"><div class="assistant-mark" aria-hidden="true"><svg><use href="#i-chat"/></svg></div><h1>今天想做点什么？</h1><div class="suggestions" aria-label="示例提问">
+          <button type="button" data-prompt="查一下今天金价">查一下今天金价</button>
+          <button type="button" data-prompt="今天北京天气怎么样">今天北京天气怎么样</button>
+          <button type="button" data-prompt="看看我的电脑屏幕">看看我的电脑屏幕</button>
+          <button type="button" data-prompt="帮我查一下个人知识库">帮我查一下个人知识库</button>
+        </div></div><div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div></div>
         <div class="composer-wrap">
           <form id="chat-form" class="composer">
             <label class="sr-only" for="message">你的消息</label><textarea id="message" maxlength="4000" rows="1" placeholder="发消息…" required></textarea>
-            <div class="composer-bottom"><button id="use-knowledge" type="button" class="knowledge-toggle" aria-pressed="false" title="检索 M5Stack 官方资料后回答"><svg aria-hidden="true"><use href="#i-search"/></svg><span>资料</span></button><span id="composer-state" class="sr-only" role="status"></span><div class="composer-actions"><span id="character-count" class="character-count"></span><button id="voice-toggle" type="button" class="icon-button" aria-label="开始语音输入" aria-pressed="false" title="语音输入"><svg aria-hidden="true"><use href="#i-mic"/></svg></button><button id="stop-turn" class="stop-button" type="button" aria-label="停止执行" title="停止当前操作" hidden><svg aria-hidden="true"><use href="#i-stop"/></svg></button><button id="send" class="send-button" type="submit" aria-label="发送消息" title="发送消息（Enter）" disabled><svg><use href="#i-arrow"/></svg></button></div></div>
+            <div class="composer-bottom"><button id="use-knowledge" type="button" class="knowledge-toggle" aria-pressed="false" title="检索 M5Stack 官方资料后回答"><svg aria-hidden="true"><use href="#i-search"/></svg><span>M5 资料</span></button><span id="composer-state" class="sr-only" role="status"></span><div class="composer-actions"><span id="character-count" class="character-count"></span><button id="voice-toggle" type="button" class="icon-button" aria-label="开始语音输入" aria-pressed="false" title="语音输入"><svg aria-hidden="true"><use href="#i-mic"/></svg></button><button id="stop-turn" class="stop-button" type="button" aria-label="停止执行" title="停止当前操作" hidden><svg aria-hidden="true"><use href="#i-stop"/></svg></button><button id="send" class="send-button" type="submit" aria-label="发送消息" title="发送消息（Enter）" disabled><svg><use href="#i-arrow"/></svg></button></div></div>
           </form>
           <div class="composer-footnote"><span id="input-hint">Enter 发送 · Shift + Enter 换行</span><button id="configure-link" class="text-button">连接你的 AI 服务</button><span id="context-note" class="sr-only" hidden>仅最近 6 轮参与上下文</span></div>
         </div>
@@ -209,6 +217,11 @@
 <audio id="rt-sample" preload="none" hidden></audio></div>
 <details class="api-disclosure"><summary>高级设置</summary><div class="api-group">
 <div class="settings-row" id="rt-asr-row"><label for="rt_asr_model">转录模型</label><input id="rt_asr_model" maxlength="200" placeholder="whisper-1（百炼默认 qwen3-asr）"></div>
+<div class="settings-row"><label for="rt_silence_gate_enabled">静音帧拦截</label><label class="checkbox-control"><input id="rt_silence_gate_enabled" type="checkbox"><span>减少底噪占用的音频用量</span></label></div>
+<div class="settings-row"><div><label for="rt_silence_gate_rms">人声灵敏度阈值</label><p id="rt-rms-hint">默认 120。吞字可调低至 80，底噪大可调高至 180。</p></div><input id="rt_silence_gate_rms" type="number" min="10" max="3000" step="10" value="120" aria-describedby="rt-rms-hint" required></div>
+<div class="settings-row"><label for="rt_defer_response_until_transcript">按需发工具</label><label class="checkbox-control"><input id="rt_defer_response_until_transcript" type="checkbox"><span>转写后按任务选择工具，减少闲聊 Token</span></label></div>
+<div class="settings-row"><div><label for="rt_max_continuous_turns">连续轮换轮数</label><p>默认 6 轮，0 为关闭。</p></div><input id="rt_max_continuous_turns" type="number" min="0" max="50" value="6" required></div>
+<div class="settings-row"><div><label for="rt_max_continuous_seconds">连续轮换时长（秒）</label><p>默认 600 秒，0 为关闭。</p></div><input id="rt_max_continuous_seconds" type="number" min="0" max="3600" value="600" required></div>
 </div></details></section>
           <section class="api-text-settings" id="text-services" hidden><h2 id="text-services-title" hidden>分模型</h2><section class="api-panel">
             <h2 class="api-panel-title">文字服务<span id="connection-summary" class="connection-label"></span></h2>
@@ -266,7 +279,11 @@
         </fieldset><div class="settings-actions"><span id="dirty-state">接入已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="settings-api-cancel" type="button" class="secondary-button">取消</button><button id="save" type="submit" class="primary-button" disabled>保存并关闭</button></div></div></form>
       </div></section>
       <section id="devices-view" class="page-view" aria-label="终端节点" hidden><div class="page-content">
-        <section id="desktop-panel" class="desktop-panel" aria-label="个人电脑节点">
+        <div class="insight-tabbar device-tabbar" role="tablist" aria-label="终端类型">
+          <button id="devices-tab-desktop" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="desktop-panel">个人电脑</button>
+          <button id="devices-tab-hardware" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="hardware-panel" tabindex="-1">语音硬件</button>
+        </div>
+        <section id="desktop-panel" class="desktop-panel" role="tabpanel" aria-labelledby="devices-tab-desktop">
           <div class="section-toolbar"><div><strong id="desktop-state">个人电脑节点（Windows / macOS）</strong><p id="desktop-state-detail" class="small-note" hidden></p></div><button id="desktop-refresh" type="button" class="text-button"><svg aria-hidden="true"><use href="#i-refresh"/></svg>刷新节点</button></div>
           <div id="desktop-nodes" class="desktop-nodes-list" aria-live="polite"><p class="small-note">正在加载个人电脑节点…</p></div>
           <div id="desktop-screen-preview" class="desktop-screen-preview" hidden>
@@ -282,6 +299,7 @@
             </section>
           </details>
         </section>
+        <section id="hardware-panel" role="tabpanel" aria-labelledby="devices-tab-hardware" hidden>
         <div class="device-connection section-toolbar"><div><strong id="device-state">正在检查连接…</strong><p id="device-state-detail" class="small-note" hidden></p></div><button id="device-refresh" type="button" class="text-button"><svg aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button></div>
         <details class="settings-advanced"><summary>接入与恢复<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary><form id="device-setup-form"><fieldset id="device-setup-fields"><section class="settings-section"><p class="section-description">先保存设备原服务器地址，再修改设备配网页中的地址。</p>
           <div class="settings-row" id="device-host-row"><div><label for="device-host">电脑局域网 IP</label><p>设备与电脑必须能在局域网互相访问</p></div><input id="device-host" autocomplete="off" required placeholder="例如：192.168.1.20"></div>
@@ -297,6 +315,7 @@
         </section></fieldset><div class="settings-actions"><span id="device-preferences-note" class="small-note">保存与应用是两个独立操作。</span><button type="submit" class="secondary-button">保存设置</button><button id="device-apply" type="button" class="primary-button" disabled>应用已保存设置</button></div></form>
         <div id="device-application" class="device-application" aria-live="polite"><p class="small-note">设备尚未连接，尚无实机验证结果。</p></div>
         <details class="settings-advanced device-recovery"><summary>切回原服务<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary><ol><li>让设备重新进入配网设置，打开高级选项。</li><li>将保存的原 OTA 地址填回设备；若原值为空，清空设备中的 OTA 字段。保存并重新联网。</li><li>确认小智平台恢复在线，并用设备实际对话验证。</li></ol><p id="device-recovery-value" class="small-note">尚未保存原设备设置。</p><button id="device-copy-original" type="button" class="secondary-button" disabled>复制已保存的原地址</button><p class="small-note">现有固件需要在设备配网页切换；这里不会声称已经远程切回。无需解除原平台绑定。</p></details>
+        </section>
       </div></section>
       <section id="capabilities-view" class="page-view" aria-label="技能与知识" hidden><div class="page-content capability-content">
         <div class="section-toolbar"><span id="capability-integration">正在加载技能与知识…</span><button id="capability-refresh" type="button" class="text-button">刷新</button></div>

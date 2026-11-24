@@ -13,6 +13,8 @@
 .device-result-row { display:flex; justify-content:space-between; gap:14px; padding:8px 0; border-bottom:1px solid var(--border); font-size:12px; }
 .settings-row select { min-width:0; width:100%; padding:9px 11px; border:1px solid var(--input-border); border-radius:7px; background:var(--bg); color:var(--text); font:inherit; }
 #devices-view .settings-actions { flex-wrap:wrap; }
+#devices-view .device-tabbar { margin:0 0 20px; }
+#devices-view #desktop-panel { border-bottom:0; padding-bottom:0; margin-bottom:0; }
 #devices-view fieldset { border:0; padding:0; margin:0; min-width:0; }
 [hidden] { display:none!important; }
 body { margin:0; font-family:"Segoe UI Variable","Segoe UI","Microsoft YaHei",sans-serif; color:var(--text); background:var(--bg); font-size:14px; line-height:1.6; }
@@ -107,6 +109,12 @@ kbd { font:11px "Segoe UI",sans-serif; color:var(--subtle); white-space:nowrap; 
 #view-title { font-size:13px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--muted); }
 #open-sidebar { display:none; }
 .model-button { display:flex; align-items:center; gap:6px; max-width:210px; font-size:12px; color:var(--muted); padding:5px 8px; border-radius:7px; }
+#runtime-status-pills { display:flex; align-items:center; gap:4px; flex:none; }
+.runtime-status-pill { display:inline-flex; align-items:center; gap:4px; padding:3px 6px; border:1px solid var(--border); border-radius:20px; color:var(--muted); font-size:11px; white-space:nowrap; }
+.runtime-status-pill:hover { background:var(--hover); color:var(--text); }
+.runtime-status-dot { width:6px; height:6px; border-radius:50%; background:var(--subtle); }
+.runtime-status-pill[data-online="true"] .runtime-status-dot { background:var(--success); }
+.toolbar-right .model-button { min-width:0; }
 .model-button:hover { background:var(--surface); }
 #model-label { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .notice { font-size:13px; margin:0 28px 8px; padding:10px 14px; border:1px solid var(--border); border-radius:8px; background:var(--surface); overflow-wrap:anywhere; }
@@ -922,3 +930,8 @@ body.voice-mode { overflow:hidden; }
 .desktop-model-stack {display:flex;flex-direction:column;gap:8px;min-width:0;width:100%}
 
 
+
+.search-key-config { display:grid; gap:8px; border-top:1px solid var(--border); padding-top:12px; }
+.search-key-config label { font-size:13px; }
+.search-key-config input { width:100%; min-width:0; padding:9px 11px; border:1px solid var(--input-border); border-radius:7px; background:var(--bg); }
+.search-tool-switches { display:flex; flex-wrap:wrap; gap:8px 16px; }

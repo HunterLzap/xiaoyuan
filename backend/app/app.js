@@ -4,6 +4,10 @@ const appFetch = window.assistantPaths.fetch;
 const el = id => document.getElementById(id);
 const state = { loaded:false, configured:false, busy:false, view:"chat", sessions:[], active:null, detail:null, pending:null, pendingSteps:[], pendingText:"", failure:null, m5stackEnabled:true, useKnowledge:false, pendingKnowledge:false };
 const configIds = ["provider", "base_url", "model", "models_protocol"];
+const realtimeAdvancedDefaults = {
+  rt_silence_gate_enabled:true, rt_silence_gate_rms:120, rt_defer_response_until_transcript:false,
+  rt_max_continuous_turns:6, rt_max_continuous_seconds:600,
+};
 const MANUAL = "__manual__";
 const SESSION_PAGE = 25;
 let sessionHasMore = false, sessionLoading = false, sessionError = "", sessionOffset = 0;
@@ -101,7 +105,7 @@ function openSidebar() {
   document.body.classList.remove("sidebar-collapsed");
   if (matchMedia("(max-width:700px)").matches) { document.body.classList.add("sidebar-open"); el("sidebar-overlay").hidden = false; }
 }
-function navigate(view, push = true) {
+function navigate(view, push = true, deviceTab = "desktop") {
   if (view === "settings") view = recalled("atoms3r.settingsSection") || "role";
   if (state.view !== view) { stopTtsPreview(); stopRealtimeSample(); }
   state.view = view;
@@ -123,10 +127,7 @@ function navigate(view, push = true) {
   closeSidebar(); notice(); refreshControls(); renderSessions();
   if (view === "connections" && state.loaded && savedConfig?.voice_mode === "pipeline" && savedConfig?.api_key_configured && !modelsFetched && !state.busy) queueMicrotask(refreshModelChoices);
   if (view === "role" && state.loaded && !deviceData) loadDevices(true).catch(error => notice(error.message,"error"));
-  if (view === "devices") {
-    loadDevices(!deviceData).catch(error => notice(error.message,"error"));
-    loadDesktopNodes().catch(error => notice(error.message,"error"));
-  }
+  if (view === "devices") showDeviceTab(deviceTab);
   if (view === "capabilities") loadCapabilities().catch(error => capabilityNotice(error.message,true));
   if (view === "insights") loadInsights().catch(error => insightNotice(error.message,true));
 }
@@ -270,6 +271,7 @@ function messageNode(message) {
 }
 const TOOL_DISPLAY_NAMES = {
   get_weather: "天气查询",
+  web_search: "联网搜索",
   search_m5stack: "M5 官方资料",
   search_personal_knowledge: "个人知识库",
   search_conversation_history: "会话历史",
@@ -763,6 +765,10 @@ function connectionPayload() {
 }
 function realtimePayload() {
   const data = Object.fromEntries(["voice_mode","rt_provider","rt_endpoint","rt_workspace","rt_model","rt_voice","rt_asr_model"].map(id => [id,el(id).value.trim()]));
+  for (const [id, defaultValue] of Object.entries(realtimeAdvancedDefaults)) {
+    const input = el(id);
+    data[id] = typeof defaultValue === "boolean" ? input.checked : input.valueAsNumber;
+  }
   if (el("rt_api_key").value.trim()) data.rt_api_key = el("rt_api_key").value.trim();
   return data;
 }
@@ -1113,6 +1119,10 @@ function renderConnectionStatus() {
 function applyConfig(data, preserve = false) {
   if (data.voice_profiles) voiceProfiles = data.voice_profiles;
   for (const id of ["voice_mode","rt_provider","rt_endpoint","rt_workspace","rt_model","rt_voice","rt_asr_model","asr_provider","asr_model","asr_language"]) el(id).value = data[id] ?? "";
+  for (const [id, defaultValue] of Object.entries(realtimeAdvancedDefaults)) {
+    if (typeof defaultValue === "boolean") el(id).checked = data[id] ?? defaultValue;
+    else el(id).value = data[id] ?? defaultValue;
+  }
   el("asr_base_url").value = data.asr_base_url || "";
   el("asr_api_key").value = ""; el("asr_api_key").type = "password";
   el("asr-show-key").textContent = "显示"; el("asr-show-key").setAttribute("aria-pressed", "false");
@@ -1532,7 +1542,14 @@ el("message").addEventListener("input", fitComposer);
 el("message").addEventListener("keydown", event => { if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendMessage(el("message").value); } });
 el("chat-form").addEventListener("submit", event => { event.preventDefault(); sendMessage(el("message").value); });
 el("stop-turn").addEventListener("click", () => { stopActiveTurn(); });
-document.querySelectorAll("[data-prompt]").forEach(button => button.addEventListener("click", () => { el("message").value = button.dataset.prompt; fitComposer(); el("message").focus(); }));
+document.querySelectorAll("#empty-state [data-prompt]").forEach(button => button.addEventListener("click", () => {
+  if (state.busy) return;
+  el("message").value = button.dataset.prompt;
+  fitComposer();
+  el("message").focus();
+  if (state.configured) sendMessage(el("message").value);
+  else notice("请先在「模型与连接」完成配置，再发送消息。");
+}));
 for (const id of ["model-button", "configure-link"]) el(id).addEventListener("click", () => navigate("connections"));
 el("desktop-planner-preset").addEventListener("change", () => {
   const picked = el("desktop-planner-preset").value;
@@ -1594,6 +1611,9 @@ el("config-form").addEventListener("submit", async event => {
   const rt = realtimePayload();
   const speechModel = selectedSpeechModel();
   if (!confirmVoiceSchemeChange(rt.voice_mode, rt.rt_provider, rt.rt_model, el("tts_provider").value, speechModel)) return;
+  for (const [id, defaultValue] of Object.entries(realtimeAdvancedDefaults)) {
+    if (rt[id] === (savedConfig?.[id] ?? defaultValue)) delete rt[id];
+  }
   busy(true);
   try {
     const data = await request("/api/settings/api", "PUT", {...connectionPayload(), ...rt, ...desktopModelsPayload(),
@@ -1872,6 +1892,7 @@ function desktopToolCard(tool) {
 }
 const CAPABILITY_LABELS = {
   get_weather: "天气查询",
+  web_search: "联网搜索",
   search_m5stack: "M5 官方资料",
   desktop_control: "个人电脑操控 (Win/Mac)",
 };
@@ -1917,7 +1938,86 @@ function renderCapabilityDetail(item) {
   if (item.type === "desktop") {
     detail.append(desktopToolCard(item.tool)); return;
   }
+  if (item.key === "web_search") {
+    detail.append(webSearchToolCard(item.tool)); return;
+  }
   detail.append(toolDetailCard(item.tool));
+}
+function webSearchToolCard(tool) {
+  const card = node("div", "capability-item");
+  const header = node("div", "capability-item-header");
+  const title = node("div", "capability-item-title");
+  title.append(node("h3", "", "联网搜索"), node("p", "small-note", "DeepSeek Search"));
+  header.append(title);
+
+  const switches = node("div", "search-tool-switches");
+  const addSwitch = (text, checked, action) => {
+    const label = node("label", "checkbox-control"), input = node("input");
+    input.type = "checkbox"; input.checked = checked;
+    input.addEventListener("change", () => {
+      const next = input.checked;
+      input.checked = checked;
+      capabilityAction(() => action(next));
+    });
+    label.append(input, node("span", "", text)); switches.append(label);
+    return input;
+  };
+  addSwitch("启用资源", tool.enabled, async enabled => {
+    updateCapabilityCatalog(await request("/api/tools/web_search/enabled", "PUT", {enabled}));
+    capabilityNotice(enabled ? "联网搜索资源已启用。" : "联网搜索资源已停用。");
+  });
+  addSwitch("选入助手", capabilityState.selectedTools.includes(tool.name), async selected => {
+    const tools = selected ? [...capabilityState.selectedTools, tool.name]
+      : capabilityState.selectedTools.filter(id => id !== tool.name);
+    await syncAssistantSelection(tools, capabilityState.selectedKbs);
+    renderCapabilityTools();
+    capabilityNotice(selected ? "联网搜索已选入助手。" : "联网搜索已从助手移除。");
+  }).dataset.requiresEnabled = String(capabilityState.selectionSupported);
+  header.append(switches);
+
+  const keySection = node("div", "search-key-config");
+  const label = node("label", "", "DeepSeek API Key");
+  label.htmlFor = "web_search_api_key";
+  const field = node("input");
+  field.id = "web_search_api_key"; field.type = "password"; field.autocomplete = "off"; field.spellcheck = false;
+  field.placeholder = "填 DeepSeek API Key；主模型已是 DeepSeek 可留空";
+  const separate = Boolean(savedConfig?.web_search_separate_key_configured);
+  const status = node("p", "small-note", separate ? "已配置独立 Key"
+    : savedConfig?.web_search_configured ? "自动复用 DeepSeek 主模型 Key" : "尚未配置密钥");
+  status.id = "web-search-key-status";
+  field.setAttribute("aria-describedby", status.id);
+
+  const saveKey = clear => capabilityAction(async () => {
+    const value = clear ? "" : field.value.trim();
+    if (!clear && !value) {
+      capabilityNotice("请输入 DeepSeek API Key。", true);
+      return;
+    }
+    field.value = "";
+    const {text} = await request("/api/settings/connections", "PUT", {web_search_api_key:value});
+    if (savedConfig) {
+      savedConfig.web_search_configured = text.web_search_configured;
+      savedConfig.web_search_separate_key_configured = text.web_search_separate_key_configured;
+    }
+    renderCapabilityTools();
+    capabilityNotice(clear ? "独立密钥已清除。" : "密钥已保存。");
+  });
+  const actions = node("div", "capability-item-actions");
+  actions.append(capabilityButton("保存密钥", () => saveKey(false)));
+  if (separate) actions.append(capabilityButton("清除密钥", () => saveKey(true)));
+  field.addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.isComposing) {
+      event.preventDefault();
+      saveKey(false);
+    }
+  });
+  keySection.append(label, field, status, actions);
+  const toolActions = node("div", "capability-item-actions");
+  const test = capabilityButton("手动测试", () => openToolCall(tool));
+  test.disabled = !tool.enabled; test.dataset.requiresEnabled = String(tool.enabled);
+  toolActions.append(test);
+  card.append(header, node("p", "small-note", tool.description), keySection, toolActions);
+  return card;
 }
 function toolDetailCard(tool) {
   const active = isSkillActive(tool);
@@ -3421,9 +3521,65 @@ for (const [btnId, inputId] of [["desktop-copy-macos", "desktop-cmd-macos"], ["d
     catch { notice("无法写入剪贴板，请手动选中命令复制。", "error"); }
   });
 }
+let activeDeviceTab = "desktop";
+const deviceTabs = {desktop:"desktop-panel", hardware:"hardware-panel"};
+function showDeviceTab(tab) {
+  activeDeviceTab = tab;
+  for (const [name, panelId] of Object.entries(deviceTabs)) {
+    const selected = tab === name, button = el("devices-tab-" + name);
+    el(panelId).hidden = !selected;
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  }
+  const load = tab === "hardware" ? loadDevices(!deviceData) : loadDesktopNodes();
+  load.catch(error => notice(error.message, "error"));
+}
+for (const name of Object.keys(deviceTabs)) {
+  const button = el("devices-tab-" + name);
+  button.addEventListener("click", () => showDeviceTab(name));
+  button.addEventListener("keydown", event => {
+    if (!["ArrowLeft","ArrowRight","Home","End"].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === "Home" ? "desktop" : event.key === "End" ? "hardware"
+      : name === "desktop" ? "hardware" : "desktop";
+    showDeviceTab(next);
+    el("devices-tab-" + next).focus();
+  });
+}
+document.querySelectorAll("[data-device-tab-link]").forEach(button => button.addEventListener("click", () => {
+  const tab = button.dataset.deviceTabLink;
+  navigate("devices", true, tab);
+  el("devices-tab-" + tab).focus();
+}));
+function renderRuntimeStatus(health) {
+  for (const [id, label, online] of [
+    ["runtime-hardware", "硬件", health?.device_connected === true],
+    ["runtime-desktop", "电脑", health?.desktop_online_nodes > 0],
+  ]) {
+    const button = el(id);
+    button.dataset.online = String(online);
+    const status = !health ? "状态未知" : online ? "在线" : "离线";
+    button.title = label + "：" + status;
+    button.setAttribute("aria-label", button.title);
+  }
+}
+let runtimeStatusLoading = false;
+async function loadRuntimeStatus() {
+  if (runtimeStatusLoading) return;
+  runtimeStatusLoading = true;
+  try {
+    const health = await request("/health");
+    renderRuntimeStatus(health);
+    el("context-note").textContent = "历史重建最多 " + health.history_turns + " 轮 / " +
+      (health.context_history_chars?.toLocaleString("zh-CN") || "—") + " 字符，旧记录按需查";
+  } catch { renderRuntimeStatus(null); }
+  finally { runtimeStatusLoading = false; }
+}
 setInterval(() => {
-  if (state.view === "devices" && !deviceBusy) loadDevices().catch(() => { el("device-state").textContent = "无法连接电脑服务"; });
-  if (state.view === "devices" && !desktopBusy) loadDesktopNodes().catch(() => {});
+  if (document.hidden) return;
+  if (state.view === "devices" && activeDeviceTab === "hardware" && !deviceBusy) loadDevices().catch(() => { el("device-state").textContent = "无法读取硬件状态"; });
+  if (state.view === "devices" && activeDeviceTab === "desktop" && !desktopBusy) loadDesktopNodes().catch(() => {});
+  if (state.view === "chat") loadRuntimeStatus();
 }, 3000);
 function routeView() {
   const path = window.assistantPaths.routePath();
@@ -3454,7 +3610,7 @@ window.addEventListener("popstate", () => navigate(routeView(),false));
     }
     renderSessions(); renderMessages();
     if (state.view === "connections" && savedConfig.voice_mode === "pipeline" && savedConfig.api_key_configured) await refreshModelChoices();
-    const health = await request("/health"); el("context-note").textContent = `历史重建最多 ${health.history_turns} 轮 / ${health.context_history_chars?.toLocaleString("zh-CN") || "—"} 字符，旧记录按需查`;
+    await loadRuntimeStatus();
   } catch (error) { notice(error.message, "error"); }
   refreshControls();
 })();

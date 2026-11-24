@@ -2,6 +2,7 @@
 
 更新：2026-11-24。本文只写当前快照；历史过程与原始证据在 [progress](docs/progress.md)。
 
+- Batch 4 已合入 `main`。技能中心可管理 DeepSeek 搜索密钥，模型与连接可调实时语音高级选项，聊天顶栏可直达两个终端页签。Windows 自动化回归与 JS 语法检查已通过，待浏览器真机目视验收。
 - Batch 3 已合入 `main`。DeepSeek 独立搜索 `web_search` 默认关闭，启用并选入后可自动执行，请求按 DeepSeek 规则计费。Windows 本地自动化已验证，待配置 DeepSeek Key 后实测外网搜索。
 - Batch 2 已合入 `main`，包括实时 WS 静默轮换、设备 RMS 静音门控、可选转写后选工具和同供应商重连。已通过 Windows 本地自动化回归，云端尚未部署，等待真机真实音频实测，重点核对 `AI_RT_DEFER_RESPONSE_UNTIL_TRANSCRIPT=true` 与静音门控阈值。
 - Batch 1 已合入 `main`，包含 SQLite WAL、会话与异常日志异步写盘、桌面视觉连接复用和控件树裁剪、异常日志去重及热备脚本。云端尚未部署，热备待云端启用。
