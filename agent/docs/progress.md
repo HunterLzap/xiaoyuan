@@ -2,6 +2,13 @@
 
 更新时间：2026-11-24。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
+## Batch 5 同音色工具首响与桌面操控（2026-11-24）
+
+- Windows `E:\xiaodan`，基于 `c501d70`，Python 3.12.0。指定五个测试文件共 65 项通过（含 5 项新增测试），8 个子测试通过，0 项跳过，1 条 Starlette 弃用警告。覆盖百炼 WS 模拟生成、当前音色命中与首响顺序、Win/Mac 操控分支、首响路由鉴权、SSE 截图及历史和审计隔离。[回归输出](E:/xiaodan/logs/batch5-pytest.log)
+- 测试补齐截图超限边界时，一次回归在审计后台任务完成前读库失败，改为在 TestClient 循环等待任务。增量 Lint 初检发现测试闭包捕获循环变量，修正后新增问题为 0。SlopGuard 通过，跳过 Pyright 和 Semgrep，其中 Pyright 已由项目 Lint 执行。[测试初检](E:/xiaodan/logs/batch5-pytest-initial.log) · [Lint 初检](E:/xiaodan/logs/batch5-lint-initial.log) · [Lint 复验](E:/xiaodan/logs/batch5-lint.log) · [门禁结果](E:/xiaodan/logs/batch5-slopguard.log)
+- `node --check backend/app/app.js` 通过。Node 验证最终消息预览保持默认折叠及临时状态，使用测试令牌检查启动脚本生成、非法令牌拦截及 macOS 脚本 Bash 语法。浏览器下载的 `.command` 可能须先加执行权限。[预览检查](E:/xiaodan/logs/batch5-preview-dom.log) · [脚本检查](E:/xiaodan/logs/batch5-launchers.log)
+- 真实百炼首响生成与同音色听感、Win/Mac 窗口前置、浏览器折叠预览和脚本双击启动均待实测。本轮未发付费上游请求、未部署。[百炼实时客户端事件](https://help.aliyun.com/en/model-studio/client-events) · [百炼实时服务端事件](https://help.aliyun.com/en/model-studio/server-events)
+
 ## Batch 4 配置与终端界面（2026-11-24）
 
 - Windows `E:\xiaodan`，基于 `fd786c0`，Python 3.12.0。指定五个测试文件共 60 项通过（含 3 项新增测试），2 个子测试通过，0 项跳过，1 条 Starlette 弃用警告。覆盖搜索密钥和实时选项持久化、搜索密钥公开状态、普通文字接口换地址鉴权及硬件就绪布尔值。[回归输出](E:/xiaodan/logs/batch4-pytest.log)

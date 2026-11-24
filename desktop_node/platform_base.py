@@ -96,6 +96,11 @@ class DesktopAdapter(ABC):
             "focused_element": ui.get("focused"),
         }
 
+    def _wait_for_ui(self, seconds: float) -> dict[str, Any]:
+        duration = max(0.2, min(float(seconds), 5.0))
+        time.sleep(duration)
+        return {"ok": True, "action": "wait", "wait_seconds": duration, **self.post_action_readback()}
+
     def _paste_via_clipboard(self, text: str, paste_keys: list[str], enter_key: str, *, submit: bool = False) -> bool:
         prev: str | None = None
         try:
@@ -133,6 +138,7 @@ class DesktopAdapter(ABC):
         keys: list[str] | None = None,
         scroll_y: int = 0,
         submit: bool = False,
+        wait_seconds: float = 1.5,
         _readback: bool = True,
     ) -> dict[str, Any]:
         ...

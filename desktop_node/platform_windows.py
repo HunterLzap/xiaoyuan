@@ -326,6 +326,53 @@ class WindowsDesktopAdapter(DesktopAdapter):
             raise DesktopRpcError("open_failed", f"打开失败：{error}") from None
         return {"ok": True, "opened": clean}
 
+    def _focus_window(self, text: str | None) -> dict[str, Any]:
+        target = (text or "").strip().casefold()
+        if not target:
+            raise DesktopRpcError("invalid_args", "focus_window 需要窗口标题或应用名。")
+        user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        callback = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        found = None
+
+        @callback
+        def match_window(hwnd, _):
+            nonlocal found
+            window = wintypes.HWND(hwnd)
+            if not user32.IsWindowVisible(window):
+                return True
+            length = user32.GetWindowTextLengthW(window)
+            title = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(window, title, length + 1)
+            if target not in title.value.casefold():
+                pid = wintypes.DWORD()
+                user32.GetWindowThreadProcessId(window, ctypes.byref(pid))
+                handle = kernel32.OpenProcess(0x1000, False, pid)
+                if not handle:
+                    return True
+                process = wintypes.HANDLE(handle)
+                try:
+                    executable = ctypes.create_unicode_buffer(1024)
+                    size = wintypes.DWORD(len(executable))
+                    if (not kernel32.QueryFullProcessImageNameW(process, 0, executable, ctypes.byref(size))
+                            or target not in Path(executable.value).name.casefold()):
+                        return True
+                finally:
+                    kernel32.CloseHandle(process)
+            found = hwnd
+            return False
+
+        user32.EnumWindows(match_window, 0)
+        if found is None:
+            raise DesktopRpcError("window_not_found", "未找到匹配的已打开窗口。")
+        window = wintypes.HWND(found)
+        if user32.IsIconic(window):
+            user32.ShowWindow(window, 9)
+        if not user32.SetForegroundWindow(window) and user32.GetForegroundWindow() != found:
+            raise DesktopRpcError("window_focus_failed", "Windows 拒绝将匹配的窗口切到前台。")
+        return {"ok": True, "action": "focus_window", **self.post_action_readback()}
+
     def gui_action(
         self,
         action: str,
@@ -336,8 +383,13 @@ class WindowsDesktopAdapter(DesktopAdapter):
         keys: list[str] | None = None,
         scroll_y: int = 0,
         submit: bool = False,
+        wait_seconds: float = 1.5,
         _readback: bool = True,
     ) -> dict[str, Any]:
+        if action == "wait":
+            return self._wait_for_ui(wait_seconds)
+        if action == "focus_window":
+            return self._focus_window(text)
         user32 = ctypes.windll.user32
         _ensure_dpi_aware()
         def _finish(res: dict[str, Any]) -> dict[str, Any]:

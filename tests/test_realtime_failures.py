@@ -1,5 +1,7 @@
 """Event-handler regressions; no provider calls, audio hardware or server startup."""
 import asyncio
+import base64
+from contextlib import asynccontextmanager
 import json
 import unittest
 from tempfile import TemporaryDirectory
@@ -12,6 +14,7 @@ from pydantic import SecretStr
 
 from websockets.exceptions import ConnectionClosedOK
 
+from backend.app import ack_cache
 from backend.app.config import Settings
 from backend.app.device_realtime import DeviceRealtime
 from backend.app.history_store import HistoryStore
@@ -530,6 +533,104 @@ class RealtimeBatch2(unittest.IsolatedAsyncioTestCase):
             await turn.open()
         self.assertEqual((error.exception.status, error.exception.code), (502, "realtime_connect"))
         self.assertEqual(connect.await_count, 2)
+
+
+class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
+    async def test_ack_cache_generates_pcm_manifest_for_exact_bailian_voice(self):
+        cfg = Settings(_env_file=None, rt_api_key="fixture-bailian-key", rt_voice="test-voice")
+        socket = _RealtimeSocket()
+        pcm = bytes([1, 0]) * 240
+        phrases = ["我帮你看看喵。", "稍等一下喵。"]
+        for _ in phrases:
+            socket.feed("response.audio.delta", delta=base64.b64encode(pcm).decode())
+            socket.feed("response.done", response={"status": "completed"})
+
+        connections = []
+
+        @asynccontextmanager
+        async def connect(url, **kwargs):
+            connections.append((url, kwargs))
+            yield socket
+
+        with TemporaryDirectory() as directory, patch("backend.app.realtime.DirectConnect", connect):
+            cache_dir = Path(directory)
+            result = await ack_cache.synthesize_ack_phrases(cfg, phrases, cache_dir=cache_dir)
+            self.assertEqual(result, {"voice": "test-voice", "count": 2, "phrases": phrases})
+            self.assertEqual(len(connections), 1)
+            self.assertTrue(connections[0][0].startswith("wss://dashscope.aliyuncs.com/"))
+            self.assertEqual(socket.sent[0]["session"]["audio"]["output"],
+                             {"format": {"type": "pcm", "sample_rate": 24000}, "voice": "test-voice"})
+            self.assertEqual([item["type"] for item in socket.sent], [
+                "session.update", "conversation.item.create", "response.create",
+                "conversation.item.create", "response.create",
+            ])
+            manifest = json.loads((cache_dir / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["model"], cfg.rt_model)
+            self.assertEqual([entry["text"] for entry in manifest["phrases"]], phrases)
+            for entry in manifest["phrases"]:
+                self.assertEqual(entry["bytes"], len(pcm))
+                self.assertEqual((cache_dir / entry["file"]).read_bytes(), pcm)
+            self.assertEqual(ack_cache.pick_ack_pcm("test-voice", cache_dir=cache_dir), pcm)
+            self.assertIsNone(ack_cache.pick_ack_pcm("other-voice", cache_dir=cache_dir))
+
+    async def test_tool_ack_uses_matching_cache_before_first_slow_tool(self):
+        cfg = Settings(_env_file=None, rt_voice="test-voice", rt_ack_enabled=True)
+        service = ChatService(cfg, None)
+        turn = RealtimeTurn(service, None, "web_voice", AsyncMock(), False)
+        turn.send = AsyncMock()
+        turn.refresh_tools = AsyncMock()
+        context = turn.tool_context
+        execution_order = []
+
+        async def push(chunk):
+            execution_order.append(("audio", chunk))
+
+        async def execute(*args):
+            execution_order.append(("tool", args[0]))
+            return {"result": "ok"}
+
+        turn.audio = SimpleNamespace(push=push, finish=AsyncMock())
+        context.execute = execute
+        pcm = b"\x01\x00" * 2600
+
+        with TemporaryDirectory() as directory, patch.object(ack_cache, "_CACHE_DIR", Path(directory)):
+            cache_dir = Path(directory)
+            items = [{"name": "web_search", "arguments": "{}", "call_id": "search"}]
+            turn.tool_rounds = 1
+            await turn.run_tools(items, turn.turn_id, context)
+            self.assertEqual(execution_order, [("tool", "web_search")])
+
+            ack_cache._save_cache(cache_dir, cfg.rt_voice, cfg.rt_model, ["测试首响"], [pcm])
+            execution_order.clear()
+            await turn.run_tools(items, turn.turn_id, context)
+            self.assertEqual(execution_order, [
+                ("audio", pcm[:4800]), ("audio", pcm[4800:]), ("tool", "web_search"),
+            ])
+
+            for rounds, name, options, reply in (
+                (2, "web_search", {}, ""),
+                (1, "get_weather", {}, ""),
+                (1, "web_search", {"rt_ack_enabled": False}, ""),
+                (1, "web_search", {"rt_provider": "compatible"}, ""),
+                (1, "web_search", {"rt_voice": "other-voice"}, ""),
+                (1, "web_search", {}, "我已经开口了"),
+            ):
+                with self.subTest(rounds=rounds, name=name, options=options, reply=reply):
+                    execution_order.clear()
+                    turn.config = cfg.model_copy(update=options)
+                    turn.tool_rounds = rounds
+                    turn.reply = reply
+                    await turn.run_tools([{**items[0], "name": name}], turn.turn_id, context)
+                    self.assertEqual(execution_order, [("tool", name)])
+
+            for audio_ms, blocked in ((0, False), (None, True)):
+                execution_order.clear()
+                turn.config = cfg
+                turn.reply = ""
+                turn.first_audio_ms = audio_ms
+                turn.output_blocked = Mock(return_value=blocked)
+                await turn.run_tools(items, turn.turn_id, context)
+                self.assertEqual(execution_order, [("tool", "web_search")])
 
 
 if __name__ == "__main__":

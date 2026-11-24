@@ -9,6 +9,7 @@ from dotenv import dotenv_values, set_key, unset_key
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 
 from . import voices
+from .ack_cache import ack_cache_status
 from .config import ROOT, Settings
 from .llm import ProviderError
 from .tts import CLONE_MODEL
@@ -18,7 +19,7 @@ from .web_search import resolve_web_search_api_key
 _CONNECTION_KEYS = ("api_key", "tts_api_key", "rt_api_key", "asr_api_key", "web_search_api_key")
 _REALTIME_ADVANCED_FIELDS = (
     "rt_max_continuous_turns", "rt_max_continuous_seconds", "rt_silence_gate_enabled",
-    "rt_silence_gate_rms", "rt_defer_response_until_transcript",
+    "rt_silence_gate_rms", "rt_defer_response_until_transcript", "rt_ack_enabled",
 )
 _OPTIONAL_CONNECTION_FIELDS = (
     "base_url", "tts_base_url", "tts_use_text_connection", "asr_use_text_connection",
@@ -82,6 +83,7 @@ class ConnectionsUpdate(BaseModel):
     rt_silence_gate_enabled: bool | None = None
     rt_silence_gate_rms: float | None = Field(default=None, ge=10.0, le=3000.0)
     rt_defer_response_until_transcript: bool | None = None
+    rt_ack_enabled: bool | None = None
 
     asr_provider: Literal["openai", "bailian", "local"] = "openai"
     asr_base_url: str = Field(default="", max_length=500)
@@ -189,6 +191,7 @@ def public_tts_settings(settings: Settings) -> dict:
 
 
 def public_settings(settings: Settings) -> dict:
+    ack = ack_cache_status(settings.rt_voice) if settings.rt_provider == "bailian" else {"count": 0}
     return {
         name: getattr(settings, name)
         for name in SettingsUpdate.model_fields if name != "api_key"
@@ -218,6 +221,8 @@ def public_settings(settings: Settings) -> dict:
         "asr_effective_base_url": settings.effective_asr_base_url,
         "asr_separate_key_configured": bool(settings.asr_api_key.get_secret_value()),
         "asr_key_configured": bool(settings.effective_asr_api_key.get_secret_value()),
+        "rt_ack_cached_count": ack["count"],
+        "rt_ack_cached_voice": settings.rt_voice if ack["count"] else None,
         "rt_key_configured": bool(settings.rt_api_key.get_secret_value()),
         "api_key_configured": bool(settings.api_key.get_secret_value().strip()),
         "configured": not settings.missing_config,

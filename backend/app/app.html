@@ -222,6 +222,7 @@
 <div class="settings-row"><label for="rt_defer_response_until_transcript">按需发工具</label><label class="checkbox-control"><input id="rt_defer_response_until_transcript" type="checkbox"><span>转写后按任务选择工具，减少闲聊 Token</span></label></div>
 <div class="settings-row"><div><label for="rt_max_continuous_turns">连续轮换轮数</label><p>默认 6 轮，0 为关闭。</p></div><input id="rt_max_continuous_turns" type="number" min="0" max="50" value="6" required></div>
 <div class="settings-row"><div><label for="rt_max_continuous_seconds">连续轮换时长（秒）</label><p>默认 600 秒，0 为关闭。</p></div><input id="rt_max_continuous_seconds" type="number" min="0" max="3600" value="600" required></div>
+<div class="settings-row"><label for="rt_ack_enabled">工具等待播报首响（同音色）</label><div class="ack-config"><input id="rt_ack_enabled" type="checkbox"><span id="rt-ack-status" class="small-note" role="status"></span><button id="rt-ack-generate" type="button" class="secondary-button">生成首响语音（约 ¥0.01）</button></div></div>
 </div></details></section>
           <section class="api-text-settings" id="text-services" hidden><h2 id="text-services-title" hidden>分模型</h2><section class="api-panel">
             <h2 class="api-panel-title">文字服务<span id="connection-summary" class="connection-label"></span></h2>
@@ -293,8 +294,8 @@
           <details class="settings-advanced desktop-setup-box">
             <summary>接入新电脑（Windows / Mac 一键命令）<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary>
             <section class="settings-section">
-              <div class="desktop-cmd-block"><label for="desktop-cmd-macos">macOS 启动命令</label><div class="device-url-row"><input id="desktop-cmd-macos" readonly><button id="desktop-copy-macos" type="button" class="secondary-button">复制</button></div></div>
-              <div class="desktop-cmd-block"><label for="desktop-cmd-windows">Windows 启动命令</label><div class="device-url-row"><input id="desktop-cmd-windows" readonly><button id="desktop-copy-windows" type="button" class="secondary-button">复制</button></div></div>
+              <div class="desktop-cmd-block"><label for="desktop-cmd-macos">macOS 启动命令</label><div class="device-url-row"><input id="desktop-cmd-macos" readonly><button id="desktop-copy-macos" type="button" class="secondary-button">复制</button></div><button id="desktop-download-macos" type="button" class="secondary-button" disabled>下载一键启动脚本 (.command)</button></div>
+              <div class="desktop-cmd-block"><label for="desktop-cmd-windows">Windows 启动命令</label><div class="device-url-row"><input id="desktop-cmd-windows" readonly><button id="desktop-copy-windows" type="button" class="secondary-button">复制</button></div><button id="desktop-download-windows" type="button" class="secondary-button" disabled>下载一键启动脚本 (.bat)</button></div>
               <div class="desktop-token-actions"><button id="desktop-rotate-token" type="button" class="secondary-button">重置接入令牌</button></div>
             </section>
           </details>

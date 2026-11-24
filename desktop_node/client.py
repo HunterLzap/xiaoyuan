@@ -85,14 +85,16 @@ def execute_rpc(
     if action == "gui_action":
         if not allow_gui:
             raise DesktopRpcError("gui_disabled", "该桌面节点已启动 --no-gui，禁止鼠标与键盘自动化。")
+        gui_action = str(params.get("action") or "")
         return adapter.gui_action(
-            str(params.get("action") or ""),
+            gui_action,
             x=params.get("x"),
             y=params.get("y"),
             text=params.get("text"),
             keys=params.get("keys"),
             scroll_y=int(params.get("scroll_y") or 0),
             submit=bool(params.get("submit")),
+            **({"wait_seconds": params.get("wait_seconds", 1.5)} if gui_action == "wait" else {}),
         )
     if action == "run_command":
         if not allow_shell:

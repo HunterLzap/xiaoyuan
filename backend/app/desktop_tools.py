@@ -128,8 +128,8 @@ DESKTOP_GUI_ACTION_SPEC = ToolSpec(
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["click", "double_click", "right_click", "move", "click_and_type", "type_text", "paste_text", "hotkey", "scroll"],
-                "description": "GUI 动作类型：click_and_type 可一步完成点击焦点+粘贴中文/文本；paste_text/type_text 支持文本输入；submit=true 可顺带回车。",
+                "enum": ["click", "double_click", "right_click", "move", "click_and_type", "type_text", "paste_text", "hotkey", "scroll", "focus_window", "wait"],
+                "description": "GUI 动作类型：click_and_type 可点击并输入；submit=true 可顺带回车。focus_window 按标题或应用名切换已打开窗口；wait 等待界面变化。",
             },
             "element_index": {
                 "type": "integer",
@@ -144,7 +144,8 @@ DESKTOP_GUI_ACTION_SPEC = ToolSpec(
                 "enum": ["image", "screen", "norm1000"],
                 "description": "坐标来源：screen 直接用 inspect_screen 返回的 suggested_screen_coords（最推荐）；norm1000 为视觉模型 0-1000 归一化坐标；image 为截图图像像素坐标（默认）。",
             },
-            "text": {"type": "string", "minLength": 1, "maxLength": 2000, "description": "当 action=type_text / paste_text / click_and_type 时要输入的文本。"},
+            "text": {"type": "string", "minLength": 1, "maxLength": 2000, "description": "输入类动作的文本，或 focus_window 的窗口标题或应用名。"},
+            "wait_seconds": {"type": "number", "minimum": 0.2, "maximum": 5.0},
             "submit": {"type": "boolean", "description": "可选：输入完成后是否自动按下回车键（Return/Enter），如搜索框检索联系人时可设 true，聊天框只填草稿不要设 true。"},
             "keys": {
                 "type": "array",
@@ -211,10 +212,17 @@ class DesktopInspectScreenTool(_DesktopBaseTool):
             analyze_vision=not direct_vision,
             include_som=True,
         )
-        if direct_vision and isinstance(trace, dict):
+        if isinstance(trace, dict) and (direct_vision or trace.get("preview_requested")):
             frame = self.hub.latest_vision_frame(result.get("node_id"))
             if frame is not None:
-                trace["vision_image"] = frame
+                if direct_vision:
+                    trace["vision_image"] = frame
+                url = frame.get("data_url")
+                if (trace.get("preview_requested") and frame.get("som_annotated")
+                        and frame.get("captured_at") == result.get("captured_at")
+                        and isinstance(url, str) and len(url) <= 350 * 1024
+                        and url.startswith(("data:image/jpeg;base64,", "data:image/png;base64,", "data:image/webp;base64,"))):
+                    trace["preview_image_url"] = url
         return result
 
 
@@ -307,11 +315,15 @@ class DesktopGuiActionTool(_DesktopBaseTool):
             raise ProviderError(422, "tool_arguments", f"GUI 动作 {action} 必须提供 element_index 或 (x, y) 坐标。")
         if action in {"type_text", "paste_text", "click_and_type"} and not arguments.get("text"):
             raise ProviderError(422, "tool_arguments", f"{action} 必须提供 text 参数。")
+        if action == "focus_window" and not str(arguments.get("text") or "").strip():
+            raise ProviderError(422, "tool_arguments", "focus_window 必须提供窗口标题或应用名。")
         if action == "hotkey" and not arguments.get("keys"):
             raise ProviderError(422, "tool_arguments", "hotkey 必须提供 keys 按键数组。")
         conn = self.hub.resolve_node(arguments.get("node_id"))
         matched_element = None
-        if element_index is not None:
+        if action in {"focus_window", "wait"}:
+            scr_x = scr_y = None
+        elif element_index is not None:
             scr_x, scr_y, matched_element = self.hub.resolve_ui_element(conn, int(element_index))
         else:
             coord_space = arguments.get("coord_space") or "image"
@@ -320,6 +332,8 @@ class DesktopGuiActionTool(_DesktopBaseTool):
         if scr_x is not None and scr_y is not None:
             payload["x"] = scr_x
             payload["y"] = scr_y
+        if action == "wait":
+            payload["wait_seconds"] = arguments.get("wait_seconds", 1.5)
         if "text" in arguments:
             payload["text"] = arguments["text"]
         if "keys" in arguments:
@@ -337,6 +351,8 @@ class DesktopGuiActionTool(_DesktopBaseTool):
             **res,
             "verified_on_screen": False,
             "next_step_note": (
+                "请根据 active_window 和 focused_element 核对当前界面。"
+                if action in {"focus_window", "wait"} else
                 "底层键鼠信号已发送（focused_element 为即时回读结果）；在向用户说‘已找到/已输入/已完成’之前，"
                 "如聚焦元素尚未确认匹配，请再调用 desktop_inspect_screen 截图核实画面确实达到目标。"
             ),

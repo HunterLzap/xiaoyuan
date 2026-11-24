@@ -390,6 +390,42 @@ class MacOSDesktopAdapter(DesktopAdapter):
             time.sleep(0.9)
         return {"ok": True, "opened": clean}
 
+    def _focus_window(self, text: str | None) -> dict[str, Any]:
+        target = (text or "").strip()
+        if not target:
+            raise DesktopRpcError("invalid_args", "focus_window 需要窗口标题或应用名。")
+        script = """
+on run argv
+    set keyword to item 1 of argv
+    tell application "System Events"
+        ignoring case
+            repeat with appProcess in (application processes whose background only is false)
+                set appName to name of appProcess
+                set appBundle to bundle identifier of appProcess
+                repeat with appWindow in windows of appProcess
+                    set windowTitle to name of appWindow
+                    if appName contains keyword or (appBundle is not missing value and appBundle contains keyword) or (windowTitle is not missing value and windowTitle contains keyword) then
+                        try
+                            set value of attribute "AXMinimized" of appWindow to false
+                        end try
+                        set frontmost of appProcess to true
+                        perform action "AXRaise" of appWindow
+                        return "focused"
+                    end if
+                end repeat
+            end repeat
+        end ignoring
+    end tell
+    return "not_found"
+end run
+"""
+        proc = subprocess.run(["osascript", "-e", script, "--", target], capture_output=True, text=True, timeout=8)
+        if proc.returncode != 0:
+            raise DesktopRpcError("window_focus_failed", "macOS 未能切换窗口，请检查辅助功能和自动化权限。")
+        if proc.stdout.strip() != "focused":
+            raise DesktopRpcError("window_not_found", "未找到匹配的已打开窗口。")
+        return {"ok": True, "action": "focus_window", **self.post_action_readback()}
+
     def gui_action(
         self,
         action: str,
@@ -400,6 +436,7 @@ class MacOSDesktopAdapter(DesktopAdapter):
         keys: list[str] | None = None,
         scroll_y: int = 0,
         submit: bool = False,
+        wait_seconds: float = 1.5,
         _readback: bool = True,
     ) -> dict[str, Any]:
         if not self._has_accessibility_access():
@@ -407,6 +444,10 @@ class MacOSDesktopAdapter(DesktopAdapter):
                 "accessibility_denied",
                 "macOS 未授予当前终端「辅助功能」权限，点击/快捷键/输入会被系统丢弃；请在 系统设置 → 隐私与安全性 → 辅助功能 中开启当前终端后重跑 desktop_node。",
             )
+        if action == "wait":
+            return self._wait_for_ui(wait_seconds)
+        if action == "focus_window":
+            return self._focus_window(text)
         cg = self._cg_lib()
         def _finish(res: dict[str, Any]) -> dict[str, Any]:
             if _readback and not os.environ.get("PYTEST_CURRENT_TEST"):

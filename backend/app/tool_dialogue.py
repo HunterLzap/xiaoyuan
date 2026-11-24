@@ -165,6 +165,10 @@ def _progress_detail(name: str, args: dict) -> str:
         return str(args.get("question") or "")[:40]
     if name == "desktop_gui_action":
         sub = str(args.get("action") or "").strip()
+        if sub == "focus_window":
+            return f"切换窗口 {str(args.get('text') or '')[:24]}"
+        if sub == "wait":
+            return f"等待 {args.get('wait_seconds', 1.5)}s"
         target_ref = (
             f"#{args.get('element_index')}"
             if args.get("element_index") is not None
@@ -509,6 +513,9 @@ def _normalize_tool_arguments(name: str, raw_args: dict) -> dict:
         "mouse_move": "move",
         "hover": "move",
         "wheel": "scroll",
+        "switch_window": "focus_window",
+        "activate": "focus_window",
+        "sleep": "wait",
     }
     raw_action = args.get("action")
     if isinstance(raw_action, str):
@@ -537,6 +544,9 @@ def _normalize_tool_arguments(name: str, raw_args: dict) -> dict:
     for int_key in ("element_index", "x", "y", "scroll_y"):
         if int_key in args:
             args[int_key] = _coerce_int(args[int_key])
+
+    if args.get("action") == "wait" and isinstance(args.get("wait_seconds"), str):
+        args["wait_seconds"] = float(args["wait_seconds"])
 
     if "text" not in args:
         for text_key in ("content", "value", "input_text"):
@@ -708,6 +718,8 @@ class TurnTools:
             call["detail"] = _progress_detail(name, args)
             if emit_progress and self.on_progress is not None:
                 progress_started = True
+                if name == "desktop_inspect_screen":
+                    trace["preview_requested"] = True
                 with suppress(Exception):
                     self.on_progress({
                         "phase": "start",
@@ -836,6 +848,7 @@ class TurnTools:
             response = call["response"]
             if isinstance(response, dict) and type(response.get("status")) is int:
                 call["http_status"] = response["status"]
+            preview = trace.pop("preview_image_url", None)
             if progress_started and self.on_progress is not None:
                 with suppress(Exception):
                     self.on_progress({
@@ -846,6 +859,8 @@ class TurnTools:
                         "elapsed_ms": call["elapsed_ms"],
                         "error_code": call.get("error_code"),
                         "detail": call.get("detail") or "",
+                        **({"preview_image_url": preview} if name == "desktop_inspect_screen"
+                           and call["status"] == "ok" and preview else {}),
                     })
         if call["response"] is None:
             call["response"] = output

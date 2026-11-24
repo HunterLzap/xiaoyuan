@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     rt_silence_gate_enabled: bool = True
     rt_silence_gate_rms: float = Field(default=120.0, ge=10.0, le=3000.0)
     rt_defer_response_until_transcript: bool = False
+    rt_ack_enabled: bool = True
     asr_provider: Literal["openai", "bailian", "local"] = "openai"
     asr_base_url: str = Field(default="", max_length=500)
     asr_api_key: SecretStr = SecretStr("")

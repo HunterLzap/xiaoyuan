@@ -935,3 +935,8 @@ body.voice-mode { overflow:hidden; }
 .search-key-config label { font-size:13px; }
 .search-key-config input { width:100%; min-width:0; padding:9px 11px; border:1px solid var(--input-border); border-radius:7px; background:var(--bg); }
 .search-tool-switches { display:flex; flex-wrap:wrap; gap:8px 16px; }
+
+.ack-config { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; }
+.step-preview-details { max-width:320px; color:var(--muted); font-size:12px; }
+.step-preview-details summary { cursor:pointer; width:fit-content; }
+.step-preview-details img { display:block; width:100%; height:auto; margin-top:6px; border:1px solid var(--border); border-radius:8px; }

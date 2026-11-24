@@ -12,6 +12,7 @@ from time import monotonic
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
+from .ack_cache import pick_ack_pcm
 from .audio_codec import resample_pcm16_mono
 from .llm import Completion, ProviderError
 from .schemas import TokenUsage
@@ -27,6 +28,11 @@ from .audit_store import redact_value
 
 
 logger = logging.getLogger(__name__)
+
+_ACK_TRIGGER_TOOLS = frozenset({
+    "web_search", "search_personal_knowledge", "search_m5stack", "desktop_inspect_screen",
+    "desktop_open", "desktop_gui_action", "desktop_run_command",
+})
 
 _WAKE_PREFIX = re.compile(r"^(?:(?:小?(?:塔|太)[菲妃]|小?菲|taffy)[，,、\s]*)+", re.I)
 _TRAILING_PUNCT = re.compile(r"[。！!？?~～，,、.\s]+$")
@@ -793,6 +799,16 @@ class RealtimeTurn:
                 return
             if self.required_controls or self.held_text:
                 await self.audio.finish()
+            if (self.turn_id == turn_id and self.config.rt_provider == "bailian"
+                    and getattr(self.config, "rt_ack_enabled", True) and self.tool_rounds == 1
+                    and not self.reply.strip() and self.first_audio_ms is None
+                    and any(item.get("name") in _ACK_TRIGGER_TOOLS for item in items)
+                    and not self.output_blocked()):
+                ack_pcm = pick_ack_pcm(self.config.rt_voice)
+                if ack_pcm:
+                    for offset in range(0, len(ack_pcm), 4800):
+                        await self.audio.push(ack_pcm[offset:offset + 4800])
+                    await self.audio.finish()
             outputs = []
             for item in items:
                 if item.get("name") in MUTATING_CONTROL_TOOLS:

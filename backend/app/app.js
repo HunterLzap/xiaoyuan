@@ -6,7 +6,7 @@ const state = { loaded:false, configured:false, busy:false, view:"chat", session
 const configIds = ["provider", "base_url", "model", "models_protocol"];
 const realtimeAdvancedDefaults = {
   rt_silence_gate_enabled:true, rt_silence_gate_rms:120, rt_defer_response_until_transcript:false,
-  rt_max_continuous_turns:6, rt_max_continuous_seconds:600,
+  rt_max_continuous_turns:6, rt_max_continuous_seconds:600, rt_ack_enabled:true,
 };
 const MANUAL = "__manual__";
 const SESSION_PAGE = 25;
@@ -18,6 +18,8 @@ const INSIGHT_PAGE = 25;
 const insightState = {kb:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},tools:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},traces:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null},errors:{offset:0,total:0,loading:false,requestId:0,controller:null,filters:{},items:[],searchTimer:null}};
 let insightDeleteState = null;
 let savedFingerprint = "";
+let lastStepPreview = null;
+let ackGenerationBusy = false;
 let savedConfig = null, savedTtsConfig = null, modelsFetched = false, speechModels = [];
 let savedWeather = {enabled:true, city:""};
 let qwenVoices = [], realtimeSampleUrl = null, realtimePreviewController = null;
@@ -351,9 +353,23 @@ function renderApprovalCard(article, message) {
   }
   article.append(card);
 }
+function renderStepPreview(calls) {
+  const preview = lastStepPreview;
+  if (!preview || !calls?.some(call => call.call_id === preview.callId)) return null;
+  const details = node("details", "step-preview-details");
+  details.open = preview.open;
+  details.addEventListener("toggle", () => { preview.open = details.open; });
+  const img = node("img");
+  img.alt = "带编号框的电脑截图";
+  img.loading = "lazy";
+  img.src = preview.url;
+  details.append(node("summary", "", "查看刚截取的带框画面"), img);
+  return details;
+}
 function renderMessageReferences(article,message) {
   if (!article) return;
   article.querySelector(".tool-pills")?.remove();
+  article.querySelector(".step-preview-details")?.remove();
   article.querySelector(".approval-card")?.remove();
   article.querySelector(".message-personal-sources")?.remove();
   article.querySelector(".message-tool-calls")?.remove();
@@ -374,6 +390,11 @@ function renderMessageReferences(article,message) {
       const footer = article.querySelector(".message-footer");
       if (footer) footer.before(strip); else article.append(strip);
     }
+  }
+  const stepPreview = renderStepPreview(message.tool_calls);
+  if (stepPreview) {
+    const footer = article.querySelector(".message-footer");
+    if (footer) footer.before(stepPreview); else article.append(stepPreview);
   }
   renderApprovalCard(article, message);
   const usageDetails = tokenUsageDetails(message.usage);
@@ -576,6 +597,8 @@ function renderMessages() {
         }
         box.append(strip);
       }
+      const stepPreview = renderStepPreview(state.pendingSteps);
+      if (stepPreview) box.append(stepPreview);
       if (state.pendingText) box.append(markdown(state.pendingText));
       area.append(box);
     } else {
@@ -695,6 +718,11 @@ async function sendMessage(value, useKnowledge = state.useKnowledge) {
         if (payload.phase === "start") {
           state.pendingSteps.push({ call_id: payload.call_id, tool_name: payload.tool_name, detail: payload.detail || "", status: "running", elapsed_ms: null });
         } else if (payload.phase === "end") {
+          const preview = payload.preview_image_url;
+          if (payload.tool_name === "desktop_inspect_screen" && typeof preview === "string" &&
+              preview.length <= 350 * 1024 && /^data:image\/(jpeg|png|webp);base64,/.test(preview)) {
+            lastStepPreview = {callId:payload.call_id, url:preview, open:false};
+          }
           const hit = state.pendingSteps.find(s => s.call_id === payload.call_id);
           if (hit) {
             hit.status = payload.status || "ok";
@@ -1116,6 +1144,28 @@ function renderConnectionStatus() {
   else hint = savedConfig.voice_mode === "realtime" ? savedConfig.rt_model : `${savedConfig.model || "未选择"} · ${savedTtsConfig.tts_model}`;
   document.querySelectorAll(".model-hint").forEach(node => { node.textContent = hint; });
 }
+function renderAckCache() {
+  const count = savedConfig?.rt_ack_cached_count || 0;
+  el("rt-ack-status").textContent = count
+    ? (savedConfig.rt_ack_cached_voice + " · 已缓存 " + count + " 条") : "当前音色暂无首响缓存";
+  el("rt-ack-generate").disabled = ackGenerationBusy ||
+    savedConfig?.rt_provider !== "bailian" || !savedConfig?.rt_key_configured;
+}
+el("rt-ack-generate").addEventListener("click", async () => {
+  if (ackGenerationBusy || !confirm("用已保存的百炼音色生成首响？费用以百炼账单为准。")) return;
+  ackGenerationBusy = true;
+  renderAckCache();
+  notice("正在生成首响语音…");
+  try {
+    const result = await request("/api/voice/ack/generate", "POST", {});
+    if (savedConfig?.rt_provider === "bailian" && savedConfig.rt_voice === result.voice) {
+      savedConfig.rt_ack_cached_voice = result.voice;
+      savedConfig.rt_ack_cached_count = result.count;
+    }
+    notice("已生成 " + result.count + " 条首响语音。", "success");
+  } catch (error) { notice(error.message, "error"); }
+  finally { ackGenerationBusy = false; renderAckCache(); }
+});
 function applyConfig(data, preserve = false) {
   if (data.voice_profiles) voiceProfiles = data.voice_profiles;
   for (const id of ["voice_mode","rt_provider","rt_endpoint","rt_workspace","rt_model","rt_voice","rt_asr_model","asr_provider","asr_model","asr_language"]) el(id).value = data[id] ?? "";
@@ -1136,6 +1186,7 @@ function applyConfig(data, preserve = false) {
     if (el("agent_profile")) el("agent_profile").value = data.agent_profile || "";
   }
   savedConfig = data; state.configured = data.configured;
+  renderAckCache();
   applyWeatherSettings(data);
   syncDesktopPlannerPreset(data.desktop_planner_model || "");
   el("desktop_vision_model").value = data.desktop_vision_model || "";
@@ -3444,6 +3495,9 @@ function renderDesktopNodes(data) {
   el("desktop-state-detail").textContent = data.last_error || "连接你的 Windows 或 Mac 电脑后，Agent 可看屏幕（Computer Use）、读写文件/剪贴板并请求确认操控。";
   el("desktop-cmd-macos").value = data.commands?.macos || "";
   el("desktop-cmd-windows").value = data.commands?.windows || "";
+  for (const os of ["macos", "windows"]) {
+    el("desktop-download-" + os).disabled = desktopBusy || !data.gateway_token || !data.websocket_url;
+  }
   const list = el("desktop-nodes"); list.replaceChildren();
   const nodes = Array.isArray(data.nodes) ? data.nodes : [];
   if (!nodes.length) {
@@ -3520,6 +3574,45 @@ for (const [btnId, inputId] of [["desktop-copy-macos", "desktop-cmd-macos"], ["d
     try { await navigator.clipboard.writeText(val); notice("启动命令已复制。", "success"); }
     catch { notice("无法写入剪贴板，请手动选中命令复制。", "error"); }
   });
+}
+function downloadDesktopLauncher(platform) {
+  const url = desktopData?.websocket_url, token = desktopData?.gateway_token;
+  if (!url || !/^wss?:\/\/[A-Za-z0-9.:[\]_-]+\/[A-Za-z0-9./_-]*$/.test(url) ||
+      !token || !/^[A-Za-z0-9_-]+$/.test(token)) {
+    notice("启动信息不可用，请在本机刷新电脑节点后重试。", "error");
+    return;
+  }
+  const windows = platform === "windows";
+  const lines = windows ? [
+    "@echo off", "setlocal DisableDelayedExpansion", "chcp 65001 > nul", 'cd /d "%~dp0"',
+    'if exist "desktop_node\\__main__.py" goto run', 'set "PROJECT_DIR="',
+    'set /p "PROJECT_DIR=请输入 xiaoyuan 项目目录: "',
+    'if not defined PROJECT_DIR goto missing', 'cd /d "%PROJECT_DIR%" || goto missing',
+    'if not exist "desktop_node\\__main__.py" goto missing', ":run",
+    'set "PYTHON=python"', 'if exist ".venv\\Scripts\\python.exe" set "PYTHON=.venv\\Scripts\\python.exe"',
+    '"%PYTHON%" -m desktop_node --server "' + url + '" --token "' + token + '"',
+    "pause", "exit /b", ":missing", "echo 未找到 desktop_node，请将脚本放到项目目录后重试。", "pause",
+  ] : [
+    "#!/bin/bash", 'cd -- "$(dirname -- "$0")" || exit 1', "if [[ ! -f desktop_node/__main__.py ]]; then",
+    '  read -r -p "请输入 xiaoyuan 项目目录: " project_dir', '  cd -- "$project_dir" || exit 1', "fi",
+    '[[ -f desktop_node/__main__.py ]] || { echo "未找到 desktop_node"; exit 1; }',
+    "python=python3", "[[ ! -x .venv/bin/python ]] || python=.venv/bin/python",
+    'exec "$python" -m desktop_node --server "' + url + '" --token "' + token + '"',
+  ];
+  const download = node("a");
+  download.download = "xiaoyuan-desktop" + (windows ? ".bat" : ".command");
+  const blob = new Blob([lines.join(windows ? "\r\n" : "\n") + "\n"], {type:"text/plain;charset=utf-8"});
+  const objectUrl = URL.createObjectURL(blob);
+  download.href = objectUrl;
+  document.body.append(download);
+  download.click();
+  download.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  notice(windows ? "脚本包含接入令牌，请仅在自己的电脑上使用。"
+    : "脚本包含接入令牌，请勿分享。若无法双击，先在终端执行 chmod +x xiaoyuan-desktop.command。", "success");
+}
+for (const os of ["macos", "windows"]) {
+  el("desktop-download-" + os).addEventListener("click", () => downloadDesktopLauncher(os));
 }
 let activeDeviceTab = "desktop";
 const deviceTabs = {desktop:"desktop-panel", hardware:"hardware-panel"};

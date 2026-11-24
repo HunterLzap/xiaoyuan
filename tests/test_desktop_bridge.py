@@ -3,17 +3,22 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ctypes
 import json
 import subprocess
 import sys
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
+from dotenv import dotenv_values
 from fastapi.testclient import TestClient
 import httpx
 import pytest
+from pydantic import SecretStr
 from starlette.websockets import WebSocketDisconnect
 
+from backend.app import ack_cache
 from backend.app.config import Settings
 from backend.app.desktop import (
     DesktopHub,
@@ -40,7 +45,7 @@ from backend.app.settings_store import SettingsStore
 from backend.app.tools import ToolRegistry
 from backend.app.text_tool_selection import TextToolSelection
 from backend.app.tool_gateway import SideEffectConfirmationStore
-from backend.app.tool_dialogue import ToolConversation
+from backend.app.tool_dialogue import ToolConversation, _normalize_tool_arguments, _progress_detail
 from desktop_node.client import _describe_rpc_for_hud, _handle_request, default_node_id, execute_rpc
 from desktop_node.platform_base import DesktopAdapter, DesktopRpcError
 from desktop_node.platform_macos import MacOSDesktopAdapter
@@ -1631,3 +1636,191 @@ def test_desktop_rpc_error_is_recorded_once_through_fastapi(tmp_path):
         assert rows["total"] == 1
         assert rows["items"][0]["detail"] == {"node_id": "node", "action": "screenshot"}
         assert len(errors) == 1 and getattr(errors[0], "_error_logged", False) is True
+
+
+def test_focus_and_wait_actions_activate_existing_windows_and_preserve_rpc_validation(tmp_path, monkeypatch):
+    match = {"active_window": {"app": "Editor", "title": "Draft"}, "focused_element": None}
+    mac = MacOSDesktopAdapter()
+    win = WindowsDesktopAdapter.__new__(WindowsDesktopAdapter)
+    monkeypatch.setattr(mac, "_has_accessibility_access", lambda: True)
+    monkeypatch.setattr(mac, "post_action_readback", lambda: match)
+    monkeypatch.setattr(win, "post_action_readback", lambda: match)
+    sleep = Mock()
+    monkeypatch.setattr("desktop_node.platform_base.time.sleep", sleep)
+
+    script = Mock(return_value=SimpleNamespace(returncode=0, stdout="focused"))
+    monkeypatch.setattr("desktop_node.platform_macos.subprocess.run", script)
+    assert mac.gui_action("focus_window", text="DRAFT")["active_window"] == match["active_window"]
+    assert script.call_args.args[0][-1] == "DRAFT"
+    script.return_value.stdout = "not_found"
+    with pytest.raises(DesktopRpcError) as missing_mac:
+        mac.gui_action("focus_window", text="Absent")
+    assert missing_mac.value.code == "window_not_found"
+
+    def enumerate_windows(callback, data):
+        for hwnd in (1, 2):
+            if not callback(hwnd, data):
+                break
+
+    def copy_title(hwnd, buffer, size):
+        buffer.value = "Draft"
+
+    user32 = SimpleNamespace(
+        EnumWindows=enumerate_windows, IsWindowVisible=lambda hwnd: hwnd.value == 2,
+        GetWindowTextLengthW=lambda hwnd: 5, GetWindowTextW=copy_title,
+        IsIconic=lambda hwnd: True, ShowWindow=Mock(), SetForegroundWindow=Mock(return_value=True),
+        GetForegroundWindow=Mock(return_value=2), GetWindowThreadProcessId=Mock(),
+    )
+    kernel32 = SimpleNamespace(OpenProcess=Mock(return_value=0))
+    monkeypatch.setattr(ctypes, "WINFUNCTYPE", lambda *_: lambda callback: callback, raising=False)
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(user32=user32, kernel32=kernel32), raising=False)
+    assert win.gui_action("focus_window", text="DRAFT")["active_window"] == match["active_window"]
+    assert user32.ShowWindow.call_args.args[0].value == 2 and user32.ShowWindow.call_args.args[1] == 9
+    assert user32.SetForegroundWindow.call_args.args[0].value == 2
+    with pytest.raises(DesktopRpcError) as missing_win:
+        win.gui_action("focus_window", text="Absent")
+    assert missing_win.value.code == "window_not_found"
+
+    def copy_executable(handle, flags, buffer, size):
+        buffer.value = "C:/apps/Editor.exe"
+        return True
+
+    kernel32.OpenProcess.return_value = 42
+    kernel32.QueryFullProcessImageNameW = copy_executable
+    kernel32.CloseHandle = Mock()
+    assert win.gui_action("focus_window", text="editor.exe")["ok"] is True
+    kernel32.CloseHandle.assert_called_once()
+
+    for adapter in (mac, win):
+        with pytest.raises(DesktopRpcError) as missing_text:
+            adapter.gui_action("focus_window", text=" ")
+        assert missing_text.value.code == "invalid_args"
+        assert adapter.gui_action("wait")["wait_seconds"] == 1.5
+        assert adapter.gui_action("wait", wait_seconds=99)["wait_seconds"] == 5.0
+        assert adapter.gui_action("wait", wait_seconds=0)["active_window"] == match["active_window"]
+        sleep.assert_called_with(0.2)
+
+    for alias in ("switch_window", "activate"):
+        normalized = _normalize_tool_arguments("desktop_gui_action", {"action": alias, "text": "Draft"})
+        assert normalized["action"] == "focus_window"
+        assert _progress_detail("desktop_gui_action", normalized) == "切换窗口 Draft"
+    wait = _normalize_tool_arguments("desktop_gui_action", {"action": "sleep", "wait_seconds": "2.5"})
+    assert wait == {"action": "wait", "wait_seconds": 2.5}
+    assert _progress_detail("desktop_gui_action", wait) == "等待 2.5s"
+    assert execute_rpc(win, "gui_action", wait)["wait_seconds"] == 2.5
+    with pytest.raises(DesktopRpcError) as gui_disabled:
+        execute_rpc(win, "gui_action", wait, allow_gui=False)
+    assert gui_disabled.value.code == "gui_disabled"
+    hub = DesktopHub(path=tmp_path / "desktop-nodes.json")
+    tool = DesktopGuiActionTool(hub)
+    assert tool.spec.permission == "write"
+    with pytest.raises(ProviderError) as missing_argument:
+        asyncio.run(tool.run({"action": "focus_window", "text": "  "}))
+    assert missing_argument.value.code == "tool_arguments"
+
+
+def test_desktop_screen_preview_is_only_in_tool_sse_and_omitted_from_persistence(tmp_path, monkeypatch):
+    cfg = _base_settings(tmp_path)
+    hub = DesktopHub(path=tmp_path / "desktop-nodes.json")
+    captured_at = "2026-11-24T00:00:00Z"
+    image = "data:image/jpeg;base64," + base64.b64encode(b"annotated-frame").decode()
+    monkeypatch.setattr(hub, "inspect_screen", AsyncMock(return_value={
+        "node_id": "demo", "som_annotated": True, "captured_at": captured_at,
+        "ui_elements": [{"index": 0, "name": "Draft"}],
+    }))
+    monkeypatch.setattr(hub, "latest_vision_frame", Mock(return_value={
+        "data_url": image, "som_annotated": True, "captured_at": captured_at,
+    }))
+    scripted = _ScriptedLLM([
+        [Completion("", None, "tool_calls", tool_calls=[{
+            "id": "screenshot", "type": "function",
+            "function": {"name": "desktop_inspect_screen", "arguments": "{}"},
+        }])],
+        ["已看到 Draft。", Completion("已看到 Draft。", None, "stop")],
+    ])
+    app = create_app(cfg, provider=scripted, desktop_hub=hub, settings_store=SettingsStore(tmp_path / ".env"))
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        selection = client.put("/api/assistant/selection", headers=HEADERS,
+                               json={"selected_tool_ids": ["desktop_control"]})
+        assert selection.status_code == 200
+        service = app.state.service
+        real_context = service.tool_context
+        contexts = []
+
+        def capture_context(*args, **kwargs):
+            context = real_context(*args, **kwargs)
+            contexts.append(context)
+            return context
+
+        monkeypatch.setattr(service, "tool_context", capture_context)
+        response = client.post("/chat/stream", json={"message": "看看电脑屏幕"})
+        assert response.status_code == 200
+        previews = []
+        sid = None
+        for block in response.text.strip().split("\n\n"):
+            event, raw = block.split("\ndata: ", 1)
+            data = json.loads(raw)
+            if event == "event: session":
+                sid = data["session_id"]
+            if "preview_image_url" in data:
+                previews.append((event, data["phase"], data["preview_image_url"]))
+        assert previews == [("event: tool", "end", image)]
+        assert sid
+        context = contexts[0]
+        history = service.history_store.get(UUID(sid))
+        assert history is not None and history.history_persisted
+        assert history.messages[-1].tool_calls[0]["tool_name"] == "desktop_inspect_screen"
+        async def await_audits():
+            await asyncio.gather(*service.audit_tasks)
+
+        client.portal.call(await_audits)
+        entries = app.state.audit.list_tools(tool_name="desktop_inspect_screen")["items"]
+        assert entries
+        audit = app.state.audit.detail(entries[0]["id"], "tool_call")
+        for record in (context.summaries(), context.outputs, history.model_dump_json(), audit):
+            serialized = json.dumps(record, ensure_ascii=False)
+            assert image not in serialized and "preview_image_url" not in serialized
+
+        hub.latest_vision_frame.return_value["data_url"] = "data:image/jpeg;base64," + "A" * (350 * 1024)
+        oversized = service.tool_context(UUID(sid), uuid4(), "text", "看看电脑屏幕")
+        events = []
+        oversized.on_progress = events.append
+        client.portal.call(oversized.execute, "desktop_inspect_screen", "{}", "oversized")
+        assert [event["phase"] for event in events] == ["start", "end"]
+        assert all("preview_image_url" not in event for event in events)
+
+
+def test_ack_routes_use_existing_auth_and_persist_setting(tmp_path, monkeypatch):
+    cfg = _base_settings(tmp_path).model_copy(update={
+        "rt_voice": "test-voice", "rt_api_key": SecretStr("fixture-bailian-key"),
+    })
+    cache_dir = tmp_path / "ack"
+    monkeypatch.setattr(ack_cache, "_CACHE_DIR", cache_dir)
+    store = SettingsStore(tmp_path / ".env")
+
+    async def synthesize(settings, phrases):
+        ack_cache._save_cache(cache_dir, settings.rt_voice, settings.rt_model, phrases, [b"\x01\x00"])
+        return ack_cache.ack_cache_status(settings.rt_voice)
+
+    generate = AsyncMock(side_effect=synthesize)
+    monkeypatch.setattr("backend.app.main.synthesize_ack_phrases", generate)
+    app = create_app(cfg, settings_store=store, provider=_ScriptedLLM([]))
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        path = "/api/voice/ack"
+        assert client.get(path).json() == {"voice": "test-voice", "count": 0, "phrases": []}
+        assert client.post(path + "/generate", json={"phrases": ["等一下"]}).status_code == 403
+        assert client.post(path + "/generate", headers=HEADERS, json={"phrases": ["a"] * 6}).status_code == 422
+        generate.assert_not_awaited()
+        result = client.post(path + "/generate", headers=HEADERS, json={"phrases": ["等一下"]})
+        assert result.status_code == 200 and result.json()["count"] == 1
+        assert client.get(path).json()["phrases"] == ["等一下"]
+        settings = client.get("/api/settings").json()
+        assert settings["rt_ack_enabled"] is True and settings["rt_ack_cached_count"] == 1
+        assert settings["rt_ack_cached_voice"] == "test-voice"
+        saved = client.put("/api/settings/connections", headers=HEADERS, json={"rt_ack_enabled": False})
+        assert saved.status_code == 200 and client.get("/api/settings").json()["rt_ack_enabled"] is False
+        assert dotenv_values(store.path)["AI_RT_ACK_ENABLED"] == "False"
+    with TestClient(app, base_url="http://127.0.0.1", client=("192.0.2.4", 50000)) as remote:
+        assert remote.get("/api/voice/ack").status_code == 403
+        assert remote.post("/api/voice/ack/generate", headers=HEADERS).status_code == 403
+    assert generate.await_count == 1

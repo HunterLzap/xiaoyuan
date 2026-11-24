@@ -8,7 +8,7 @@ import secrets
 import time
 from ipaddress import ip_address
 from pathlib import Path
-from typing import Callable
+from typing import Annotated, Callable
 from uuid import UUID
 import urllib.parse
 
@@ -16,9 +16,11 @@ from fastapi import FastAPI, Query, Request, Response, WebSocket, WebSocketDisco
 from .realtime import RealtimeTurn
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field, StringConstraints
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import qwen_voices, voices
+from .ack_cache import ack_cache_status, synthesize_ack_phrases
 from .asr import transcribe_browser_wav
 from .config import ROOT, Settings
 from .llm import ChatProvider, OpenAICompatibleProvider, ProviderError
@@ -52,6 +54,12 @@ from .desktop import DesktopHub, mount_desktop_admin_routes
 from .devices import DeviceHub, DeviceSetup, DevicePreferences
 from .voice_transport import DeviceVoice, VoiceStreamingResponse, sse
 from .speech_bridge import SpeechRecognizer, SPEECH_PYTHON
+
+
+class AckGenerationRequest(BaseModel):
+    phrases: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]] | None = Field(
+        default=None, min_length=1, max_length=5,
+    )
 
 
 def create_app(settings: Settings | None = None, provider: ChatProvider | None = None,
@@ -232,7 +240,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         if request.url.path in {"/", "/settings", "/devices", "/settings.js", "/paths.js", "/app.js", "/voice.js", "/app.css"}:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-                "connect-src 'self'; media-src 'self' blob: https://g-adoc.alcasset.com https://help-static-aliyun-doc.aliyuncs.com; frame-ancestors 'none'; form-action 'self'"
+                "connect-src 'self'; img-src 'self' data:; media-src 'self' blob: https://g-adoc.alcasset.com https://help-static-aliyun-doc.aliyuncs.com; frame-ancestors 'none'; form-action 'self'"
             )
         return response
 
@@ -547,6 +555,22 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     async def voice_playback(body: VoicePlaybackRequest):
         await app.state.service.playback(body.session_id, body.turn_id, body.state)
         return {"ok": True}
+
+    ack_generation_lock = asyncio.Lock()
+
+    @app.get("/api/voice/ack")
+    async def get_voice_ack():
+        config = app.state.service.settings
+        if config.rt_provider != "bailian":
+            return {"voice": config.rt_voice, "count": 0, "phrases": []}
+        return await asyncio.to_thread(ack_cache_status, config.rt_voice)
+
+    @app.post("/api/voice/ack/generate")
+    async def generate_voice_ack(body: AckGenerationRequest | None = None):
+        if ack_generation_lock.locked():
+            raise ProviderError(409, "ack_generation_busy", "首响语音正在生成。")
+        async with ack_generation_lock:
+            return await synthesize_ack_phrases(app.state.service.settings, body.phrases if body else None)
 
     @app.post("/api/voice/asr")
     async def voice_asr(request: Request):
