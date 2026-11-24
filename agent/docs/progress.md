@@ -1,6 +1,11 @@
 # 当前进度与证据
 
-更新时间：2026-11-23。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
+更新时间：2026-11-24。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
+
+## Windows SlopGuard 门禁本地化（2026-11-24）
+
+- 在 Windows `E:\xiaodan` 的 `5b659e2` 上停止跟踪 SlopGuard 配置与交付流程，原文件内容和 Git pre-commit 钩子保留在本机。原门禁条款移至本机 `AGENTS.local.md`，Git 本机忽略规则覆盖三个文件。
+- 本机 `slopguard verify --json` 退出 0，0 findings。用现有 `.venv` 运行桌面管理权限与设备结束意图的 3 条回归，全部通过，出现 1 条 Starlette TestClient 弃用警告。本次验证范围为 Windows 开发工作树。[门禁结果](E:/xiaodan/logs/slopguard-local-verify-20261124.json) · [回归输出](E:/xiaodan/logs/slopguard-local-regressions-20261124.log)
 
 ## Windows SlopGuard 门禁与核心回归（2026-11-23）
 

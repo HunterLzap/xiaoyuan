@@ -1,12 +1,15 @@
 # 当前工作入口
 
-更新：2026-11-23。本文只写当前快照；历史过程与原始证据在 [progress](docs/progress.md)。
+更新：2026-11-24。本文只写当前快照；历史过程与原始证据在 [progress](docs/progress.md)。
+
+## Windows SlopGuard 本机配置（2026-11-24）
+
+- Windows 的 SlopGuard 配置、pre-commit 钩子和交付流程在本机维护，本机工作约定见 `AGENTS.local.md`。共享仓库保留桌面权限修复和回归用例。验证记录见 [progress](docs/progress.md#windows-slopguard-门禁本地化2026-11-24)。
 
 ## Windows 本机同步（2026-11-23）
 
 - `E:\xiaodan` 已统一为 Windows 项目的 Git 工作树与运行目录。`main` 与 GitHub `origin/main` 同为 `d567120`，本机从 `local/windows-sync` 运行。旧 `.cache/repo-export` 已移出项目，11 月 16 日本机刷写记录保留在忽略文件 `LOCAL_FLASH_NOTES.md`。
 - 现有 `.venv` 已启动管理页面与 API，监听 `127.0.0.1:8000`。已读回历史、个人知识库和本机音色配置。桌面节点管理仅限本机回环，公网代理模式禁用该管理接口。启动、备份和验证范围见 [progress](docs/progress.md#windows-工作树统一与本机启动验证2026-11-23)。
-- Windows 已安装 SlopGuard pre-commit 钩子。本机 `.slopguard/config.yaml` 的 `verify.test_cmd` 使用现有 `.venv` 执行桌面节点和结束意图的 3 条核心用例。门禁契约见根 [AGENTS](../AGENTS.md)，执行结果见 [progress](docs/progress.md#windows-slopguard-门禁与核心回归2026-11-23)。
 
 ## 11 月 17 日开发记录与暂停事项
 

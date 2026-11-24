@@ -6,6 +6,8 @@
 
 本文件是唯一总入口。新Agent依次读本文件→[START](agent/START.md)→任务相关专题；只有需要追溯证据时检索progress或归档，不默认读取全部报告。
 
+若当前工作树有 `AGENTS.local.md`，一并读取其中适用于本机的工作约定。
+
 **换开发电脑时**：以当前clone目录为项目根，用 `git rev-parse --show-toplevel` 确认。文中的 `E:\xiaodan`、`C:\Users\l` 是原电脑记录，不要求在新电脑创建同名路径。先按仓库内相对链接阅读，再按 [handoff](agent/docs/handoff.md) 的新电脑步骤接手。
 
 | 信息类别 | 权威文件 | 其他文件的职责 |
@@ -59,15 +61,6 @@
 - **设备配对 / OTA / 控制回读**（`devices.py`）：`.venv/bin/pytest tests/test_devices.py`（仅测配置/鉴权可用 `-k "not real_socket"`；`test_device_audio.py` 与 `test_device_conversation.py` 依赖 Windows `.venv-speech` 及 `output/speech/` 样例，Mac 自动跳过）
 - **前端 JS**（`backend/app/*.js`）：`node --check <修改的 JS 文件>`（修改 `voice.js` 且在 Windows 具备 Chrome/Playwright 时跑 `node tests/voice_browser.cjs`）
 - **历史旧套件边界**：`test_api.py`、`test_api_configuration.py`、`test_tts.py`、`test_settings_workflow.py` 及上述 `-k` 排除用例含默认 `voice_mode="realtime"` 等演进导致的历史失败；仅在改动对应设置/接口且用 `-k` 筛选相关用例时参考，不与本次改动混淆，也不擅自批量修改旧测试。
-
-<!-- slopguard:start -->
-## SlopGuard 质量门禁契约
-- 每次代码改动结束前，必须运行 `slopguard verify` 直到退出码为 `0`。
-- 修复 Bug 时，必须补充复现测试并运行 `slopguard verify --ablation`，确保通过 `RED -> GREEN` 消融验证。
-- 严禁使用 `git commit --no-verify` 绕过 `pre-commit` 门禁。
-- 严禁通过新增抑制注释（`# type: ignore`、`# noqa`、`@ts-ignore`、`eslint-disable`）或堆叠症状兜底来敷衍门禁；遇到 `probe:*` 告警时，按 `action_hint` 做最小根因修复或沉淀为可执行测试/Lint 规则后删掉注释。
-- 所有涉及代码改动的任务，在向用户汇报完成前，必须自动执行 `.agent/workflows/ship.md` 定义的完整闭环直至提交成功。
-<!-- slopguard:end -->
 
 ## 当前技术与数据边界
 
