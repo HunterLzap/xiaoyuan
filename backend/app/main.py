@@ -47,6 +47,7 @@ from .settings_store import (SettingsStore, SettingsUpdate, public_settings, API
 from .tts import (CLONE_MODEL, PRESET_VOICES, TTSProvider, build_tts_provider,
                   shared_client, close_shared_client)
 from .voice_profiles import BUSINESS_STATE_FIELDS, VoiceProfileStore
+from .web_search import close_web_search_client
 from .desktop import DesktopHub, mount_desktop_admin_routes
 from .devices import DeviceHub, DeviceSetup, DevicePreferences
 from .voice_transport import DeviceVoice, VoiceStreamingResponse, sse
@@ -94,7 +95,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             app.state.personal_kb.initialize_if_missing()
         if config.selected_tool_ids is None or config.selected_kb_ids is None:
             defaults = [item["name"] for item in tool_catalog(config, knowledge, app.state.personal_kb,
-                        app.state.external_tools) if item["kind"] in {"official", "weather", "http", "desktop"} and item["enabled"]]
+                        app.state.external_tools) if item["kind"] in {"official", "weather", "search", "http", "desktop"} and item["enabled"]]
             kb_defaults = ([app.state.personal_kb.default_library_id()]
                            if config.selected_kb_ids is None and config.personal_kb_enabled and app.state.personal_kb is not None else [])
             if state_db_path is not None:
@@ -167,6 +168,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             if app.state.embedder is not None:
                 await app.state.embedder.close()
             await close_shared_client()
+            await close_web_search_client()
 
     app = FastAPI(title="AtomS3R AI Assistant", version="0.2.0", lifespan=lifespan,
                   root_path=startup_config.public_base_path)
@@ -699,9 +701,9 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                 catalog = tool_catalog(service.settings, service.knowledge,
                                        app.state.personal_kb, app.state.external_tools,
                                        desktop=getattr(app.state, "desktop", None))
-                known = {item["name"] for item in catalog if item["kind"] in {"official", "weather", "http", "desktop"}}
+                known = {item["name"] for item in catalog if item["kind"] in {"official", "weather", "search", "http", "desktop"}}
                 if any(tool_id not in known for tool_id in update.selected_tool_ids):
-                    raise ProviderError(422, "assistant_tool_unknown", "请选择已有的天气、M5、电脑控制或 HTTP API 能力。")
+                    raise ProviderError(422, "assistant_tool_unknown", "请选择已有的天气、联网搜索、M5、电脑控制或 HTTP API 能力。")
             if "selected_kb_ids" in update.model_fields_set and update.selected_kb_ids:
                 await asyncio.to_thread(get_personal_kb().assert_libraries, update.selected_kb_ids)
             config = store.prepare(service.settings, update)
@@ -929,7 +931,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     @app.put("/api/tools/{name}/enabled")
     async def enable_tool(name: str, body: ToolEnabledUpdate):
         fields = {"search_m5stack": "m5stack_enabled", "search_personal_knowledge": "personal_kb_enabled",
-                  "get_weather": "weather_enabled", "desktop_control": "desktop_enabled"}
+                  "get_weather": "weather_enabled", "web_search": "web_search_enabled", "desktop_control": "desktop_enabled"}
         if name in fields:
             update = CapabilitySettingsUpdate.model_validate({fields[name]: body.enabled})
             await save_grouped_settings(update)
@@ -1115,6 +1117,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     def audit_secrets():
         config = app.state.service.settings
         values = [getattr(config, name).get_secret_value() for name in ("api_key", "rt_api_key", "tts_api_key")]
+        values.append(config.web_search_api_key.get_secret_value())
         for cfg in app.state.external_tools.items.values():
             values.extend(secret_values(cfg.request))
         return [value for value in values if value]

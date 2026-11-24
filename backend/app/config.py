@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     personal_kb_db_path: Path | None = ROOT / "data" / "personal_kb.sqlite3"
     weather_enabled: bool = True
     weather_default_city: str = Field(default="", max_length=80)
+    web_search_enabled: bool = False
+    web_search_api_key: SecretStr = SecretStr("")
     # None 仅标记旧配置未初始化；启动时一次性写成具体数组。[] 明确禁止对应能力。
     selected_tool_ids: list[str] | None = None
     selected_kb_ids: list[str] | None = None
@@ -192,7 +194,7 @@ class Settings(BaseSettings):
             raise ValueError("选择必须是不重复的有效 ID 数组")
         return value
 
-    @field_validator("api_key", "tts_api_key", "rt_api_key", "asr_api_key")
+    @field_validator("api_key", "tts_api_key", "rt_api_key", "asr_api_key", "web_search_api_key")
     @classmethod
     def validate_api_key(cls, value: SecretStr) -> SecretStr:
         key = value.get_secret_value().strip()

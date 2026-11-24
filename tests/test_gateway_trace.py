@@ -7,12 +7,15 @@ import json
 import sqlite3
 from contextlib import closing
 from threading import get_ident
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 import wave
 
 from fastapi.testclient import TestClient
+import httpx
 import pytest
 
+from backend.app import web_search
 from backend.app.audit_store import AuditStore
 from backend.app.config import Settings
 from backend.app.error_log import ErrorLogStore
@@ -23,8 +26,9 @@ from backend.app.realtime import RealtimeTurn
 from backend.app.schemas import TokenUsage
 from backend.app.service import ChatService
 from backend.app.settings_store import SettingsStore
+from backend.app.text_tool_selection import TextToolSelection
 from backend.app.tool_dialogue import TOOL_LOADING_NAME, ToolConversation
-from backend.app.tools import ToolRegistry, ToolSpec
+from backend.app.tools import ToolRegistry, ToolSpec, build_tool_registry
 
 
 HEADERS = {"X-Local-Settings": "1", "Origin": "http://127.0.0.1"}
@@ -380,5 +384,146 @@ def test_async_history_persistence_builds_snapshot_before_threaded_save(tmp_path
             await service._persist_async(session_id)
             assert session.history_persisted is False
             assert "会话仅保留在内存：无法写入本机历史记录。" in caplog.text
+
+    asyncio.run(scenario())
+
+
+def test_deepseek_search_protocol_trimming_cache_and_key_resolution(monkeypatch):
+    async def scenario():
+        clock = [100.0]
+        monkeypatch.setattr(web_search, "monotonic", lambda: clock[0])
+        payload = {"results": [
+            {"title": "题" * 140, "url": "https://example.invalid/" + "x" * 310,
+             "summary": "摘" * 320, "snippet": "优先使用摘要", "content": "全文", "rerank_score": 2.4},
+            {"title": "简讯", "url": "https://example.invalid/second",
+             "summary": "", "snippet": "备用摘要", "rerank_score": 1.8},
+        ]}
+        post = AsyncMock(return_value=httpx.Response(200, json=payload))
+        monkeypatch.setattr(httpx.AsyncClient, "post", post)
+        settings = Settings(_env_file=None, web_search_api_key="search-test-key",
+                            api_key="text-test-key", base_url="https://api.deepseek.com/v1")
+        try:
+            result = await web_search.search_web(settings, "  Gold News  ", count=10)
+            post.assert_awaited_once_with(
+                "https://api.deepseek.com/v1/tools/search",
+                headers={"Authorization": "Bearer search-test-key", "Content-Type": "application/json"},
+                json={"query": "Gold News", "count": 5, "need_content": False},
+            )
+            assert result["query"] == "Gold News" and result["provider"] == "deepseek" and result["fetched_at"]
+            assert result["results"] == [
+                {"title": payload["results"][0]["title"][:120], "url": payload["results"][0]["url"][:300],
+                 "summary": "摘" * 300, "score": 2.4},
+                {"title": "简讯", "url": "https://example.invalid/second", "summary": "备用摘要", "score": 1.8},
+            ]
+            clock[0] += 179
+            assert await web_search.search_web(settings, "Gold News") == result
+            assert post.await_count == 1
+            clock[0] += 1
+            await web_search.search_web(settings, "Gold News")
+            assert post.await_count == 2
+
+            inherited = Settings(_env_file=None, web_search_api_key="",
+                                 api_key="text-test-key", base_url="https://api.deepseek.com/v1")
+            await web_search.search_web(inherited, "最新资讯", count=0)
+            assert post.await_args.kwargs["headers"]["Authorization"] == "Bearer text-test-key"
+            assert post.await_args.kwargs["json"]["count"] == 1
+            unrelated = inherited.model_copy(update={"base_url": "https://third-party.invalid/deepseek.com"})
+            with pytest.raises(web_search.WebSearchError) as missing:
+                await web_search.search_web(unrelated, "Gold News")
+            assert (missing.value.code, missing.value.status) == ("web_search_not_configured", 422)
+            with pytest.raises(web_search.WebSearchError) as invalid_query:
+                await web_search.search_web(settings, "金" * 129)
+            assert (invalid_query.value.code, invalid_query.value.status) == ("web_search_query_invalid", 422)
+            assert post.await_count == 3
+
+            for failure, code, status in (
+                (TimeoutError("search-test-key"), "web_search_timeout", 504),
+                (httpx.ReadTimeout("search-test-key"), "web_search_timeout", 504),
+                (httpx.ConnectError("search-test-key"), "web_search_unavailable", 502),
+                (httpx.Response(401, text="search-test-key"), "web_search_upstream_error", 502),
+            ):
+                post.side_effect = [failure]
+                with pytest.raises(web_search.WebSearchError) as error:
+                    await web_search.search_web(settings, "未缓存的查询")
+                assert (error.value.code, error.value.status) == (code, status)
+                assert "search-test-key" not in str(error.value)
+        finally:
+            await web_search.close_web_search_client()
+
+    asyncio.run(scenario())
+
+
+def test_web_search_selection_requires_enablement_and_keeps_weather(monkeypatch):
+    monkeypatch.delenv("AI_WEB_SEARCH_ENABLED", raising=False)
+    settings = Settings(_env_file=None, selected_tool_ids=["web_search", "get_weather"], weather_enabled=True)
+    disabled = build_tool_registry(settings, None, None)
+    assert settings.web_search_enabled is False and not disabled.has("web_search")
+    enabled = settings.model_copy(update={"web_search_enabled": True})
+    unselected = enabled.model_copy(update={"selected_tool_ids": ["get_weather"]})
+    assert not build_tool_registry(unselected, None, None).has("web_search")
+    assert build_tool_registry(unselected, None, None, assistant_scope=False).has("web_search")
+
+    service = ChatService(enabled, None)
+    service.tools = build_tool_registry(enabled, None, None)
+    assert service.tools.get("web_search").spec.permission == "read"
+    sid = service.new_session()
+    for question, expected in (("查一下今天金价", "web_search"), ("今天天气怎么样", "get_weather")):
+        context = service.tool_context(sid, uuid4(), "text", question)
+        selection = TextToolSelection(context)
+        assert selection.active_names() == [expected]
+
+
+def test_web_search_settings_are_persisted_and_key_is_redacted(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_WEB_SEARCH_ENABLED", raising=False)
+    key = "manual-redaction-probe-value"
+    cfg = Settings(
+        _env_file=None, web_search_api_key=key, assistant_db_path=tmp_path / "assistant.sqlite3",
+        history_db_path=None, personal_kb_db_path=tmp_path / "audit.sqlite3", usage_log_path=None,
+        m5stack_enabled=False,
+        selected_tool_ids=[],
+    )
+    post = AsyncMock(side_effect=AssertionError("invalid query must not reach DeepSeek"))
+    monkeypatch.setattr(httpx.AsyncClient, "post", post)
+    app = create_app(cfg, settings_store=SettingsStore(tmp_path / ".env"))
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        settings = client.get("/api/settings")
+        assert settings.status_code == 200 and settings.json()["web_search_configured"] is True
+        assert "web_search_api_key" not in settings.json() and key not in settings.text
+        enabled = client.put("/api/tools/web_search/enabled", json={"enabled": True}, headers=HEADERS)
+        assert enabled.status_code == 200
+        catalog = {tool["name"]: tool for tool in enabled.json()["tools"]}
+        assert catalog["web_search"]["enabled"] is True and catalog["web_search"]["kind"] == "search"
+        assert not app.state.service.tools.has("web_search")
+        selected = client.put("/api/assistant/selection", json={"selected_tool_ids": ["web_search"]}, headers=HEADERS)
+        assert selected.status_code == 200 and app.state.service.tools.has("web_search")
+
+        response = client.post("/api/tools/web_search/call",
+                               json={"arguments": {"query": key + "字" * 128}}, headers=HEADERS)
+        assert response.status_code == 422 and key not in response.text
+        post.assert_not_awaited()
+        entry = app.state.audit.list_tools(tool_name="web_search")["items"][0]
+        detail = app.state.audit.detail(entry["id"], "tool_call")
+        audit_json = json.dumps(detail, ensure_ascii=False)
+        assert key not in audit_json and "[已隐藏]" in audit_json
+
+    with closing(sqlite3.connect(cfg.assistant_db_path)) as connection:
+        entries = dict(connection.execute("SELECT key, value_json FROM assistant_settings"))
+        assert json.loads(entries["web_search_enabled"]) is True
+        assert "web_search_api_key" not in entries and key not in json.dumps(entries)
+
+    restarted = create_app(cfg, settings_store=SettingsStore(tmp_path / ".env"))
+    with TestClient(restarted, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        assert restarted.state.service.tools.has("web_search")
+        disabled = client.put("/api/tools/web_search/enabled", json={"enabled": False}, headers=HEADERS)
+        assert disabled.status_code == 200 and not restarted.state.service.tools.has("web_search")
+
+
+def test_close_web_search_client_closes_and_releases_reused_client():
+    async def scenario():
+        client = web_search._client()
+        assert web_search._client() is client
+        await web_search.close_web_search_client()
+        assert client.is_closed and web_search._SHARED_CLIENT is None
+        await web_search.close_web_search_client()
 
     asyncio.run(scenario())

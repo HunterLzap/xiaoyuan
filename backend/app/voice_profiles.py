@@ -21,6 +21,7 @@ BUSINESS_STATE_FIELDS = frozenset({
     "m5stack_enabled",
     "personal_kb_enabled",
     "weather_enabled",
+    "web_search_enabled",
     "weather_default_city",
     "embedding_enabled",
     "desktop_enabled",

@@ -12,6 +12,7 @@ from . import voices
 from .config import ROOT, Settings
 from .llm import ProviderError
 from .tts import CLONE_MODEL
+from .web_search import resolve_web_search_api_key
 
 
 class SettingsUpdate(BaseModel):
@@ -34,6 +35,7 @@ class CapabilitySettingsUpdate(BaseModel):
     m5stack_enabled: bool = True
     personal_kb_enabled: bool = True
     weather_enabled: bool = True
+    web_search_enabled: bool = False
     embedding_enabled: bool | None = None
     desktop_enabled: bool | None = None
     desktop_vision_model: str | None = Field(default=None, max_length=200)
@@ -179,6 +181,8 @@ def public_settings(settings: Settings) -> dict:
         "personal_kb_enabled": settings.personal_kb_enabled,
         "embedding_enabled": settings.embedding_enabled,
         "weather_enabled": settings.weather_enabled,
+        "web_search_enabled": settings.web_search_enabled,
+        "web_search_configured": bool(resolve_web_search_api_key(settings)),
         "weather_default_city": settings.weather_default_city,
         "desktop_enabled": settings.desktop_enabled,
         "desktop_vision_model": settings.desktop_vision_model,

@@ -157,6 +157,8 @@ def turn_limits(allowed: set[str] | None) -> tuple[int, int]:
 
 
 def _progress_detail(name: str, args: dict) -> str:
+    if name == "web_search":
+        return str(args.get("query") or "")[:36]
     if name == "desktop_open":
         return str(args.get("target") or "")[:40]
     if name == "desktop_inspect_screen":

@@ -4,15 +4,14 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
 
-import httpx
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError as SchemaValidationError
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, SecretStr, ValidationError, field_validator, model_validator
 
 from .llm import ProviderError
 from .schemas import KnowledgeSearchRequest
+from .web_search import search_web
 from .api_requests import (RequestDraft, RequestAuth, RequestBody, merge_request,
                            request_dump, secret_values, send_request, validate_url)
 
@@ -223,9 +222,15 @@ WEATHER_SPEC = ToolSpec("get_weather",
         "end_date": {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}$",
                      "description": "预报结束日期（含），格式 YYYY-MM-DD。"}},
      "additionalProperties": False}, permission="read")
+WEB_SEARCH_SPEC = ToolSpec("web_search",
+    "调用 DeepSeek 联网搜索查询实时新闻、价格汇率、最新资讯与公开网页信息。查天气请使用 get_weather，查个人文档请用 search_personal_knowledge。",
+    {"type": "object", "properties": {
+        "query": {"type": "string", "minLength": 1, "maxLength": 200},
+        "count": {"type": "integer", "minimum": 1, "maximum": 5, "default": 5}},
+     "required": ["query"], "additionalProperties": False}, permission="read")
 BUILTIN_NAMES = {M5STACK_SPEC.name, PERSONAL_KB_SPEC.name,
                  DEVICE_VOLUME_SPEC.name, SPEECH_RATE_SPEC.name, SPEECH_PITCH_SPEC.name,
-                 DEVICE_STATUS_SPEC.name, WEATHER_SPEC.name,
+                 DEVICE_STATUS_SPEC.name, WEATHER_SPEC.name, WEB_SEARCH_SPEC.name,
                  "desktop_control", "desktop_list_nodes", "desktop_inspect_screen",
                  "desktop_clipboard", "desktop_list_dir", "desktop_read_file",
                  "desktop_set_clipboard", "desktop_open", "desktop_gui_action",
@@ -385,7 +390,17 @@ class WeatherTool:
                 end_date=arguments.get("end_date", ""),
             )
         except WeatherError as error:
-            raise ProviderError(error.status, error.code, error.message)
+            raise ProviderError(error.status, error.code, error.message) from error
+
+
+class WebSearchTool:
+    spec = WEB_SEARCH_SPEC
+
+    def __init__(self, settings):
+        self.settings = settings
+
+    async def run(self, arguments, *, trace=None):
+        return await search_web(self.settings, arguments["query"], arguments.get("count", 5))
 
 
 class DeviceVolumeTool:
@@ -484,6 +499,7 @@ def compact_text_definitions(definitions):
             "来源Open-Meteo模型，非气象站实测，回答注明来源。"),
     }
     parameter_descriptions = {
+        "web_search": {"query": "公开网页搜索词，建议精简至 128 个字符以内。"},
         "get_weather": {
             "city": "城市名，可带省市；省略用常用城市。",
             "days": "从今天起预报天数；1=仅今天。",
@@ -559,7 +575,7 @@ def build_tool_registry(settings, knowledge, personal_kb, external=None, embedde
     selected = set(settings.selected_tool_ids if settings.selected_tool_ids is not None else [])
     if not assistant_scope:
         # 人工资源调用只受资源启停/权限约束；不改变对话注册表及知识库范围。
-        selected = {"search_m5stack", "get_weather", "desktop_control"}
+        selected = {"search_m5stack", "get_weather", "web_search", "desktop_control"}
         if external:
             selected.update(cfg.name for cfg in external.items.values())
     kb_ids = settings.selected_kb_ids if settings.selected_kb_ids is not None else []
@@ -569,6 +585,8 @@ def build_tool_registry(settings, knowledge, personal_kb, external=None, embedde
         tools.append(PersonalKnowledgeTool(personal_kb, embedder, settings.embedding_enabled, kb_ids))
     if "get_weather" in selected and getattr(settings, "weather_enabled", False):
         tools.append(WeatherTool(settings))
+    if "web_search" in selected and settings.web_search_enabled:
+        tools.append(WebSearchTool(settings))
     if "desktop_control" in selected and getattr(settings, "desktop_enabled", False) and desktop is not None:
         from .desktop_tools import build_desktop_tools
         tools.extend(build_desktop_tools(desktop))
@@ -589,6 +607,7 @@ def tool_catalog(settings, knowledge, personal_kb, external=None, desktop=None):
         {**M5STACK_SPEC.public(settings.m5stack_enabled and knowledge is not None), "kind": "official"},
         {**PERSONAL_KB_SPEC.public(settings.personal_kb_enabled and personal_kb is not None), "kind": "personal"},
         {**WEATHER_SPEC.public(getattr(settings, "weather_enabled", False)), "kind": "weather"},
+        {**WEB_SEARCH_SPEC.public(settings.web_search_enabled), "kind": "search"},
         {**DESKTOP_CAPABILITY_SPEC.public(getattr(settings, "desktop_enabled", False) and desktop is not None), "kind": "desktop"},
     ]
     if external:

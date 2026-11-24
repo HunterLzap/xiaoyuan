@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 TOOL_PURPOSES = {
     "get_weather": "天气、预报、气象出行建议",
+    "web_search": "联网搜索实时新闻、价格、百科与公开网页资料",
     "search_m5stack": "M5Stack官方硬件、引脚、SDK资料",
     "search_personal_knowledge": "用户上传的个人资料和知识库",
     "get_device_status": "当前设备音量、亮度、连接状态",
@@ -81,6 +82,7 @@ class TextToolSelection:
         if any(action["tool"] == "set_device_volume" and action["kind"] == "relative" for action in actions):
             names.add("get_device_status")
         for pattern, tools in [
+            (r"搜索|搜一下|查一下|网上|联网|新闻|资讯|热搜|价格|金价|股价|汇率|上映|比分|百科|官网|最新消息|是什么时候", {"web_search"}),
             (r"天气|气温|预报|降雨|下雨|下雪|带伞|穿衣|防晒|空气质量", {"get_weather"}),
             (r"m5|atoms3|atom\s*s3|esp32|k147|gpio|引脚|接线|sdk|arduino", {"search_m5stack"}),
             (r"知识库|我的资料|上传|个人资料|文档|文件|资料里|资料中", {"search_personal_knowledge"}),

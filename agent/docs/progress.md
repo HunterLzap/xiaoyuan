@@ -2,6 +2,12 @@
 
 更新时间：2026-11-24。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
+## Batch 3 DeepSeek 联网搜索（2026-11-24）
+
+- Windows `E:\xiaodan`，基于 `028efbd`，Python 3.12.0。指定五个测试文件共 57 项通过（含 4 项新增测试），2 个子测试通过，0 项跳过，1 条 Starlette 弃用警告。增量 Lint 新增问题为 0。SlopGuard 通过，跳过 Pyright 和 Semgrep，其中 Pyright 已由增量 Lint 执行。[回归输出](E:/xiaodan/logs/batch3-pytest.log) · [增量 Lint](E:/xiaodan/logs/batch3-lint.log) · [门禁结果](E:/xiaodan/logs/batch3-slopguard.log)
+- 初跑的审计测试未配置临时审计库，补齐 fixture 后通过。门禁初检报告 `tools.py` 的两条未用导入和原 WeatherTool 异常链，经授权修正后通过。[初跑](E:/xiaodan/logs/batch3-pytest-initial.log) · [门禁初检](E:/xiaodan/logs/batch3-slopguard-initial.log)
+- `web_search` 默认关闭，按用户确认保留 `read` 权限。DeepSeek 对成功且有结果的独立搜索请求计费。工具 Schema 保留 200 字符上限，发请求前按上游 128 字符限制校验，超长查询返回 422。Key 只从服务端配置读取，复用主接口 Key 时校验主机名。测试使用 HTTP mock，未用真实 Key 发请求，外网搜索待配置后实测。[DeepSeek 搜索 API](https://api-docs.deepseek.com/zh-cn/api/search/) · [搜索计费规则](https://api-docs.deepseek.com/zh-cn/guides/search/)
+
 ## Batch 2 实时语音降本与稳定性（2026-11-24）
 
 - Windows `E:\xiaodan`，基于 `416455f`，Python 3.12.0。指定的实时语音失败、语音兼容、网关追踪和桌面桥接回归共 52 项通过（含 6 项新增测试），2 个子测试通过，0 项跳过，1 条 Starlette 弃用警告。增量 Lint 新增问题为 0。SlopGuard 通过，跳过 Pyright 和 Semgrep，其中 Pyright 已由增量 Lint 执行。[回归输出](E:/xiaodan/logs/batch2-pytest.log) · [增量 Lint](E:/xiaodan/logs/batch2-lint.log) · [门禁结果](E:/xiaodan/logs/batch2-slopguard.log)
