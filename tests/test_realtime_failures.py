@@ -2,23 +2,36 @@
 import asyncio
 import json
 import unittest
+from tempfile import TemporaryDirectory
+from pathlib import Path
 from time import monotonic
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 from pydantic import SecretStr
 
 from websockets.exceptions import ConnectionClosedOK
 
+from backend.app.config import Settings
 from backend.app.device_realtime import DeviceRealtime
+from backend.app.history_store import HistoryStore
+from backend.app.llm import ProviderError
 from backend.app.order_confirmation import RealtimeOrderGuard
 from backend.app.realtime import RealtimeTurn
+from backend.app.service import ChatService
+from backend.app.silence_gate import SilenceGate
+from backend.app.tools import PERSONAL_KB_SPEC, WEATHER_SPEC, ToolRegistry, ToolSpec
 
 
 class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
     def make_turn(self):
         turn = RealtimeTurn.__new__(RealtimeTurn)
         turn.turn_id = uuid4()
+        turn.turns_in_ws = 0
+        turn.continuous = False
+        turn.manual = False
+        turn.source = "device_voice"
+        turn._defer_response = False
         turn.ws = SimpleNamespace(
             recv=AsyncMock(side_effect=[json.dumps({
                 "type": "conversation.item.input_audio_transcription.completed",
@@ -150,7 +163,11 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
     def make_bridge(self):
         bridge = DeviceRealtime.__new__(DeviceRealtime)
         bridge.conn = SimpleNamespace(frames_dropped=0, send=AsyncMock(), ws=SimpleNamespace(close=AsyncMock()))
+        bridge._closed = False
+        bridge._rotate_pending = bridge._rotating = bridge._idle_reconnect_used = False
+        bridge.silence_gate = SilenceGate(enabled=False)
         bridge.turn = SimpleNamespace(
+            continuous=False, saved=False,
             ws=object(), reader=SimpleNamespace(done=lambda: False),
             turn_id=uuid4(), input_closed=False,
             append=AsyncMock(side_effect=ConnectionClosedOK(None, None)),
@@ -258,6 +275,261 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
         bridge.conn.ws.close.assert_not_awaited()
         bridge.stop_audio.assert_awaited_once_with(interrupt=True)
         bridge.show_text.assert_awaited_once_with(bridge.hub.last_error)
+
+
+class _RealtimeSocket:
+    def __init__(self):
+        self.incoming = asyncio.Queue()
+        self.outgoing = asyncio.Queue()
+        self.sent = []
+        self.close = AsyncMock()
+        self.feed("session.created")
+        self.feed("session.updated")
+
+    def feed(self, kind, **fields):
+        self.incoming.put_nowait(json.dumps({"type": kind, **fields}))
+
+    async def recv(self):
+        event = await self.incoming.get()
+        if isinstance(event, Exception):
+            raise event
+        return event
+
+    async def send(self, raw):
+        event = json.loads(raw)
+        self.sent.append(event)
+        self.outgoing.put_nowait(event)
+
+    async def wait_for_send(self, kind):
+        async with asyncio.timeout(1):
+            while True:
+                event = await self.outgoing.get()
+                if event["type"] == kind:
+                    return event
+
+    def finish_turn(self, item_id, reply):
+        self.feed("input_audio_buffer.speech_started", item_id=item_id)
+        self.feed("conversation.item.input_audio_transcription.completed", item_id=item_id, transcript=f"问题 {item_id}")
+        self.feed("response.text.delta", delta=reply)
+        self.feed("response.done", response={"id": f"reply-{item_id}", "status": "completed"})
+
+
+class RealtimeBatch2(unittest.IsolatedAsyncioTestCase):
+    def make_service(self, history=None, **settings):
+        cfg = Settings(_env_file=None, rt_api_key="test-key", usage_log_path=None, **settings)
+        return ChatService(cfg, None, history_store=history)
+
+    def make_bridge(self, service, manual=False):
+        conn = SimpleNamespace(
+            voice_session_id=None, client_aec=True, frames_dropped=0,
+            send=AsyncMock(), ws=SimpleNamespace(close=AsyncMock()),
+        )
+        hub = SimpleNamespace(voice=SimpleNamespace(service=service), now=monotonic, last_realtime_latency=None)
+        codec = SimpleNamespace(decode=lambda packet: packet, encode=Mock(return_value=[]), pending=[], close=Mock())
+        with patch("backend.app.device_realtime.DeviceCodec", return_value=codec):
+            bridge = DeviceRealtime(hub, conn, manual)
+        bridge._write_metrics = Mock()
+        return bridge
+
+    def make_tool_turn(self, **settings):
+        service = self.make_service(**settings)
+        names = {"get_weather", "search_m5stack", "search_personal_knowledge", "get_device_status",
+                 "search_conversation_history", "desktop_list_nodes"}
+        service.tools = ToolRegistry([
+            SimpleNamespace(spec=spec) for spec in (WEATHER_SPEC, PERSONAL_KB_SPEC)
+        ] + [
+            SimpleNamespace(spec=ToolSpec(name, name, {"type": "object", "properties": {}}))
+            for name in sorted(names - {WEATHER_SPEC.name, PERSONAL_KB_SPEC.name})
+        ])
+        turn = RealtimeTurn(service, None, "web_voice", AsyncMock(), False)
+        return turn, names
+
+    def test_silence_gate_preroll_hangover_reset_and_bypass(self):
+        gate = SilenceGate(hangover_frames=2, preroll_frames=2)
+        for packet in (b"noise 1", b"noise 2", b"noise 3"):
+            self.assertEqual(gate.process(packet, 20), [])
+        self.assertEqual(gate.process(b"voice", 120), [b"noise 2", b"noise 3", b"voice"])
+        self.assertEqual(gate.process(b"tail 1", 20), [b"tail 1"])
+        self.assertEqual(gate.process(b"tail 2", 20), [b"tail 2"])
+        self.assertEqual(gate.process(b"noise 4", 20), [])
+        gate.reset()
+        self.assertEqual(gate.process(b"new voice", 130), [b"new voice"])
+        self.assertEqual((gate.dropped_frames, gate.passed_frames), (4, 6))
+        bypass = SilenceGate(enabled=False)
+        self.assertEqual(bypass.process(b"quiet", 0), [b"quiet"])
+        self.assertEqual((bypass.dropped_frames, bypass.passed_frames), (0, 1))
+
+    async def test_device_silence_gate_counts_drops_and_manual_is_passthrough(self):
+        service = self.make_service()
+        packet = bytes(32)
+        for manual in (False, True):
+            with self.subTest(manual=manual):
+                bridge = self.make_bridge(service, manual=manual)
+                bridge.turn.ws = object()
+                bridge.turn.reader = SimpleNamespace(done=lambda: False)
+                bridge.turn.append = AsyncMock()
+                await bridge.append(packet)
+                metrics = bridge.publish_metrics(force=True)
+                self.assertEqual(metrics["uplink_silence_dropped"], int(not manual))
+                self.assertEqual(metrics["uplink_silence_passed"], int(manual))
+                if manual:
+                    bridge.turn.append.assert_awaited_once_with(packet)
+                else:
+                    bridge.turn.append.assert_not_awaited()
+
+    async def test_continuous_rotation_persists_then_drains_and_recovers_idle_socket(self):
+        with TemporaryDirectory() as directory:
+            history = HistoryStore(Path(directory) / "history.sqlite3")
+            service = self.make_service(history, rt_max_continuous_turns=2, rt_max_continuous_seconds=0)
+            bridge = self.make_bridge(service)
+            old_turn = bridge.turn
+            old_socket, rotated_socket, recovered_socket = (_RealtimeSocket() for _ in range(3))
+            initial_ready, rotate_requested, release_playback = (asyncio.Event() for _ in range(3))
+            completed = []
+            emit = bridge.emit
+
+            async def observe_old_events(kind, data):
+                if kind == "done":
+                    completed.append(data)
+                    if len(completed) == 2:
+                        bridge.speaking = True
+                        bridge.controller.wait_finished = AsyncMock(side_effect=release_playback.wait)
+                await emit(kind, data)
+                if kind == "ready":
+                    initial_ready.set()
+                elif kind == "rotate_session":
+                    self.assertEqual(data["turns"], 2)
+                    rotate_requested.set()
+
+            old_turn.emit = observe_old_events
+            connect = AsyncMock(side_effect=[old_socket, rotated_socket, recovered_socket])
+            disconnect = ConnectionClosedOK(None, None)
+            with patch("backend.app.realtime.DirectConnect", connect):
+                bridge.start()
+                try:
+                    await asyncio.wait_for(initial_ready.wait(), 1)
+                    old_socket.finish_turn("one", "第一轮")
+                    old_socket.finish_turn("two", "第二轮")
+                    await asyncio.wait_for(rotate_requested.wait(), 1)
+                    await asyncio.wait_for(old_turn.reader, 1)
+                    self.assertEqual(connect.await_count, 1)
+                    snapshot = history.get(old_turn.sid)
+                    self.assertEqual([msg.content for msg in snapshot.messages],
+                                     ["问题 one", "第一轮", "问题 two", "第二轮"])
+                    self.assertTrue(snapshot.history_persisted)
+                    bridge.conn.send.assert_any_await({"type": "ui", "state": "listening"})
+                    self.assertNotIn({"type": "tts", "state": "stop"}, [c.args[0] for c in bridge.conn.send.await_args_list])
+                    bridge.queue_audio(b"\x40\x01" * 16)
+                    await asyncio.sleep(0.03)
+                    self.assertFalse(bridge.input_task.done())
+                    release_playback.set()
+                    await asyncio.wait_for(bridge.drain, 1)
+                    self.assertIsNot(bridge.turn, old_turn)
+                    self.assertEqual([c.args[0] for c in bridge.conn.send.await_args_list].count(
+                        {"type": "tts", "state": "stop"}), 1)
+                    self.assertEqual(bridge.turn.sid, old_turn.sid)
+                    self.assertTrue(bridge.turn.saved)
+                    self.assertEqual(bridge.metrics_turn_id, str(bridge.turn.turn_id))
+                    self.assertEqual([x["item"]["content"][0]["text"] for x in rotated_socket.sent
+                                      if x["type"] == "conversation.item.create"],
+                                     ["问题 one", "第一轮", "问题 two", "第二轮"])
+                    self.assertFalse(bridge.input_task.done())
+                    bridge.queue_audio(b"\x40\x01" * 16)
+                    await rotated_socket.wait_for_send("input_audio_buffer.append")
+                    rotated_socket.finish_turn("three", "第三轮")
+                    rotated_socket.incoming.put_nowait(disconnect)
+                    await asyncio.wait_for(bridge.turn.reader, 1)
+                    await asyncio.wait_for(bridge._rotate_task, 1)
+                    self.assertEqual(connect.await_count, 3)
+                    self.assertTrue(bridge._idle_reconnect_used)
+                    self.assertEqual(bridge.turn.sid, old_turn.sid)
+                    self.assertTrue(bridge.turn.saved)
+                    self.assertTrue(all(call.args == connect.await_args_list[0].args
+                                        and call.kwargs == connect.await_args_list[0].kwargs
+                                        for call in connect.await_args_list))
+                    bridge.conn.ws.close.assert_not_awaited()
+                    self.assertNotIn({"type": "ui", "state": "sleep"}, [c.args[0] for c in bridge.conn.send.await_args_list])
+                finally:
+                    await bridge.close()
+
+    async def test_deferred_voice_tools_wait_for_the_matching_turn_update(self):
+        turn, _ = self.make_tool_turn(rt_defer_response_until_transcript=True)
+        turn.continuous = True
+        ws = _RealtimeSocket()
+        with patch("backend.app.realtime.DirectConnect", AsyncMock(return_value=ws)):
+            await turn.open()
+        try:
+            initial = (await ws.wait_for_send("session.update"))["session"]
+            self.assertEqual(initial["turn_detection"],
+                             {"type": "server_vad", "create_response": False, "interrupt_response": True})
+            self.assertEqual(initial["tools"], [])
+            ws.feed("input_audio_buffer.speech_started", item_id="first")
+            ws.feed("conversation.item.input_audio_transcription.completed", item_id="first", transcript="明天天气")
+            update = (await ws.wait_for_send("session.update"))["session"]
+            self.assertEqual({tool["function"]["name"] for tool in update["tools"]},
+                             {"get_weather", "_load_task_tools"})
+            self.assertIn("未加载不等于没有能力", update["instructions"])
+            self.assertNotIn("response.create", [msg["type"] for msg in ws.sent])
+            ws.feed("session.updated")
+            await ws.wait_for_send("response.create")
+
+            for item_id in ("old", "new"):
+                ws.feed("input_audio_buffer.speech_started", item_id=item_id)
+                ws.feed("conversation.item.input_audio_transcription.completed", item_id=item_id, transcript="查引脚")
+                await ws.wait_for_send("session.update")
+            ws.feed("session.updated")
+            handled_old_ack = asyncio.Event()
+
+            async def mark_thinking(kind, _):
+                if kind == "thinking":
+                    handled_old_ack.set()
+
+            turn.emit.side_effect = mark_thinking
+            ws.feed("input_audio_buffer.speech_stopped")
+            await asyncio.wait_for(handled_old_ack.wait(), 1)
+            self.assertEqual(sum(msg["type"] == "response.create" for msg in ws.sent), 1)
+            ws.feed("session.updated")
+            await ws.wait_for_send("response.create")
+            self.assertEqual(sum(msg["type"] == "response.create" for msg in ws.sent), 2)
+        finally:
+            await turn.close()
+
+    async def test_default_vad_still_sends_all_tools_in_handshake(self):
+        turn, names = self.make_tool_turn()
+        ws = _RealtimeSocket()
+        with patch("backend.app.realtime.DirectConnect", AsyncMock(return_value=ws)):
+            await turn.open()
+        try:
+            initial = (await ws.wait_for_send("session.update"))["session"]
+            self.assertEqual(initial["turn_detection"], {"type": "server_vad"})
+            self.assertEqual({tool["function"]["name"] for tool in initial["tools"]}, names)
+        finally:
+            await turn.close()
+
+    async def test_handshake_retries_once_and_exposes_final_provider_error(self):
+        service = self.make_service()
+        first = _RealtimeSocket()
+        first.incoming = asyncio.Queue()
+        first.feed("session.created")
+        first.incoming.put_nowait(OSError("handshake interrupted"))
+        good = _RealtimeSocket()
+        connect = AsyncMock(side_effect=[first, good])
+        turn = RealtimeTurn(service, None, "device_voice", AsyncMock(), False)
+        with patch("backend.app.realtime.DirectConnect", connect):
+            await turn.open()
+        try:
+            self.assertEqual(connect.await_count, 2)
+            self.assertIs(turn.ws, good)
+            first.close.assert_awaited_once()
+        finally:
+            await turn.close()
+
+        turn = RealtimeTurn(service, None, "device_voice", AsyncMock(), False)
+        connect = AsyncMock(side_effect=OSError("unreachable"))
+        with patch("backend.app.realtime.DirectConnect", connect), self.assertRaises(ProviderError) as error:
+            await turn.open()
+        self.assertEqual((error.exception.status, error.exception.code), (502, "realtime_connect"))
+        self.assertEqual(connect.await_count, 2)
 
 
 if __name__ == "__main__":

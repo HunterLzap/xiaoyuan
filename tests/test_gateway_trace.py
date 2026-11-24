@@ -282,7 +282,7 @@ def test_unified_traces_and_sqlite_business_state(tmp_path, monkeypatch):
                 await asyncio.gather(*list(app.state.service.audit_tasks), return_exceptions=True)
             return rt.turn_id
 
-        rt_turn_id = asyncio.run(_persist_realtime())
+        rt_turn_id = client.portal.call(_persist_realtime)
 
         traces_res = client.get("/api/insights/traces")
         assert traces_res.status_code == 200

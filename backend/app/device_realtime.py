@@ -16,6 +16,7 @@ from .community import AudioRateController
 from .config import ROOT
 from .llm import ProviderError
 from .realtime import RealtimeTurn
+from .silence_gate import SilenceGate
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,17 @@ class DeviceRealtime:
         self._rx_diag_last_log = monotonic()
         self.turn = RealtimeTurn(hub.voice.service,conn.voice_session_id,"device_voice",self.emit,manual)
         self.turn.continuous = self.client_aec and not manual
+        self._rotate_pending: bool = False
+        self._rotating: bool = False
+        self._rotate_lock = asyncio.Lock()
+        self._rotate_task: asyncio.Task | None = None
+        self._idle_reconnect_used: bool = False
+        self._closed = False
+        settings = hub.voice.service.settings
+        self.silence_gate = SilenceGate(
+            enabled=bool(getattr(settings, "rt_silence_gate_enabled", True)) and not manual,
+            rms_threshold=float(getattr(settings, "rt_silence_gate_rms", 120.0)),
+        )
         self.metrics_turn_id = str(self.turn.turn_id)
         self.metrics_session_id = str(self.turn.sid)
         self.metrics_started_at = self.hub.now()
@@ -138,6 +150,9 @@ class DeviceRealtime:
                     return
                 await self.append(packet)
                 if not self.accepting_audio():
+                    if self._rotate_pending or self._rotating:
+                        await asyncio.sleep(0.02)
+                        continue
                     return
         except Exception:
             logger.exception("device_realtime_input_failed turn_id=%s", self.metrics_turn_id)
@@ -157,6 +172,8 @@ class DeviceRealtime:
         return bool(turn.ws and turn.reader is not None and not turn.reader.done())
 
     async def append(self, packet):
+        if self._rotate_pending or self._rotating:
+            return
         if not self.accepting_audio():
             # The turn reader is already gone (a reply finished, or open failed), yet the
             # device may keep streaming before the next listen start. Those frames used to
@@ -180,22 +197,28 @@ class DeviceRealtime:
         if rms > 100:
             self.last_voice_at = now
             self.publish_metrics()
-        started = monotonic()
+        frames_to_send = self.silence_gate.process(pcm, rms)
+        turn = self.turn
         turn_id = self.metrics_turn_id
         try:
-            try:
-                await self.turn.append(pcm)
-            finally:
-                if turn_id == self.metrics_turn_id:
-                    elapsed_ms = (monotonic() - started) * 1000
-                    self.uplink_frames += 1
-                    self.max_uplink_send_ms = max(self.max_uplink_send_ms, round(elapsed_ms))
-                    if elapsed_ms > FRAME_MS:
-                        self.uplink_stalls += 1
-                        logger.warning("device_upstream_send_slow turn_id=%s duration_ms=%s",
-                                       turn_id, round(elapsed_ms))
+            for frame_pcm in frames_to_send:
+                if self._rotate_pending or self._rotating or turn is not self.turn:
+                    return
+                started = monotonic()
+                try:
+                    await turn.append(frame_pcm)
+                finally:
+                    if turn_id == self.metrics_turn_id:
+                        elapsed_ms = (monotonic() - started) * 1000
+                        self.uplink_frames += 1
+                        self.max_uplink_send_ms = max(self.max_uplink_send_ms, round(elapsed_ms))
+                        if elapsed_ms > FRAME_MS:
+                            self.uplink_stalls += 1
+                            logger.warning("device_upstream_send_slow turn_id=%s duration_ms=%s",
+                                           turn_id, round(elapsed_ms))
         except ConnectionClosed:
-            await self._upstream_closed()
+            if turn is self.turn and not (self._rotate_pending or self._rotating):
+                await self._upstream_closed()
 
     async def finish(self):
         try:
@@ -204,11 +227,59 @@ class DeviceRealtime:
             await self._upstream_closed()
 
     async def _upstream_closed(self):
-        # Only called for provider sends, never for the device WebSocket transport.
-        logger.exception("device_realtime_upstream_closed turn_id=%s", self.turn.turn_id)
-        self.turn.input_closed = True
-        await self.turn.close()
+        turn = self.turn
+        logger.exception("device_realtime_upstream_closed turn_id=%s", turn.turn_id)
+        if self._closed or self._rotate_pending or self._rotating:
+            return
+        if turn.continuous and turn.saved and not self.speaking and not self._idle_reconnect_used:
+            self._idle_reconnect_used = True
+            self._rotate_pending = True
+            if self.drain is not None and not self.drain.done():
+                return
+            if turn.reader is asyncio.current_task():
+                self._schedule_rotate()
+            else:
+                await self._rotate_turn()
+            return
+        turn.input_closed = True
+        await turn.close()
         await self.emit("error", "百炼实时连接已关闭，请重新发起对话。")
+
+    def _schedule_rotate(self) -> None:
+        if self._rotate_task is None or self._rotate_task.done():
+            self._rotate_task = asyncio.create_task(self._rotate_turn())
+
+    async def _rotate_turn(self) -> None:
+        async with self._rotate_lock:
+            if not self._rotate_pending or self._closed:
+                return
+            self._rotate_pending = False
+            self._rotating = True
+            old_turn = self.turn
+            new_turn = None
+            try:
+                if old_turn.input_closed and old_turn.reader is not None:
+                    # Let receive() release the conversation before opening its replacement.
+                    await asyncio.shield(old_turn.reader)
+                await old_turn.close()
+                new_turn = RealtimeTurn(
+                    self.hub.voice.service, self.conn.voice_session_id, "device_voice", self.emit, False,
+                    config=old_turn.config,
+                )
+                new_turn.continuous = self.client_aec
+                new_turn.saved = True  # The resumed connection starts between completed turns.
+                await new_turn.open()
+                if not self._closed:
+                    self.turn = new_turn
+                    self._reset_turn_metrics()
+                    self.silence_gate.reset()
+            except ProviderError:
+                if not self._closed:
+                    await self.emit("error", "百炼实时会话续接失败，请重新发起对话。")
+            finally:
+                self._rotating = False
+                if new_turn is not None and self.turn is not new_turn:
+                    await new_turn.close()
 
     def publish_metrics(self, force=False):
         # A turn that never heard speech and produced no audio must not overwrite the last
@@ -237,6 +308,8 @@ class DeviceRealtime:
             "continuous": self.turn.continuous,
             "frames_dropped_after_turn": self.frames_dropped_after_turn,
             "uplink_frames": self.uplink_frames,
+            "uplink_silence_dropped": self.silence_gate.dropped_frames,
+            "uplink_silence_passed": self.silence_gate.passed_frames,
             "uplink_stalls": self.uplink_stalls,
             "max_uplink_send_ms": self.max_uplink_send_ms,
             "uplink_queue_dropped": self.uplink_queue_dropped,
@@ -502,6 +575,41 @@ class DeviceRealtime:
         await self.stop_audio(interrupt=interrupt)
         self.controller = AudioRateController(frame_duration=60)
 
+    def _reset_turn_metrics(self):
+        self.first_audio_at = None
+        self.first_packet_at = None
+        self.tts_started_at = None
+        self.done_at = None
+        self.outbound_starvations = 0
+        self.max_send_gap_ms = 0
+        self.max_send_gap_at = None
+        self.last_voice_at = None
+        self.speech_stopped_at = None
+        self.starvation_total_ms = 0
+        self.gap_phases = {"ack": 0, "answer": 0, "ack_to_answer": 0}
+        self.ack_end_at = None
+        self.answer_first_packet_at = None
+        self.answer_first_audio_at = None
+        self.ack_first_packet_at = None
+        self.ack_cache_hits = 0
+        self.ack_cache_misses = 0
+        self.max_send_duration_ms = 0
+        self.queue_exhaustions = 0
+        self.playback_metrics = PlaybackMetrics()
+        self.turn.audio.metrics.reset()
+        self.metrics_finalized = False
+        self._last_text = None
+        self.metrics_turn_id = str(self.turn.turn_id)
+        self.metrics_session_id = str(self.turn.sid)
+        self.metrics_started_at = self.hub.now()
+        self.metrics_recorded = False
+        self.frames_dropped_after_turn = 0
+        self.uplink_frames = 0
+        self.uplink_stalls = 0
+        self.max_uplink_send_ms = 0
+        self.uplink_queue_dropped = 0
+        self.max_uplink_queue_ms = 0
+
     async def emit(self,kind,data):
         conn = self.conn
         if kind in {"notice", "interrupt", "done", "next", "error"}:
@@ -513,39 +621,7 @@ class DeviceRealtime:
             await self.prepare_playback(interrupt=True)
             await conn.send({"type": "ui", "state": "cancel" if interrupted_playback else "listening"})
             await self._archive_metrics("interrupted" if not self.metrics_finalized else "complete")
-            self.first_audio_at = None
-            self.first_packet_at = None
-            self.tts_started_at = None
-            self.done_at = None
-            self.outbound_starvations = 0
-            self.max_send_gap_ms = 0
-            self.max_send_gap_at = None
-            self.last_voice_at = None
-            self.speech_stopped_at = None
-            self.starvation_total_ms = 0
-            self.gap_phases = {"ack": 0, "answer": 0, "ack_to_answer": 0}
-            self.ack_end_at = None
-            self.answer_first_packet_at = None
-            self.answer_first_audio_at = None
-            self.ack_first_packet_at = None
-            self.ack_cache_hits = 0
-            self.ack_cache_misses = 0
-            self.max_send_duration_ms = 0
-            self.queue_exhaustions = 0
-            self.playback_metrics = PlaybackMetrics()
-            self.turn.audio.metrics.reset()
-            self.metrics_finalized = False
-            self._last_text = None
-            self.metrics_turn_id = str(self.turn.turn_id)
-            self.metrics_session_id = str(self.turn.sid)
-            self.metrics_started_at = self.hub.now()
-            self.metrics_recorded = False
-            self.frames_dropped_after_turn = 0
-            self.uplink_frames = 0
-            self.uplink_stalls = 0
-            self.max_uplink_send_ms = 0
-            self.uplink_queue_dropped = 0
-            self.max_uplink_queue_ms = 0
+            self._reset_turn_metrics()
         elif kind == "idle":
             conn.voice_session_id = None
             conn.close_after_chat = True
@@ -592,7 +668,14 @@ class DeviceRealtime:
             self.playback_metrics.arrival("answer", len(pcm))
             chunk = list(self.codec.encode(pcm))
             await self._queue_frames(chunk, "answer")
+        elif kind == "rotate_session":
+            self._rotate_pending = True
+            if not self.speaking and (self.drain is None or self.drain.done()):
+                self._schedule_rotate()
+        elif kind == "upstream_closed":
+            await self._upstream_closed()
         elif kind=="done":
+            self._idle_reconnect_used = False
             self.done_at = monotonic()
             self.publish_metrics()
             text_only = isinstance(data, dict) and data.get("audio_status") == "text_only"
@@ -623,6 +706,8 @@ class DeviceRealtime:
                         self._finish_metrics()
                         await self.stop_audio()
                         await self._archive_metrics("complete")
+                        if self._rotate_pending and epoch + 1 == self.stream_epoch:
+                            await self._rotate_turn()
                 if self.turn.continuous:
                     self.drain = asyncio.create_task(drain())
                 else:
@@ -659,7 +744,9 @@ class DeviceRealtime:
         sender = controller.pending_send_task
         controller.reset()
         self.codec.pending.clear()
-        drain, self.drain = self.drain, None
+        drain = self.drain
+        if drain is not asyncio.current_task():
+            self.drain = None
         tasks = [task for task in (timer, drain, sender)
                  if task is not None and task is not asyncio.current_task()]
         for task in tasks:
@@ -675,6 +762,10 @@ class DeviceRealtime:
             await self.conn.send(payload)
 
     async def close(self):
+        self._closed = True
+        if self._rotate_task is not None and not self._rotate_task.done():
+            self._rotate_task.cancel()
+            await asyncio.gather(self._rotate_task, return_exceptions=True)
         if self.input_task is not None:
             self.input_task.cancel()
             await asyncio.gather(self.input_task, return_exceptions=True)

@@ -2,6 +2,12 @@
 
 更新时间：2026-11-24。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
+## Batch 2 实时语音降本与稳定性（2026-11-24）
+
+- Windows `E:\xiaodan`，基于 `416455f`，Python 3.12.0。指定的实时语音失败、语音兼容、网关追踪和桌面桥接回归共 52 项通过（含 6 项新增测试），2 个子测试通过，0 项跳过，1 条 Starlette 弃用警告。增量 Lint 新增问题为 0。SlopGuard 通过，跳过 Pyright 和 Semgrep，其中 Pyright 已由增量 Lint 执行。[回归输出](E:/xiaodan/logs/batch2-pytest.log) · [增量 Lint](E:/xiaodan/logs/batch2-lint.log) · [门禁结果](E:/xiaodan/logs/batch2-slopguard.log)
+- 初跑的选工具测试替身缺少天气和知识库的真实参数定义，改用现有定义后通过。次跑遇到网关追踪旧用例跨事件循环等待，获准将该调用改到 TestClient 所在循环并保留断言。[初跑](E:/xiaodan/logs/batch2-pytest-initial.log) · [次跑](E:/xiaodan/logs/batch2-pytest-second.log)
+- 本地覆盖会话落盘后等播放收尾再轮换、设备收音任务跨轮换保活、空闲断连重建、静音帧门控、转写确认及迟到事件隔离。云端尚未部署，待真机真实音频验证，尤其是 `AI_RT_DEFER_RESPONSE_UNTIL_TRANSCRIPT=true`、120 RMS 门限和实际百炼确认时序。实际 Token 节省与听感仍待测。
+
 ## Batch 1 后端存储与桌面操控（2026-11-24）
 
 - Windows `E:\xiaodan`，基于 `29f9a15`，Python 3.12.0。桌面桥接、网关追踪、个人知识库隔离和实时语音失败回归共 38 项通过（含 5 项新增测试），0 项跳过，1 条 Starlette 弃用警告。[测试输出](E:/xiaodan/logs/batch1-pytest.log)

@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     rt_voice: str = Field(default="Tina", min_length=1, max_length=80)
     rt_asr_model: str = Field(default="whisper-1", max_length=200)
     rt_api_key: SecretStr = SecretStr("")
+    rt_max_continuous_turns: int = Field(default=6, ge=0, le=50)
+    rt_max_continuous_seconds: int = Field(default=600, ge=0, le=3600)
+    rt_silence_gate_enabled: bool = True
+    rt_silence_gate_rms: float = Field(default=120.0, ge=10.0, le=3000.0)
+    rt_defer_response_until_transcript: bool = False
     asr_provider: Literal["openai", "bailian", "local"] = "openai"
     asr_base_url: str = Field(default="", max_length=500)
     asr_api_key: SecretStr = SecretStr("")
