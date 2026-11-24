@@ -206,7 +206,7 @@ class ChatService:
                 session.updated_at = datetime.now(timezone.utc)
                 turns = self.settings.history_turns if history_turns is None else history_turns
                 self.rebuild_context(session, turns)
-                self.persist(session_id)
+                await self._persist_async(session_id)
                 saved = True
         if tool_context is not None:
             tool_context.question = user_text
@@ -363,6 +363,18 @@ class ChatService:
             session.history_persisted = False
             logger.warning("会话仅保留在内存：无法写入本机历史记录。")
 
+    async def _persist_async(self, session_id: UUID) -> None:
+        session = self.sessions[session_id]
+        if self.history_store is None:
+            return
+        session.history_persisted = True
+        try:
+            snapshot = self.session_detail(session_id)
+            await asyncio.to_thread(self.history_store.save, snapshot)
+        except (sqlite3.Error, OSError):
+            session.history_persisted = False
+            logger.warning("会话仅保留在内存：无法写入本机历史记录。")
+
     async def rename_session(self, session_id: UUID, title: str) -> SessionSummary:
         session = self.get_session(session_id)
         async with session.lock:
@@ -415,7 +427,7 @@ class ChatService:
                     if message.audio_status in {"failed", "interrupted"} and state == "played":
                         return
                     message.audio_status = state
-                    self.persist(session_id)
+                    await self._persist_async(session_id)
                     return
 
     async def close(self) -> None:
@@ -565,7 +577,7 @@ class ChatService:
                 session.title = request.message[:40]
             session.history.append(question)
             session.updated_at = datetime.now(timezone.utc)
-            self.persist(session_id)
+            await self._persist_async(session_id)
             session.active_task = asyncio.current_task()
             session.active_turn_id = identity
             if using_shared_provider:
@@ -630,7 +642,7 @@ class ChatService:
                         answer.pending_approval = tool_context.pending_approval
                         self._sync_approval_statuses(session)
                         session.updated_at = datetime.now(timezone.utc)
-                        self.persist(session_id)
+                        await self._persist_async(session_id)
                     elif kind == "warning":
                         answer.audio_status = "failed"
                     yield kind, payload
@@ -676,7 +688,7 @@ class ChatService:
                 self._sync_approval_statuses(session)
                 self.rebuild_context(session, self.settings.history_turns)
                 session.updated_at = datetime.now(timezone.utc)
-                self.persist(session_id)
+                await self._persist_async(session_id)
                 model_success = core.llm_complete and bool(core.reply)
                 results = tool_provider.results if tool_provider and tool_provider.results else [core.result]
                 for index, result in enumerate(results):
@@ -747,7 +759,7 @@ class ChatService:
                 raise ProviderError(404, "session_not_found", "会话不存在。")
             if self.history_store is not None:
                 try:
-                    self.history_store.delete(session_id)
+                    await asyncio.to_thread(self.history_store.delete, session_id)
                 except (sqlite3.Error, OSError):
                     raise ProviderError(500, "history_delete_failed", "无法删除本机会话记录；请检查文件权限后重试。") from None
             del self.sessions[session_id]

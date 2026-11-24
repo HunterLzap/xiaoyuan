@@ -1,5 +1,5 @@
 """Single local SQLite file; each complete conversation snapshot is atomic."""
-from contextlib import closing
+from contextlib import closing, suppress
 from pathlib import Path
 import json
 import sqlite3
@@ -12,14 +12,21 @@ class HistoryStore:
     def __init__(self, path: Path):
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(sqlite3.connect(path)) as connection, connection:
+        with closing(self._connect()) as connection, connection:
+            with suppress(sqlite3.OperationalError):
+                connection.execute("PRAGMA journal_mode=WAL;")
             connection.execute("""CREATE TABLE IF NOT EXISTS conversations (
                 session_id TEXT PRIMARY KEY,
                 snapshot TEXT NOT NULL
             )""")
 
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=10)
+        connection.execute("PRAGMA busy_timeout=10000;")
+        return connection
+
     def load(self) -> list[SessionDetail]:
-        with closing(sqlite3.connect(self.path)) as connection:
+        with closing(self._connect()) as connection:
             rows = connection.execute("SELECT snapshot FROM conversations").fetchall()
         try:
             return [SessionDetail.model_validate_json(row[0]) for row in rows]
@@ -27,7 +34,7 @@ class HistoryStore:
             raise RuntimeError("本机会话记录格式损坏；请备份 data/conversations.sqlite3 后修复，未自动清空。") from None
 
     def get(self, session_id: UUID) -> SessionDetail | None:
-        with closing(sqlite3.connect(self.path)) as connection:
+        with closing(self._connect()) as connection:
             row = connection.execute(
                 "SELECT snapshot FROM conversations WHERE session_id=?", (str(session_id),),
             ).fetchone()
@@ -61,7 +68,7 @@ class HistoryStore:
                  SELECT session_id,title,created_at,updated_at,message_count,history_persisted
                  FROM entries WHERE instr(lower(title), lower(?)) > 0
                  ORDER BY updated_at DESC, session_id DESC LIMIT ? OFFSET ?"""
-        with closing(sqlite3.connect(self.path)) as connection:
+        with closing(self._connect()) as connection:
             rows = connection.execute(sql, (cached, q.strip(), limit if limit is not None else -1, offset)).fetchall()
         return [SessionSummary(
             session_id=row[0], title=row[1], created_at=row[2], updated_at=row[3],
@@ -69,11 +76,11 @@ class HistoryStore:
         ) for row in rows]
 
     def save(self, conversation: SessionDetail) -> None:
-        with closing(sqlite3.connect(self.path)) as connection, connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("""INSERT INTO conversations(session_id, snapshot) VALUES (?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET snapshot=excluded.snapshot""",
                 (str(conversation.session_id), conversation.model_dump_json()))
 
     def delete(self, session_id: UUID) -> None:
-        with closing(sqlite3.connect(self.path)) as connection, connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("DELETE FROM conversations WHERE session_id=?", (str(session_id),))

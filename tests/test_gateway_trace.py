@@ -4,13 +4,19 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import sqlite3
+from contextlib import closing
+from threading import get_ident
 from uuid import UUID, uuid4
 import wave
 
 from fastapi.testclient import TestClient
 import pytest
 
+from backend.app.audit_store import AuditStore
 from backend.app.config import Settings
+from backend.app.error_log import ErrorLogStore
+from backend.app.history_store import HistoryStore
 from backend.app.llm import Completion, ProviderError
 from backend.app.main import create_app
 from backend.app.realtime import RealtimeTurn
@@ -309,3 +315,70 @@ def test_unified_traces_and_sqlite_business_state(tmp_path, monkeypatch):
         assert settings2["embedding_enabled"] is False
         assert settings2["weather_enabled"] is False
         assert settings2["selected_tool_ids"] == []
+
+
+def test_sqlite_stores_enable_wal_and_audit_initializes_schema_once(tmp_path, monkeypatch):
+    history_path = tmp_path / "history.sqlite3"
+    errors_path = tmp_path / "errors.sqlite3"
+    audit_path = tmp_path / "audits" / "audit.sqlite3"
+    HistoryStore(history_path)
+    ErrorLogStore(errors_path)
+    audit = AuditStore(audit_path)
+    assert not audit_path.parent.exists()
+
+    connect = sqlite3.connect
+    scripts = []
+
+    class TrackingConnection(sqlite3.Connection):
+        def executescript(self, sql_script):
+            scripts.append(sql_script)
+            return super().executescript(sql_script)
+
+    def connect_tracked(*args, **kwargs):
+        return connect(*args, **kwargs, factory=TrackingConnection)
+
+    monkeypatch.setattr(sqlite3, "connect", connect_tracked)
+    audit.record("tool_call", tool_name="example")
+    assert audit.list_tools()["total"] == 1
+    assert len(scripts) == 1
+    for path in (history_path, errors_path, audit_path):
+        with closing(connect(path)) as connection:
+            assert connection.execute("PRAGMA journal_mode").fetchone() == ("wal",)
+
+
+def test_async_history_persistence_builds_snapshot_before_threaded_save(tmp_path, monkeypatch, caplog):
+    async def scenario():
+        history = HistoryStore(tmp_path / "history.sqlite3")
+        service = ChatService(Settings(_env_file=None, usage_log_path=None), None, history)
+        session_id = service.new_session()
+        session = service.get_session(session_id)
+        loop_thread = get_ident()
+        build_snapshot, save_snapshot = service.session_detail, history.save
+
+        def checked_snapshot(sid):
+            assert get_ident() == loop_thread
+            assert session.lock.locked()
+            return build_snapshot(sid)
+
+        def checked_save(snapshot):
+            assert get_ident() != loop_thread
+            save_snapshot(snapshot)
+
+        def failed_save(snapshot):
+            assert get_ident() != loop_thread
+            raise sqlite3.OperationalError("write failed")
+
+        monkeypatch.setattr(service, "session_detail", checked_snapshot)
+        monkeypatch.setattr(history, "save", checked_save)
+        async with session.lock:
+            await service._persist_async(session_id)
+            assert session.history_persisted is True
+            saved = history.get(session_id)
+            assert saved is not None and saved.session_id == session_id and saved.history_persisted
+
+            monkeypatch.setattr(history, "save", failed_save)
+            await service._persist_async(session_id)
+            assert session.history_persisted is False
+            assert "会话仅保留在内存：无法写入本机历史记录。" in caplog.text
+
+    asyncio.run(scenario())

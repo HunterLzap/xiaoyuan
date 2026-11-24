@@ -27,6 +27,7 @@ from .llm import ProviderError
 logger = logging.getLogger(__name__)
 DESKTOP_WS_MAX_BYTES = 6 * 1024 * 1024
 DESKTOP_RPC_TIMEOUT = 25.0
+_ERROR_LOGGED = "_error_logged"
 SENSITIVE_PATH_PARTS = frozenset({".ssh", ".gnupg", ".aws", ".kube", "keychains"})
 SENSITIVE_FILENAMES = frozenset({
     ".env", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "desktop_nodes.json",
@@ -114,14 +115,19 @@ class DesktopNodeConnection:
             result = await asyncio.wait_for(future, timeout=max(2.0, min(float(timeout), 45.0)))
         except TimeoutError:
             msg = f"电脑节点 {self.name} 执行 {action} 超时。"
+            err = ProviderError(504, "desktop_rpc_timeout", msg)
             self.hub.record_error("desktop_rpc_timeout", msg, detail={"node_id": self.node_id, "action": action})
-            raise ProviderError(504, "desktop_rpc_timeout", msg) from None
+            setattr(err, _ERROR_LOGGED, True)
+            raise err from None
         except (WebSocketDisconnect, ConnectionError, RuntimeError):
             msg = f"电脑节点 {self.name} 连接已断开。"
+            err = ProviderError(502, "desktop_disconnected", msg)
             self.hub.record_error("desktop_disconnected", msg, detail={"node_id": self.node_id, "action": action})
-            raise ProviderError(502, "desktop_disconnected", msg) from None
+            setattr(err, _ERROR_LOGGED, True)
+            raise err from None
         except ProviderError as error:
             self.hub.record_error(error.code, error.message, detail={"node_id": self.node_id, "action": action})
+            setattr(error, _ERROR_LOGGED, True)
             raise
         finally:
             self.pending.pop(req_id, None)
@@ -163,6 +169,9 @@ class DesktopNodeConnection:
             if not future.done():
                 future.set_exception(ProviderError(409, "desktop_disconnected", "电脑节点已断开，操作未确认完成。"))
         self.pending.clear()
+        self.last_screenshot = None
+        self.last_som_screenshot = None
+        self.last_ui_elements.clear()
 
 
 _VISION_BRACKET_RE = re.compile(
@@ -225,6 +234,7 @@ class DesktopHub:
         self.active: dict[str, DesktopNodeConnection] = {}
         self.last_error: str | None = None
         self.error_logger: Callable[..., None] | None = None
+        self._vision_client: httpx.AsyncClient | None = None
         self._load()
 
     def record_error(self, code: str, message: str, *, detail: dict | None = None) -> None:
@@ -409,6 +419,9 @@ class DesktopHub:
             with suppress(Exception):
                 await conn.ws.close(code=1001)
         self.active.clear()
+        if self._vision_client is not None and not self._vision_client.is_closed:
+            await self._vision_client.aclose()
+        self._vision_client = None
 
     async def inspect_screen(
         self,
@@ -460,7 +473,7 @@ class DesktopHub:
                     item["width"] = int(elem["width"])
                     item["height"] = int(elem["height"])
             clean_elements.append(item)
-        conn.last_ui_elements = clean_elements
+        conn.last_ui_elements = clean_elements.copy()
         captured_at = _utc_now()
         if b64:
             with suppress(ValueError, TypeError):
@@ -531,6 +544,11 @@ class DesktopHub:
             return None
         return dict(conn.last_som_screenshot)
 
+    def _get_vision_client(self) -> httpx.AsyncClient:
+        if self._vision_client is None or self._vision_client.is_closed:
+            self._vision_client = httpx.AsyncClient(timeout=25.0, trust_env=False)
+        return self._vision_client
+
     async def _analyze_screenshot(
         self, *, b64: str, mime: str, question: str,
         img_w: int, img_h: int, scr_w: int, scr_h: int, os_name: str,
@@ -579,12 +597,13 @@ class DesktopHub:
             "temperature": 0.1,
         }
         try:
-            async with httpx.AsyncClient(timeout=min(float(settings.timeout_seconds), 25.0)) as client:
-                resp = await client.post(
-                    f"{base_url}/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                    json=payload,
-                )
+            client = self._get_vision_client()
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=min(float(settings.timeout_seconds), 25.0),
+            )
             if resp.status_code >= 400:
                 err_msg = f"当前模型({model})视觉看图返回 HTTP {resp.status_code}，可能不支持图片输入。"
                 self.record_error("desktop_vision_http_error", err_msg, detail={"model": model, "status": resp.status_code})

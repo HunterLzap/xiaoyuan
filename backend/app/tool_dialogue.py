@@ -1003,6 +1003,25 @@ def _prune_prior_desktop_images(messages: list[dict]) -> None:
             }
 
 
+def _prune_prior_desktop_ui_elements(messages: list[dict]) -> None:
+    for msg in messages:
+        content = msg.get("content")
+        if msg.get("role") != "tool" or not isinstance(content, str):
+            continue
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        elements = payload.get("ui_elements")
+        if isinstance(elements, list) and elements:
+            pruned = {key: value for key, value in payload.items() if key != "ui_elements"}
+            pruned["ui_elements_omitted"] = len(elements)
+            pruned["ui_elements_note"] = "已省略更早一轮的控件树，请以最新一次 desktop_inspect_screen 的 ui_elements 为准"
+            msg["content"] = json.dumps(pruned, ensure_ascii=False)
+
+
 def _build_desktop_vision_user_message(frame: dict) -> dict:
     w = frame.get("width") or 0
     h = frame.get("height") or 0
@@ -1109,6 +1128,8 @@ class ToolConversation:
             messages.append({"role": "assistant", "content": text or None, "tool_calls": result.tool_calls})
             pending = []
             round_outputs = []
+            if any(call["function"]["name"] == "desktop_inspect_screen" for call in result.tool_calls):
+                _prune_prior_desktop_ui_elements(messages)
             for call in result.tool_calls:
                 function = call["function"]
                 output = await self.context.execute(function["name"], function["arguments"], call["id"])

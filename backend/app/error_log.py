@@ -46,10 +46,13 @@ class ErrorLogStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout=10000;")
         return conn
 
     def _init_db(self) -> None:
         with self._connect() as conn:
+            with suppress(sqlite3.OperationalError):
+                conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS system_errors (

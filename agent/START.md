@@ -2,6 +2,8 @@
 
 更新：2026-11-24。本文只写当前快照；历史过程与原始证据在 [progress](docs/progress.md)。
 
+- Batch 1 已合入 `main`，包含 SQLite WAL、会话与异常日志异步写盘、桌面视觉连接复用和控件树裁剪、异常日志去重及热备脚本。云端尚未部署，热备待云端启用。
+
 ## Windows SlopGuard 本机配置（2026-11-24）
 
 - Windows 的 SlopGuard 配置、pre-commit 钩子和交付流程在本机维护，本机工作约定见 `AGENTS.local.md`。共享仓库保留桌面权限修复和回归用例。验证记录见 [progress](docs/progress.md#windows-slopguard-门禁本地化2026-11-24)。

@@ -100,7 +100,22 @@ Set-Location E:\xiaodan
 
 完整文字历史、知识库原文/索引、音色元数据与原样本保留；不长期保存聊天录音。数据库迁移/迁移数据使用SQLite备份机制或停写后一致性复制，不能只复制活动库主文件。密钥/NVS/带key地址不入Git、模型或普通日志。
 
-每日独立备份、保留30天是目标，尚无已部署任务/实际恢复证据；目的地待定。本轮不上传数据或创建任务。将来恢复须保护在线数据并处理手动删除语义；同盘副本不冒充独立备份。
+仅本机热备脚本 [deploy/backup_shared.sh](../../deploy/backup_shared.sh) 已入库，尚未在云端部署定时器或配置异地同步，同盘副本不冒充独立备份。脚本默认读取 `/opt/xiaodan/shared`，用 SQLite `.backup` 热备 `data/*.sqlite3`，另存 `data/*.json` 和 `.env`，向 `/opt/xiaodan/backups` 写入时间戳目录并保留 30 天。
+
+手动预览和执行（需要 `sqlite3` 命令）：
+
+```bash
+bash /opt/xiaodan/repo/deploy/backup_shared.sh --dry-run
+bash /opt/xiaodan/repo/deploy/backup_shared.sh
+```
+
+每日 03:00 的 cron 示例（云端本地时间，待启用）：
+
+```cron
+0 3 * * * /usr/bin/bash /opt/xiaodan/repo/deploy/backup_shared.sh
+```
+
+每日独立备份仍待异地目的地和恢复验证。恢复时须保护在线数据并处理手动删除语义。
 
 有下载/安装授权且确有需要时，Windows所有产物留项目内，并显式设置：
 

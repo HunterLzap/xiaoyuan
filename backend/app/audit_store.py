@@ -1,7 +1,7 @@
 import json
 import re
 import sqlite3
-from contextlib import closing
+from contextlib import closing, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -81,13 +81,25 @@ def redact_summary(text):
 class AuditStore:
     def __init__(self, db_path: Path):
         self.db_path = Path(db_path)
+        self._initialized_path: Path | None = None
 
-    def _connect(self):
+    def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        needs_schema = self._initialized_path != self.db_path or not self.db_path.exists()
         connection = sqlite3.connect(self.db_path, timeout=10)
         connection.row_factory = sqlite3.Row
         try:
-            connection.executescript("""
+            connection.execute("PRAGMA busy_timeout=10000;")
+            if needs_schema:
+                self._init_schema(connection)
+                self._initialized_path = self.db_path
+        except Exception:
+            connection.close()
+            raise
+        return connection
+
+    def _init_schema(self, connection: sqlite3.Connection) -> None:
+        connection.executescript("""
                 CREATE TABLE IF NOT EXISTS kb_audit (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, surface TEXT NOT NULL,
                     session_id TEXT, query_summary TEXT NOT NULL DEFAULT '', tool_name TEXT,
@@ -114,10 +126,8 @@ class AuditStore:
                 CREATE INDEX IF NOT EXISTS idx_turn_traces_ts ON turn_traces(ts DESC);
                 CREATE INDEX IF NOT EXISTS idx_audit_details_turn ON kb_audit_details(turn_id);
             """)
-        except Exception:
-            connection.close()
-            raise
-        return connection
+        with suppress(sqlite3.OperationalError):
+            connection.execute("PRAGMA journal_mode=WAL;")
 
     def record(self, surface, *, session_id=None, query_summary="", tool_name=None,
                permission=None, hit=False, top_k=0, sources=None, elapsed_ms=0,

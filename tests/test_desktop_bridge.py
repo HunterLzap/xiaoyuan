@@ -10,12 +10,14 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
+import httpx
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
 from backend.app.config import Settings
 from backend.app.desktop import (
     DesktopHub,
+    DesktopNodeConnection,
     build_desktop_planner_config,
     desktop_planner_uses_direct_vision,
     is_sensitive_path,
@@ -38,6 +40,7 @@ from backend.app.settings_store import SettingsStore
 from backend.app.tools import ToolRegistry
 from backend.app.text_tool_selection import TextToolSelection
 from backend.app.tool_gateway import SideEffectConfirmationStore
+from backend.app.tool_dialogue import ToolConversation
 from desktop_node.client import _describe_rpc_for_hud, _handle_request, default_node_id, execute_rpc
 from desktop_node.platform_base import DesktopAdapter, DesktopRpcError
 from desktop_node.platform_macos import MacOSDesktopAdapter
@@ -609,15 +612,9 @@ def test_realtime_bailian_vision_fallback_and_app_alias(tmp_path, monkeypatch):
 
     class _FakeHttpClient:
         def __init__(self, **kwargs):
-            pass
+            self.is_closed = False
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return False
-
-        async def post(self, url, headers=None, json=None):
+        async def post(self, url, headers=None, json=None, timeout=None):
             captured_requests.append((url, headers, json))
             return SimpleNamespace(
                 status_code=200,
@@ -1518,3 +1515,119 @@ def test_chat_cancel_and_text_stop_intent(tmp_path):
         # Direct /chat/cancel endpoint on explicit unknown/idle session stays safe and well-typed
         res = client.post("/chat/cancel", json={"session_id": sid}, headers=HEADERS)
         assert res.status_code == 200 and res.json()["ok"] is True
+
+
+def test_desktop_tool_rounds_prune_only_prior_ui_elements(tmp_path, monkeypatch):
+    metadata = {
+        "node_id": "node",
+        "active_window": {"title": "窗口"},
+        "screen": {"width": 1280, "height": 720},
+        "captured_at": "2026-11-24T00:00:00Z",
+        "vision_analysis": "窗口说明",
+    }
+    first = {**metadata, "ui_elements": [{"index": 0}, {"index": 1}]}
+    latest = {**metadata, "ui_elements": [{"index": 2}]}
+    results = iter((first, latest))
+    seen = []
+
+    async def inspect_screen(**kwargs):
+        return next(results)
+
+    class Planner:
+        async def complete_stream(self, messages, tools=None):
+            seen.append([json.loads(msg["content"]) for msg in messages if msg["role"] == "tool"])
+            if len(seen) <= 2:
+                yield Completion(None, None, "tool_calls", tool_calls=[{
+                    "id": f"inspect-{len(seen)}",
+                    "type": "function",
+                    "function": {"name": "desktop_inspect_screen", "arguments": "{}"},
+                }])
+            else:
+                yield Completion(None, None, "stop")
+
+    hub = DesktopHub(path=tmp_path / "desktop_nodes.json")
+    monkeypatch.setattr(hub, "inspect_screen", inspect_screen)
+    service = ChatService(_base_settings(tmp_path), None)
+    service.tools = ToolRegistry([DesktopInspectScreenTool(hub)])
+    context = service.tool_context(service.new_session(), uuid4(), "text", "查看电脑屏幕")
+
+    asyncio.run(ToolConversation(Planner(), context).complete([{"role": "user", "content": "查看电脑屏幕"}]))
+
+    assert seen[1] == [first]
+    assert seen[2] == [
+        {
+            **metadata,
+            "ui_elements_omitted": 2,
+            "ui_elements_note": "已省略更早一轮的控件树，请以最新一次 desktop_inspect_screen 的 ui_elements 为准",
+        },
+        latest,
+    ]
+    assert context.outputs["inspect-1"] == first
+    assert context.outputs["inspect-2"] == latest
+
+
+def test_desktop_disconnect_closes_shared_vision_client_and_clears_screen_cache(tmp_path):
+    async def scenario():
+        hub = DesktopHub(path=tmp_path / "desktop_nodes.json")
+        vision_client = hub._get_vision_client()
+        assert isinstance(vision_client, httpx.AsyncClient)
+        assert hub._get_vision_client() is vision_client
+
+        async def close_socket(code):
+            assert code == 1001
+
+        conn = DesktopNodeConnection(
+            ws=SimpleNamespace(close=close_socket), hub=hub, node_id="node", name="PC", os_name="windows",
+            last_screenshot={"bytes": b"raw"}, last_som_screenshot={"data_url": "frame"},
+            last_ui_elements=[{"index": 0}],
+        )
+        hub.active[conn.node_id] = conn
+        await hub.disconnect()
+
+        assert vision_client.is_closed and hub._vision_client is None
+        assert conn.last_screenshot is None
+        assert conn.last_som_screenshot is None
+        assert conn.last_ui_elements == []
+        replacement = hub._get_vision_client()
+        assert replacement is not vision_client and not replacement.is_closed
+        await hub.disconnect()
+
+    asyncio.run(scenario())
+
+
+def test_desktop_rpc_error_is_recorded_once_through_fastapi(tmp_path):
+    hub = DesktopHub(path=tmp_path / "desktop_nodes.json")
+    app = create_app(
+        _base_settings(tmp_path),
+        settings_store=SettingsStore(tmp_path / ".env"),
+        provider_factory=lambda cfg: _ScriptedLLM([]),
+        desktop_hub=hub,
+    )
+
+    async def send_json(message):
+        conn.handle_message({
+            "type": "rpc_response", "request_id": message["request_id"], "ok": False,
+            "error": {"code": "desktop_rpc_failed", "message": "操作失败"},
+        })
+
+    conn = DesktopNodeConnection(
+        ws=SimpleNamespace(send_json=send_json), hub=hub, node_id="node", name="PC", os_name="windows",
+    )
+    errors = []
+
+    @app.get("/test-desktop-rpc")
+    async def invoke_rpc():
+        try:
+            return await conn.rpc("screenshot")
+        except ProviderError as error:
+            errors.append(error)
+            raise
+
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        response = client.get("/test-desktop-rpc")
+        assert response.status_code == 502
+        assert response.json()["detail"]["code"] == "desktop_rpc_failed"
+        rows = app.state.error_log.list(source="desktop")
+        assert rows["total"] == 1
+        assert rows["items"][0]["detail"] == {"node_id": "node", "action": "screenshot"}
+        assert len(errors) == 1 and getattr(errors[0], "_error_logged", False) is True

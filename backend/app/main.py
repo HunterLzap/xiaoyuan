@@ -251,13 +251,17 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     @app.exception_handler(ProviderError)
     async def provider_error_handler(request, error: ProviderError):
         err_log = getattr(app.state, "error_log", None)
-        if err_log is not None and error.status >= 400 and error.code not in {"session_not_found", "tool_not_found", "insight_not_found"}:
+        if (err_log is not None and error.status >= 400
+                and error.code not in {"session_not_found", "tool_not_found", "insight_not_found"}
+                and not getattr(error, "_error_logged", False)):
             src = ("desktop" if error.code.startswith("desktop_")
                    else "device" if error.code.startswith(("device_", "ota_"))
                    else "tool" if error.code.startswith(("tool_", "approval_", "order_"))
                    else "model" if error.status in (502, 503, 504) else "system")
-            err_log.record(src, error.code, error.message,
-                           detail={"status": error.status, "path": request.url.path}, secrets=audit_secrets())
+            await asyncio.to_thread(
+                err_log.record, src, error.code, error.message,
+                detail={"status": error.status, "path": request.url.path}, secrets=audit_secrets(),
+            )
         return JSONResponse(status_code=error.status, content={
             "detail": {"code": error.code, "message": error.message},
         })
@@ -266,7 +270,8 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     async def unhandled_exception_handler(request, error: Exception):
         err_log = getattr(app.state, "error_log", None)
         if err_log is not None:
-            err_log.record(
+            await asyncio.to_thread(
+                err_log.record,
                 "system",
                 f"unhandled_{type(error).__name__}",
                 f"服务端未捕获异常：{type(error).__name__}: {str(error)[:300]}",
@@ -378,9 +383,12 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                         if kind in ("session", "tool", "text", "done"):
                             yield _sse(kind, payload)
             except ProviderError as error:
-                if error.status >= 400 and error.code not in {"session_not_found", "tool_not_found", "insight_not_found"}:
+                if (error.status >= 400
+                        and error.code not in {"session_not_found", "tool_not_found", "insight_not_found"}
+                        and not getattr(error, "_error_logged", False)):
                     with suppress(Exception):
-                        app.state.error_log.record(
+                        await asyncio.to_thread(
+                            app.state.error_log.record,
                             "system",
                             error.code,
                             error.message,
@@ -1039,10 +1047,10 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         except ProviderError as error:
             error_code = error.code
             raise
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as error:
             state, error_code = "cancelled", "tool_cancelled"
             raise ProviderError(409, "tool_cancelled",
-                                "等待已取消；若请求已发出，外部操作可能已生效，请核实，未自动重试。")
+                                "等待已取消；若请求已发出，外部操作可能已生效，请核实，未自动重试。") from error
         finally:
             app.state.debug_tasks.pop(body.request_id, None)
             elapsed = int((time.perf_counter() - started) * 1000)
@@ -1170,14 +1178,14 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             return await asyncio.to_thread(get_personal_kb().rename_document,
                                            document_id, update.title, update.group)
         except KnowledgeError as error:
-            raise ProviderError(error.status, error.code, error.message)
+            raise ProviderError(error.status, error.code, error.message) from error
 
     @app.delete("/api/knowledge/personal/{document_id}", status_code=204)
     async def personal_kb_delete(document_id: str):
         try:
             await asyncio.to_thread(get_personal_kb().delete_document, document_id)
         except KnowledgeError as error:
-            raise ProviderError(error.status, error.code, error.message)
+            raise ProviderError(error.status, error.code, error.message) from error
         return Response(status_code=204)
 
     @app.get("/api/knowledge/libraries")
@@ -1189,14 +1197,14 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         try:
             return await asyncio.to_thread(get_personal_kb().create_library, body.name)
         except KnowledgeError as error:
-            raise ProviderError(error.status, error.code, error.message)
+            raise ProviderError(error.status, error.code, error.message) from error
 
     @app.patch("/api/knowledge/libraries/{library_id}")
     async def rename_kb_library(library_id: str, body: LibraryRename):
         try:
             return await asyncio.to_thread(get_personal_kb().rename_library, library_id, body.name)
         except KnowledgeError as error:
-            raise ProviderError(error.status, error.code, error.message)
+            raise ProviderError(error.status, error.code, error.message) from error
 
     @app.delete("/api/knowledge/libraries/{library_id}", status_code=204)
     async def delete_kb_library(library_id: str):
@@ -1208,7 +1216,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             try:
                 await asyncio.to_thread(get_personal_kb().delete_library, library_id)
             except KnowledgeError as error:
-                raise ProviderError(error.status, error.code, error.message)
+                raise ProviderError(error.status, error.code, error.message) from error
             refresh_tools()
         return Response(status_code=204)
 

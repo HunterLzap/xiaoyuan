@@ -2,6 +2,12 @@
 
 更新时间：2026-11-24。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
 
+## Batch 1 后端存储与桌面操控（2026-11-24）
+
+- Windows `E:\xiaodan`，基于 `29f9a15`，Python 3.12.0。桌面桥接、网关追踪、个人知识库隔离和实时语音失败回归共 38 项通过（含 5 项新增测试），0 项跳过，1 条 Starlette 弃用警告。[测试输出](E:/xiaodan/logs/batch1-pytest.log)
+- 项目缓存内的 Pyright 1.1.414 补齐增量 Lint 所需工具，复验新增问题为 0。SlopGuard 初检发现项目基线已有的 6 处 `B904`，经授权补齐显式异常链。桌面 RPC 异常去重用例通过 RED → GREEN 消融，SlopGuard 跳过环境中未发现的 Pyright 与 Semgrep，Pyright 已由项目增量 Lint 执行。[增量 Lint](E:/xiaodan/logs/batch1-lint.log) · [门禁初检](E:/xiaodan/logs/batch1-slopguard.log) · [消融复验](E:/xiaodan/logs/batch1-slopguard-ablation.log)
+- Git Bash 通过热备脚本语法与参数预演检查。Windows 缺少 `sqlite3` 命令，未执行实际热备、清理或恢复。云端、真机及模型上游未参与验证。[预演输出](E:/xiaodan/logs/batch1-backup-dry-run.log)
+
 ## Windows SlopGuard 门禁本地化（2026-11-24）
 
 - 在 Windows `E:\xiaodan` 的 `5b659e2` 上停止跟踪 SlopGuard 配置与交付流程，原文件内容和 Git pre-commit 钩子保留在本机。原门禁条款移至本机 `AGENTS.local.md`，Git 本机忽略规则覆盖三个文件。
