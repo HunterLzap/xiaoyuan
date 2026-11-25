@@ -127,21 +127,24 @@
       </nav>
     </aside>
     <div class="settings-main">
-      <header class="settings-view-header"><h1 id="settings-view-heading">助手</h1><div class="settings-header-actions"><button id="capability-refresh" type="button" class="text-button" hidden>刷新</button></div></header>
+      <header class="settings-view-header">
+        <h1 id="settings-view-heading">助手</h1>
+        <div class="settings-header-actions">
+          <span id="header-actions-role" class="header-action-group" hidden><span id="role-dirty-state" class="header-dirty-note">设置已同步</span><button id="assistant-reset" type="button" class="secondary-button">取消</button><button id="tts-save" type="submit" form="assistant-form" class="primary-button" disabled>保存</button></span>
+          <span id="header-actions-connections" class="header-action-group" hidden><span id="dirty-state" class="header-dirty-note">接入已同步</span><button id="settings-api-cancel" type="button" class="secondary-button">取消</button><button id="save" type="submit" form="config-form" class="primary-button" disabled>保存</button></span>
+          <button id="tool-new" type="button" class="secondary-button" hidden>+ 新建 HTTP 工具</button>
+          <button id="capability-refresh" type="button" class="text-button" hidden>刷新</button>
+        </div>
+      </header>
       <div id="settings-notice" class="notice" role="status" aria-live="polite" hidden></div>
       <div class="settings-dialog-body">
       <section id="settings-view" class="page-view" aria-label="助手" hidden><div class="page-content assistant-content">
         <form id="assistant-form"><fieldset id="role-fields" disabled>
           <section id="role-pane" class="assistant-section api-panel">
-            <h2 class="api-panel-title"><label for="system_prompt">Agent 人设与指令</label></h2>
+            <h2 class="api-panel-title">人设与偏好</h2>
             <div class="api-group role-card-group">
-              <div class="role-card-field">
-                <textarea id="system_prompt" maxlength="4000" rows="6" required placeholder="写清楚它是谁、什么性格、怎么回答、如何做事。例如：你是我的个人 AI Agent 小圆，回复简短干脆，先给结论，动手前先核对高风险操作。"></textarea>
-              </div>
-              <div class="agent-profile-block">
-                <h3><label for="agent_profile">个人工作档案与偏好</label></h3>
-                <textarea id="agent_profile" maxlength="2000" rows="4" placeholder="常用电脑名、工作目录、偏好或命名规范（勿填密码与密钥），例如：Mac 目录 ~/Projects；Windows 目录 D:\Work"></textarea>
-              </div>
+              <div class="settings-row"><label for="system_prompt">系统指令</label><textarea id="system_prompt" maxlength="4000" rows="5" required placeholder="写清楚它是谁、什么性格、怎么回答、如何做事。"></textarea></div>
+              <div class="settings-row"><label for="agent_profile">工作档案</label><textarea id="agent_profile" maxlength="2000" rows="3" placeholder="常用电脑名、工作目录、偏好或命名规范（勿填密码与密钥），例如：Mac 目录 ~/Projects；Windows 目录 D:\Work"></textarea></div>
             </div>
           </section>
           <section id="voice-pane" class="assistant-section api-panel" aria-label="声音调节"><h2 class="api-panel-title">声音调节</h2>
@@ -149,25 +152,21 @@
               <div class="settings-row voice-row"><label for="device-volume">设备音量</label><div class="voice-inline tuning"><input id="device-volume" type="range" min="0" max="100" step="1" value="75"><span id="device-volume-value" class="tuning-value">75</span><button id="volume-apply" type="button" class="secondary-button">应用到设备</button><span id="volume-status" class="small-note" role="status"></span></div></div>
               <div class="settings-row voice-row"><label for="tts_rate">语速</label><div class="voice-inline tuning"><input id="tts_rate" type="range" min="0.5" max="2" step="0.05" value="1"><span id="tts_rate-value" class="tuning-value">1.00x</span></div></div>
               <div class="settings-row voice-row"><label for="tts_pitch">音调</label><div class="voice-inline tuning"><input id="tts_pitch" type="range" min="-8" max="8" step="1" value="0"><span id="tts_pitch-value" class="tuning-value">0</span><button id="tuning-reset" type="button" class="text-button">恢复默认</button></div></div>
-              <div class="voice-preview"><label class="sr-only" for="tts-text">试听文字</label><input id="tts-text" maxlength="500" value="你好，我是你的个人助理。很高兴认识你。"><button id="tts-preview" type="button" class="secondary-button" disabled>试听</button><button id="tts-cancel" type="button" class="secondary-button" hidden>取消合成</button></div><p id="tts-result" class="small-note" role="status" aria-live="polite"></p><audio id="tts-audio" controls preload="none" hidden aria-label="声音调节试听"></audio>
+              <div class="settings-row voice-row"><label for="tts-text">试听文本</label><div class="voice-preview"><input id="tts-text" maxlength="500" value="你好，我是小圆，很高兴认识你。"><button id="tts-preview" type="button" class="secondary-button" disabled>试听</button><button id="tts-cancel" type="button" class="secondary-button" hidden>取消合成</button></div></div><p id="tts-result" class="small-note" role="status" aria-live="polite"></p><audio id="tts-audio" controls preload="none" hidden aria-label="声音调节试听"></audio>
             </div>
           </section>
-</fieldset><div class="settings-actions assistant-save"><span id="role-dirty-state">设置已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="assistant-reset" type="button" class="secondary-button">取消</button><button id="tts-save" type="submit" class="primary-button" disabled>保存</button></div></div></form>
+</fieldset></form>
       </div></section>
       <section id="connections-view" class="page-view" aria-label="模型" hidden><div class="page-content">
         <form id="config-form"><fieldset id="config-fields" class="compact-api" disabled>
-          <section class="api-panel model-overview-panel" id="model-overview-panel" aria-label="当前生效模型">
-            <h2 class="api-panel-title">当前生效模型</h2>
-            <div class="model-overview-grid">
-              <div class="model-overview-item"><span class="model-overview-role">日常对话</span><strong id="overview-chat-model">—</strong><small id="overview-chat-meta"></small></div>
-              <div class="model-overview-item"><span class="model-overview-role">电脑操控</span><strong id="overview-desktop-model">—</strong><small id="overview-desktop-meta"></small></div>
+          <div id="model-overview-panel" class="model-route-bar">
+            <div class="api-segments" role="radiogroup" aria-label="接入模式">
+              <label><input type="radio" name="voice-route" value="realtime" checked><span>实时对话</span></label>
+              <label><input type="radio" name="voice-route" value="pipeline"><span>分模型</span></label>
             </div>
-          </section>
-          <section class="api-panel api-routing">
-<div class="api-segments" role="radiogroup" aria-label="接入模式">
-<label><input type="radio" name="voice-route" value="realtime" checked><span>实时对话</span></label>
-<label><input type="radio" name="voice-route" value="pipeline"><span>分模型</span></label></div>
-<input id="voice_mode" type="hidden" value="realtime"></section>
+            <input id="voice_mode" type="hidden" value="realtime">
+            <span class="model-route-summary">当前生效：<strong id="overview-chat-model">—</strong><small id="overview-chat-meta"></small><span hidden><strong id="overview-desktop-model"></strong><small id="overview-desktop-meta"></small></span></span>
+          </div>
 <section class="api-panel" id="rt-fields"><h2 class="api-panel-title"><span id="rt-service-name">阿里云百炼</span><small id="rt-region">北京</small></h2>
 <div class="api-group">
 <div class="settings-row"><label for="rt_provider">服务</label><select id="rt_provider"><option value="bailian">百炼 · 北京</option><option value="compatible">自定义实时接口</option></select></div>
@@ -319,15 +318,19 @@
             </div>
           </section>
           <input id="m5stack_enabled" type="checkbox" checked hidden>
-        </fieldset><div class="settings-actions"><span id="dirty-state">接入已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="settings-api-cancel" type="button" class="secondary-button">取消</button><button id="save" type="submit" class="primary-button" disabled>保存并关闭</button></div></div></form>
+        </fieldset></form>
       </div></section>
       <section id="devices-view" class="page-view" aria-label="设备" hidden><div class="page-content">
         <div class="insight-tabbar device-tabbar" role="tablist" aria-label="终端类型">
           <button id="devices-tab-desktop" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="desktop-panel">电脑</button>
           <button id="devices-tab-hardware" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="hardware-panel" tabindex="-1">硬件</button>
+          <div class="tabbar-right">
+            <button id="desktop-refresh" type="button" class="text-button">刷新</button>
+            <button id="device-refresh" type="button" class="text-button" hidden>刷新</button>
+          </div>
         </div>
         <section id="desktop-panel" class="desktop-panel" role="tabpanel" aria-labelledby="devices-tab-desktop">
-          <div class="section-toolbar"><div><strong id="desktop-state">个人电脑节点（Windows / macOS）</strong><p id="desktop-state-detail" class="small-note" hidden></p></div><button id="desktop-refresh" type="button" class="text-button"><svg aria-hidden="true"><use href="#i-refresh"/></svg>刷新节点</button></div>
+          <div class="sr-only"><strong id="desktop-state">个人电脑节点（Windows / macOS）</strong><p id="desktop-state-detail" hidden></p></div>
           <div id="desktop-nodes" class="desktop-nodes-list" aria-live="polite"><p class="small-note">正在加载个人电脑节点…</p></div>
           <div id="desktop-screen-preview" class="desktop-screen-preview" hidden>
             <div class="desktop-preview-head"><span id="desktop-preview-meta" class="small-note"></span><button id="desktop-preview-close" type="button" class="text-button">收起预览</button></div>
@@ -343,7 +346,7 @@
           </details>
         </section>
         <section id="hardware-panel" role="tabpanel" aria-labelledby="devices-tab-hardware" hidden>
-        <div class="device-connection section-toolbar"><div><strong id="device-state">正在检查连接…</strong><p id="device-state-detail" class="small-note" hidden></p></div><button id="device-refresh" type="button" class="text-button"><svg aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button></div>
+        <div class="ui-card" style="margin-bottom:20px"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;"><strong id="device-state">正在检查连接…</strong></div><p id="device-state-detail" class="small-note" hidden style="margin-top:6px"></p></div>
         <details class="settings-advanced"><summary>接入与恢复<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary><form id="device-setup-form"><fieldset id="device-setup-fields"><section class="settings-section"><p class="section-description">先保存设备原服务器地址，再修改设备配网页中的地址。</p>
           <div class="settings-row" id="device-host-row"><div><label for="device-host">电脑局域网 IP</label><p>设备与电脑必须能在局域网互相访问</p></div><input id="device-host" autocomplete="off" required placeholder="例如：192.168.1.20"></div>
           <div class="settings-row"><div><label for="device-mac">设备 MAC 地址</label><p>可留空；设备首次使用接入地址连接后自动配对</p></div><input id="device-mac" autocomplete="off" placeholder="留空自动记录，或填写已知 MAC"></div>
@@ -367,8 +370,7 @@
         </div>
         <p id="capability-notice" class="small-note" role="status" aria-live="polite"></p>
         <section id="capabilities-panel-tools" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-tools">
-          <section class="capability-section" aria-labelledby="capability-tools-title">
-            <div class="capability-heading"><h2 id="capability-tools-title">可用技能</h2><div class="capability-heading-actions"><button id="tool-new" type="button" class="secondary-button">+ 新建 HTTP 工具</button></div></div>
+          <section class="capability-section" aria-label="可用技能">
             <div class="cap-panes">
               <div class="cap-list" id="capability-tools" role="list" aria-live="polite"></div>
               <div class="cap-detail" id="capability-detail" aria-live="polite"></div>

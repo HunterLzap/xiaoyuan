@@ -129,6 +129,9 @@ function navigate(view, push = true, deviceTab = "desktop") {
   const title = view === "chat" ? state.detail?.title || "新对话" : {settings:"助手", connections:"模型", role:"助手", devices:"设备", capabilities:"技能", kb:"知识库", insights:"记录"}[view];
   el("view-title").textContent = title;
   if (el("settings-view-heading") && view !== "chat") el("settings-view-heading").textContent = title;
+  if (el("header-actions-role")) el("header-actions-role").hidden = view !== "role";
+  if (el("header-actions-connections")) el("header-actions-connections").hidden = view !== "connections";
+  if (el("tool-new")) el("tool-new").hidden = view !== "capabilities";
   if (el("capability-refresh")) el("capability-refresh").hidden = !(view === "capabilities" || view === "kb");
   el("rename-form").hidden = true; el("view-title").hidden = false;
   const path = appPath({settings:"/settings", connections:"/settings#api", role:"/settings#role", devices:"/devices", capabilities:"/settings#capabilities", kb:"/settings#kb", insights:"/settings#insights", chat:"/"}[view]);
@@ -1990,7 +1993,7 @@ function weatherToolCard(tool) {
   city.addEventListener("change", saveCity);
   city.addEventListener("keydown", event => {if (event.key === "Enter") {event.preventDefault(); saveCity();}});
   row.append(city); details.append(summary,row);
-  card.append(header,node("p","small-note",tool.description || "允许 Agent 查询实时与未来天气（Open-Meteo，无需密钥）。"),details);
+  card.append(header,node("p","small-note","Open-Meteo 实时与预报天气"),details);
   return card;
 }
 function weatherHeadingPair(toggleLabel) {
@@ -2259,7 +2262,11 @@ function toolDetailCard(tool) {
   const active = isSkillActive(tool);
   const card = node("div","capability-item");
   const header = node("div","capability-item-header");
-  header.append(node("h3","", CAPABILITY_LABELS[tool.name] || tool.name));
+  const titleWrap = node("div","capability-item-title");
+  titleWrap.append(node("h3","", CAPABILITY_LABELS[tool.name] || tool.name));
+  const subtitle = tool.kind === "http" ? (tool.description || "") : ({ search_m5stack: "本地官方文档检索索引" }[tool.name] || "");
+  if (subtitle) titleWrap.append(node("p","small-note",subtitle));
+  header.append(titleWrap);
   const { label: toggleLabel } = makeSkillSwitch(active, (toggle, previous) => {
     const enabled = toggle.checked; toggle.checked = previous;
     capabilityAction(async () => {
@@ -2268,7 +2275,7 @@ function toolDetailCard(tool) {
     });
   });
   header.append(toggleLabel);
-  card.append(header,node("p","small-note",tool.description || ""));
+  card.append(header);
   if (tool.kind === "http") card.append(node("p","small-note",`${tool.request?.method || tool.method} ${tool.request?.url || tool.url}`));
   const actions = node("div","capability-item-actions");
   const call = capabilityButton("手动测试", () => openToolCall(tool)); call.disabled = !tool.enabled; call.dataset.requiresEnabled = String(tool.enabled); actions.append(call);
@@ -3840,6 +3847,8 @@ function showDeviceTab(tab) {
     button.setAttribute("aria-selected", String(selected));
     button.tabIndex = selected ? 0 : -1;
   }
+  if (el("desktop-refresh")) el("desktop-refresh").hidden = tab !== "desktop";
+  if (el("device-refresh")) el("device-refresh").hidden = tab !== "hardware";
   const load = tab === "hardware" ? loadDevices(!deviceData) : loadDesktopNodes();
   load.catch(error => notice(error.message, "error"));
 }
