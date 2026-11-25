@@ -1242,8 +1242,9 @@ function renderConnectionStatus() {
 }
 function renderAckCache() {
   const count = savedConfig?.rt_ack_cached_count || 0;
-  el("rt-ack-status").textContent = count
-    ? (savedConfig.rt_ack_cached_voice + " · 已缓存 " + count + " 条") : "当前音色暂无首响缓存";
+  const statusEl = el("rt-ack-status");
+  statusEl.textContent = count ? `已缓存 ${count} 条` : "暂无首响缓存";
+  statusEl.title = count && savedConfig?.rt_ack_cached_voice ? `对应音色：${savedConfig.rt_ack_cached_voice}` : "";
   el("rt-ack-generate").disabled = ackGenerationBusy ||
     savedConfig?.rt_provider !== "bailian" || !savedConfig?.rt_key_configured;
 }

@@ -234,14 +234,14 @@
 <input id="rt_voice" maxlength="200" hidden><button type="button" id="rt-sample-button" class="secondary-button">试听</button><button type="button" id="rt-clone-button" class="secondary-button">新建复刻</button><button type="button" id="rt-delete-clone" class="text-button" hidden>删除</button>
 </div></div><p id="rt-sample-error" class="small-note" role="status" hidden></p>
 <audio id="rt-sample" preload="none" hidden></audio></div>
-<details class="api-disclosure"><summary>高级设置</summary><div class="api-group">
-<div class="settings-row" id="rt-asr-row"><label for="rt_asr_model">转录模型</label><input id="rt_asr_model" maxlength="200" placeholder="fun-asr（百炼默认；兼容接口 whisper-1）"></div>
-<div class="settings-row"><label for="rt_silence_gate_enabled">静音帧拦截</label><label class="checkbox-control"><input id="rt_silence_gate_enabled" type="checkbox"><span>减少底噪占用的音频用量</span></label></div>
-<div class="settings-row"><div><label for="rt_silence_gate_rms">人声灵敏度阈值</label><p id="rt-rms-hint">默认 120。吞字可调低至 80，底噪大可调高至 180。</p></div><input id="rt_silence_gate_rms" type="number" min="10" max="3000" step="10" value="120" aria-describedby="rt-rms-hint" required></div>
-<div class="settings-row"><label for="rt_defer_response_until_transcript">按需发工具</label><label class="checkbox-control"><input id="rt_defer_response_until_transcript" type="checkbox"><span>转写后按任务选择工具，减少闲聊 Token</span></label></div>
-<div class="settings-row"><div><label for="rt_max_continuous_turns">连续轮换轮数</label><p>默认 6 轮，0 为关闭。</p></div><input id="rt_max_continuous_turns" type="number" min="0" max="50" value="6" required></div>
-<div class="settings-row"><div><label for="rt_max_continuous_seconds">连续轮换时长（秒）</label><p>默认 600 秒，0 为关闭。</p></div><input id="rt_max_continuous_seconds" type="number" min="0" max="3600" value="600" required></div>
-<div class="settings-row"><label for="rt_ack_enabled">工具等待播报首响（同音色）</label><div class="ack-config"><input id="rt_ack_enabled" type="checkbox"><span id="rt-ack-status" class="small-note" role="status"></span><button id="rt-ack-generate" type="button" class="secondary-button">生成首响缓存</button></div></div>
+<details class="api-disclosure"><summary><span>高级设置</span><svg class="disclosure-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary><div class="api-group">
+<div class="settings-row" id="rt-asr-row"><div><label for="rt_asr_model">转录模型</label><p>语音转文字模型；百炼默认自动用 fun-asr。</p></div><input id="rt_asr_model" maxlength="200" placeholder="fun-asr（百炼默认）"></div>
+<div class="settings-row"><div><label for="rt_silence_gate_enabled">静音帧拦截</label><p>跳过无人说话的静默帧，减少底噪占用的音频用量。</p></div><label class="checkbox-control"><input id="rt_silence_gate_enabled" type="checkbox"><span>启用</span></label></div>
+<div class="settings-row"><div><label for="rt_silence_gate_rms">人声灵敏度阈值</label><p id="rt-rms-hint">默认 120；容易吞字可调低（如 80），底噪大可调高（如 180）。</p></div><input id="rt_silence_gate_rms" type="number" min="10" max="3000" step="10" value="120" aria-describedby="rt-rms-hint" required></div>
+<div class="settings-row"><div><label for="rt_defer_response_until_transcript">按需发工具</label><p>先转写再按任务选择工具，减少日常闲聊的 Token 消耗。</p></div><label class="checkbox-control"><input id="rt_defer_response_until_transcript" type="checkbox"><span>启用</span></label></div>
+<div class="settings-row"><div><label for="rt_max_continuous_turns">连续轮换轮数</label><p>连续对话满该轮数后自动重连刷新，默认 6 轮（0 为关闭）。</p></div><input id="rt_max_continuous_turns" type="number" min="0" max="50" value="6" required></div>
+<div class="settings-row"><div><label for="rt_max_continuous_seconds">连续轮换时长（秒）</label><p>单次实时连接超过该秒数后自动重连，默认 600 秒（0 为关闭）。</p></div><input id="rt_max_continuous_seconds" type="number" min="0" max="3600" value="600" required></div>
+<div class="settings-row"><div><label for="rt_ack_enabled">工具等待播报首响</label><p>调用较慢工具前先用同音色播报“稍等”，减少等待空白。</p></div><div class="ack-config"><input id="rt_ack_enabled" type="checkbox"><span id="rt-ack-status" class="small-note" role="status"></span><button id="rt-ack-generate" type="button" class="secondary-button">生成首响缓存</button></div></div>
 </div></details></section>
           <section class="api-text-settings" id="text-services" hidden><h2 id="text-services-title" hidden>分模型</h2><section class="api-panel">
             <h2 class="api-panel-title">文字服务<span id="connection-summary" class="connection-label"></span></h2>
@@ -297,8 +297,8 @@
                 </div>
               </div>
             </div>
-            <details class="api-disclosure"><summary>更多模型选项</summary><div class="api-group">
-              <div class="settings-row"><label for="desktop_vision_model">纯视觉备用</label><input id="desktop_vision_model" list="desktop-vision-models" maxlength="200" autocomplete="off" placeholder="qwen3-vl-plus（主控非多模态时使用）"><datalist id="desktop-vision-models"><option value="qwen3-vl-plus"><option value="qwen3.5-plus"><option value="qwen-vl-max"></datalist></div>
+            <details class="api-disclosure"><summary><span>更多模型选项</span><svg class="disclosure-chevron" aria-hidden="true"><use href="#i-chevron"/></svg></summary><div class="api-group">
+              <div class="settings-row"><div><label for="desktop_vision_model">纯视觉备用</label><p>仅在主控模型不支持看图时，用它先识别屏幕画面。</p></div><input id="desktop_vision_model" list="desktop-vision-models" maxlength="200" autocomplete="off" placeholder="qwen3-vl-plus"><datalist id="desktop-vision-models"><option value="qwen3-vl-plus"><option value="qwen3.5-plus"><option value="qwen-vl-max"></datalist></div>
             </div></details>
           </section>
           <section class="api-panel" id="web-search-connection-panel" aria-label="联网搜索" hidden>
