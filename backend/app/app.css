@@ -1018,6 +1018,10 @@ body.voice-mode { overflow:hidden; }
 .model-overview-item strong {font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .model-overview-item small {font-size:11px;color:var(--subtle)}
 .desktop-model-stack {display:flex;flex-direction:column;gap:8px;min-width:0;width:100%}
+.desktop-planner-row select {flex:1;min-width:0}
+#desktop-model-test-result {margin:0}
+#desktop-model-test-result[data-kind="error"] {color:var(--error)}
+#desktop-model-test-result[data-kind="success"] {color:var(--success)}
 
 
 

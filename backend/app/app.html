@@ -286,14 +286,23 @@
               <div class="settings-row">
                 <label for="desktop-planner-preset">主控模型</label>
                 <div class="desktop-model-stack">
-                  <select id="desktop-planner-preset" aria-label="电脑操控主控模型">
-                    <option value="">自动推荐（qwen3.5-plus）</option>
-                    <option value="qwen3.5-plus">qwen3.5-plus（推荐）</option>
-                    <option value="qwen3.5-flash">qwen3.5-flash</option>
-                    <option value="qwen3-vl-plus">qwen3-vl-plus</option>
-                    <option value="__manual__">手动填写模型 ID…</option>
-                  </select>
-                  <input id="desktop_planner_model" maxlength="200" autocomplete="off" placeholder="例如：qwen3.5-plus / qwen3.5-flash / deepseek-chat" hidden>
+                  <div class="voice-inline desktop-planner-row">
+                    <select id="desktop-planner-preset" aria-label="电脑操控主控模型">
+                      <option value="">自动推荐（qwen3.5-plus）</option>
+                      <option value="qwen3.5-plus">qwen3.5-plus（推荐）</option>
+                      <option value="qwen3.5-flash">qwen3.5-flash</option>
+                      <option value="qwen3.8-max-0902">qwen3.8-max-0902（百炼免费额度）</option>
+                      <option value="qwen4-max">qwen4-max（百炼免费额度）</option>
+                      <option value="qwen3.8-omni-flash">qwen3.8-omni-flash（百炼免费额度）</option>
+                      <option value="deepseek-v4.1-flash">deepseek-v4.1-flash（百炼免费额度）</option>
+                      <option value="deepseek-v4.1-flash-1017">deepseek-v4.1-flash-1017（百炼免费额度）</option>
+                      <option value="qwen3-vl-plus">qwen3-vl-plus</option>
+                      <option value="__manual__">手动填写模型 ID…</option>
+                    </select>
+                    <button id="desktop-model-test" type="button" class="secondary-button">测试</button>
+                  </div>
+                  <input id="desktop_planner_model" maxlength="200" autocomplete="off" placeholder="例如：qwen3.8-max-0902 / qwen4-max / deepseek-v4.1-flash" hidden>
+                  <p id="desktop-model-test-result" class="small-note" role="status" aria-live="polite" hidden></p>
                 </div>
               </div>
             </div>

@@ -887,11 +887,14 @@ function realtimePayload() {
   if (el("rt_api_key").value.trim()) data.rt_api_key = el("rt_api_key").value.trim();
   return data;
 }
-const DESKTOP_PLANNER_PRESETS = ["", "qwen3.5-plus", "qwen3.5-flash", "qwen3-vl-plus"];
+const DESKTOP_PLANNER_PRESETS = [
+  "", "qwen3.5-plus", "qwen3.5-flash", "qwen3.8-max-0902", "qwen4-max",
+  "qwen3.8-omni-flash", "deepseek-v4.1-flash", "deepseek-v4.1-flash-1017", "qwen3-vl-plus",
+];
 function isNativeVisionModel(modelName) {
   const lowered = (modelName || "").trim().toLowerCase();
   if (!lowered) return false;
-  return ["qwen3.5","qwen3-vl","qwen2.5-vl","qwen-vl","qvq","gpt-4o","gpt-4.1","gpt-5","o1","o3","o4","gemini","claude-3","claude-4","kimi-latest"].some(p => lowered.startsWith(p));
+  return ["qwen3.5","qwen3.8","qwen4","qwen3-vl","qwen2.5-vl","qwen-vl","qvq","deepseek-v4","gpt-4o","gpt-4.1","gpt-5","o1","o3","o4","gemini","claude-3","claude-4","kimi-latest"].some(p => lowered.startsWith(p));
 }
 function desktopModelsPayload() {
   return {
@@ -920,7 +923,7 @@ function resolveDesktopModelState() {
   const vision = el("desktop_vision_model").value.trim() || "qwen3-vl-plus";
   let effectiveModel = "";
   let routeNote = "";
-  if (hasBailianKey && planner && /^(?:qwen|qvq)/i.test(planner) && (!el("base_url").value.toLowerCase().includes("aliyuncs.com") || !hasText || rtMode)) {
+  if (hasBailianKey && planner && /^(?:qwen|qvq|deepseek-v4)/i.test(planner) && (!el("base_url").value.toLowerCase().includes("aliyuncs.com") || !hasText || rtMode)) {
     effectiveModel = planner;
     routeNote = "复用百炼 Key";
   } else if (hasBailianKey && !planner && rtMode && (!hasText || !isNativeVisionModel(textModel))) {
@@ -1286,6 +1289,11 @@ function applyConfig(data, preserve = false) {
   renderAckCache();
   renderWebSearchConnectionState();
   applyWeatherSettings(data);
+  if (el("desktop-model-test-result")) {
+    el("desktop-model-test-result").hidden = true;
+    el("desktop-model-test-result").textContent = "";
+    el("desktop-model-test-result").dataset.kind = "";
+  }
   syncDesktopPlannerPreset(data.desktop_planner_model || "");
   el("desktop_vision_model").value = data.desktop_vision_model || "";
   capabilityState.selectionSupported = Array.isArray(data.selected_tool_ids) || Array.isArray(data.selected_kb_ids);
@@ -1715,7 +1723,31 @@ el("desktop-planner-preset").addEventListener("change", () => {
     el("desktop_planner_model").value = picked;
     el("desktop_planner_model").hidden = true;
   }
+  if (el("desktop-model-test-result")) el("desktop-model-test-result").hidden = true;
   updateModelOverview(); dirty(); notice();
+});
+el("desktop_planner_model").addEventListener("input", () => {
+  if (el("desktop-model-test-result")) el("desktop-model-test-result").hidden = true;
+});
+el("desktop-model-test").addEventListener("click", async () => {
+  const btn = el("desktop-model-test"), out = el("desktop-model-test-result");
+  if (!btn || !out || btn.disabled) return;
+  btn.disabled = true;
+  out.hidden = false; out.dataset.kind = ""; out.textContent = "正在测试连通性…";
+  try {
+    const res = await request("/api/settings/desktop-model/test", "POST", {
+      desktop_planner_model: el("desktop_planner_model").value.trim(),
+    });
+    const visionTag = res.native_vision ? "原生视觉" : "需视觉备用";
+    const tail = res.reply ? `：${res.reply}` : "";
+    out.textContent = `连通成功（${res.latency_ms}ms · ${res.model} · ${visionTag}）${tail}`;
+    out.dataset.kind = "success";
+  } catch (error) {
+    out.textContent = error.message || "测试失败，请检查百炼密钥与模型 ID。";
+    out.dataset.kind = "error";
+  } finally {
+    btn.disabled = false;
+  }
 });
 el("show-key").addEventListener("click", () => { const show = el("api_key").type === "password"; el("api_key").type = show ? "text" : "password"; el("show-key").textContent = show ? "隐藏" : "显示"; el("show-key").setAttribute("aria-pressed", String(show)); });
 el("config-form").addEventListener("input", event => { updateConnectionMode(); updateTtsMode(); stopTtsPreview(); el("test-panel").hidden = true; if (["base_url", "api_key", "models_protocol"].includes(event.target.id)) { resetModelList(); } dirty(); notice(); });

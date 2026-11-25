@@ -1824,3 +1824,54 @@ def test_ack_routes_use_existing_auth_and_persist_setting(tmp_path, monkeypatch)
         assert remote.get("/api/voice/ack").status_code == 403
         assert remote.post("/api/voice/ack/generate", headers=HEADERS).status_code == 403
     assert generate.await_count == 1
+
+
+def test_desktop_model_test_endpoint_and_bailian_vision_models(tmp_path):
+    from backend.app.desktop import build_desktop_planner_config, supports_native_vision
+    from backend.app.llm import Completion
+
+    for model_name in ("qwen3.8-max-0902", "qwen4-max", "qwen3.8-omni-flash", "deepseek-v4.1-flash", "deepseek-v4.1-flash-1017"):
+        assert supports_native_vision(model_name)
+        cfg = _base_settings(tmp_path).model_copy(update={
+            "voice_mode": "realtime", "rt_provider": "bailian",
+            "rt_api_key": SecretStr("bailian-k"), "desktop_planner_model": model_name,
+        })
+        resolved = build_desktop_planner_config(cfg)
+        assert resolved is not None and resolved.model == model_name and resolved.provider == "bailian"
+
+    unconfigured = _base_settings(tmp_path).model_copy(update={
+        "voice_mode": "realtime", "rt_provider": "bailian", "rt_api_key": SecretStr(""),
+        "api_key": SecretStr(""), "model": "",
+    })
+    app_unconfigured = create_app(unconfigured, settings_store=SettingsStore(tmp_path / "empty.env"))
+    with TestClient(app_unconfigured, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        fail_resp = client.post("/api/settings/desktop-model/test", headers=HEADERS, json={"desktop_planner_model": "qwen3.8-max-0902"})
+        assert fail_resp.status_code == 422
+
+    captured = {}
+
+    class FakeAdapter:
+        async def complete(self, messages):
+            return Completion(reply="OK", usage=None, finish_reason="stop")
+
+        async def close(self):
+            captured["closed"] = True
+
+    def factory(cfg):
+        captured["model"] = cfg.model
+        captured["provider"] = cfg.provider
+        return FakeAdapter()
+
+    configured = _base_settings(tmp_path).model_copy(update={
+        "voice_mode": "realtime", "rt_provider": "bailian", "rt_api_key": SecretStr("bailian-k"),
+    })
+    app = create_app(configured, settings_store=SettingsStore(tmp_path / ".env"), provider_factory=factory)
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        resp = client.post("/api/settings/desktop-model/test", headers=HEADERS, json={"desktop_planner_model": "qwen3.8-max-0902"})
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["model"] == "qwen3.8-max-0902"
+        assert data["native_vision"] is True
+        assert data["reply"] == "OK"
+    assert captured == {"model": "qwen3.8-max-0902", "provider": "bailian", "closed": True}

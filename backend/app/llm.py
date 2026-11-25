@@ -138,11 +138,20 @@ class OpenAICompatibleProvider:
             options["reasoning_effort"] = self.settings.reasoning_effort
         return options
 
-    async def complete(self, messages: list[dict[str, str]]) -> Completion:
+    @staticmethod
+    def _supports_bailian_thinking_toggle(model: str, base_url: str) -> bool:
+        return (
+            model.lower().startswith(("qwen3.5", "qwen3.8", "qwen4", "deepseek-v4"))
+            and "aliyuncs.com" in (base_url or "").lower()
+        )
+
+    async def complete(self, messages: list[dict[str, str]], *, disable_thinking: bool = False) -> Completion:
         if self.settings.model in {"mimo-v2.5-tts", "mimo-v2.5-tts-voicedesign", "mimo-v2.5-tts-voiceclone"}:
             raise ProviderError(422, "tts_model_in_text", "这是语音合成模型，请在设置的“语音合成”中配置和试听；文字聊天请选择文字模型。")
         try:
             options = self._request_options()
+            if disable_thinking and self._supports_bailian_thinking_toggle(self.settings.model, self.settings.base_url):
+                options["extra_body"] = {"enable_thinking": False}
             response = await self.client.chat.completions.create(
                 model=self.settings.model, messages=messages,
                 stream=False, **options,
@@ -174,8 +183,7 @@ class OpenAICompatibleProvider:
             if tools:
                 options["tools"] = tools
                 if (
-                    self.settings.model.lower().startswith("qwen3.5")
-                    and "aliyuncs.com" in (self.settings.base_url or "").lower()
+                    self._supports_bailian_thinking_toggle(self.settings.model, self.settings.base_url)
                     and any(
                         str((t.get("function") or t).get("name") or "").startswith("desktop_")
                         for t in tools if isinstance(t, dict)

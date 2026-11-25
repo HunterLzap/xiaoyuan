@@ -807,10 +807,13 @@ def supports_native_vision(model_name: str) -> bool:
         return False
     return lowered.startswith((
         "qwen3.5",
+        "qwen3.8",
+        "qwen4",
         "qwen3-vl",
         "qwen2.5-vl",
         "qwen-vl",
         "qvq",
+        "deepseek-v4",
         "gpt-4o",
         "gpt-4.1",
         "gpt-5",
@@ -825,7 +828,7 @@ def supports_native_vision(model_name: str) -> bool:
 
 
 def _is_bailian_model_name(model_name: str) -> bool:
-    return (model_name or "").strip().lower().startswith(("qwen", "qvq"))
+    return (model_name or "").strip().lower().startswith(("qwen", "qvq", "deepseek-v4"))
 
 
 def _has_bailian_key(settings: Settings) -> bool:

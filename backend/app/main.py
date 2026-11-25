@@ -62,6 +62,10 @@ class AckGenerationRequest(BaseModel):
     )
 
 
+class DesktopModelTestRequest(BaseModel):
+    desktop_planner_model: str | None = Field(default=None, max_length=200)
+
+
 def create_app(settings: Settings | None = None, provider: ChatProvider | None = None,
                settings_store: SettingsStore | None = None,
                provider_factory: Callable[[Settings], ChatProvider] = build_chat_provider,
@@ -859,6 +863,39 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                 return await diagnostic.chat(ChatRequest(message="请只回复：连接成功"))
             finally:
                 await adapter.close()
+
+    @app.post("/api/settings/desktop-model/test")
+    async def test_desktop_model(body: DesktopModelTestRequest):
+        from .desktop import build_desktop_planner_config, supports_native_vision
+        base = app.state.service.settings
+        candidate = base.model_copy(update={
+            "desktop_planner_model": (
+                base.desktop_planner_model
+                if body.desktop_planner_model is None
+                else body.desktop_planner_model.strip()
+            ),
+        })
+        planner_cfg = build_desktop_planner_config(candidate)
+        if planner_cfg is None or planner_cfg.missing_config:
+            raise ProviderError(422, "desktop_model_not_configured", "请先保存百炼 API Key 或配置可用的电脑操控模型服务。")
+        adapter = provider_factory(planner_cfg.model_copy(update={"max_tokens": 32}))
+        started = time.monotonic()
+        try:
+            messages = [{"role": "user", "content": "请只回复：OK"}]
+            if isinstance(adapter, OpenAICompatibleProvider):
+                result = await adapter.complete(messages, disable_thinking=True)
+            else:
+                result = await adapter.complete(messages)
+        finally:
+            await adapter.close()
+        return {
+            "ok": True,
+            "model": planner_cfg.model,
+            "provider": planner_cfg.provider,
+            "native_vision": supports_native_vision(planner_cfg.model),
+            "latency_ms": int((time.monotonic() - started) * 1000),
+            "reply": (result.reply or "").strip()[:80],
+        }
 
     @app.post("/api/settings/models")
     async def list_models(update: SettingsUpdate):
