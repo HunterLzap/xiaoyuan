@@ -1,6 +1,6 @@
 # 工作约定
 
-更新：2026-11-16。用户最新明确目标优先于旧文；实现不得缩减目标，也不得自行扩大目标。当前任务、版本和暂停事项先读 [START](agent/START.md)，不默认载入全部历史。
+更新：2026-11-25。用户最新明确目标优先于旧文；实现不得缩减目标，也不得自行扩大目标。当前任务、版本和暂停事项先读 [START](agent/START.md)，不默认载入全部历史。
 
 ## 文档唯一来源与阅读顺序
 
@@ -27,15 +27,14 @@
 
 过期说明直接修正或归档，不再叠加“顶部优先”保留冲突正文。自有历史文档可原位归档以保留既有路径，文件开头必须标明历史/非指令并指回权威入口；第三方与工具链文档不改成项目规范。归档中不保留会被自动加载的旧AGENTS.md。
 
-`E:\xiaodan` 同时是 Windows Git 工作树与本机运行目录。私有配置、运行数据、`output/`、`logs/` 及 `LOCAL_FLASH_NOTES.md` 留在本机，仓库文档链接实际证据位置。
+`E:\xiaodan` 是 Windows Git 工作树与运行目录，Mac 端亦在各自 clone 根目录独立开发。私有配置、运行数据、`output/`、`logs/` 及 `LOCAL_FLASH_NOTES.md` 留在本机，仓库文档按相对路径或实际证据位置记录。
 
 ## 产品目标
 
-- 本项目是一个硬件语音助手（AtomS3R + Echo Base）：正常对话，能理解用户想做什么，按需调用 API 和所选知识库，用真实结果达成需求；简单、高效、快速。
-- 只有一个助手，不做多助手系统，不为多助手预建实体或平台。长期记忆、复杂规划器、无人值守任务、电脑控制不是当前范围。
-- 助手配置集中放提示词、选用的 API 能力和选用的知识库；API 能力统一管理天气、M5Stack 官方资料和自定义 API；知识库按用户参考图做多独立库。资源“启用/停用”与助手“选入”不能混淆。
-- 复用现有实时语音和工具反馈循环，不新增每轮必走的规划模型请求，不因 Agent 改造切换音色或改写已跑通的音频链。
-- 当前设计见 [架构](agent/docs/architecture.md)，需求见 [PRD](agent/docs/prd.md)，执行依赖见 [roadmap](agent/docs/roadmap.md)。旧 M0–M5、固定 P0→P1→P2 顺序、920×720 弹窗/三页签及“个人知识库不纳入”等不再作为当前要求；历史事实见进度和决策记录。
+- 本项目是一个**个人 Agent 硬件语音与电脑工作台**（AtomS3R + Echo Base + 网页工作台 + macOS/Windows `desktop_node`）：正常语音与文字对话，理解用户意图，按需调用联网/API、所选知识库与授权后的个人电脑操控（SoM 截图 + UI 树 + 确认卡片/3 分钟租约 + 语音/网页即时打断），用真实结果达成需求；简单、高效、快速。
+- 只有一个助手，不做多助手系统，不为多助手预建实体或平台。跨会话长期画像、重型多 Agent 编排和无人值守后台任务不是当前范围。
+- 助手配置围绕单个人格与工作档案统一组织，复用现有实时语音/文字与工具反馈循环，不新增每轮必走的规划模型请求，不因功能扩展随便切换已跑通的塔菲复刻音色与音频链。
+- 当前设计见 [架构](agent/docs/architecture.md)，需求见 [PRD](agent/docs/prd.md)，执行依赖见 [roadmap](agent/docs/roadmap.md)。旧 M0–M5、固定 P0→P1→P2 顺序、920×720 弹窗/三页签、旧版“电脑控制先不做”及“个人知识库不纳入”等不再作为当前要求；历史事实见进度和决策记录。
 
 ## 动手与检查
 
@@ -51,37 +50,37 @@
 
 遵循全局规范的最小相关验证原则，改动对应模块后主动选跑下列已有检查与测试（不跑全量、不将测试通过等同于真机或真实上游可用；完整边界见 [acceptance](agent/docs/acceptance.md)）：
 
-- **任何 `backend/` 或 `tests/` Python 改动**：`.venv/bin/python scripts/lint_incremental.py`（Windows 用 `.venv\Scripts\python.exe`）。
+- **任何 `backend/`、`desktop_node/` 或 `tests/` Python 改动**：`.venv/bin/python scripts/lint_incremental.py`（Windows 用 `.venv\Scripts\python.exe`）。
+- **跨平台桌面操控 / 确认闭环 / 语音与网页即时打断**（`desktop.py`、`desktop_tools.py`、`desktop_node/`、`tool_dialogue.py`、`main.py` 相关）：`.venv/bin/pytest tests/test_desktop_bridge.py -v`
 - **个人知识库 / 多库检索 / 助手选库**（`personal_kb.py`、`tools.py`、`main.py` 相关）：`.venv/bin/pytest tests/test_personal_kb_isolation.py -v`
-- **实时语音 / 设备桥接事件**（`realtime.py`、`device_realtime.py`）：`.venv/bin/pytest tests/test_realtime_failures.py -v`
-- **多厂商语音兼容 / 网关与追踪**（`asr.py`、`tts.py`、`voice_profiles.py`、`tool_gateway.py`、`audit_store.py`）：`.venv/bin/pytest tests/test_voice_compat.py tests/test_gateway_trace.py -v`
-- **音色复刻与音效**（`voices.py`、`audio_fx.py`）：`.venv/bin/pytest tests/test_voices.py -v`
+- **实时语音 / 设备桥接事件 / 语音打断**（`realtime.py`、`device_realtime.py`、`ack_cache.py`）：`.venv/bin/pytest tests/test_realtime_failures.py -v`
+- **多厂商语音兼容 / 网关与轨迹审计**（`asr.py`、`tts.py`、`voice_profiles.py`、`tool_gateway.py`、`audit_store.py`）：`.venv/bin/pytest tests/test_voice_compat.py tests/test_gateway_trace.py -v`
+- **音色复刻与音效**（`voices.py`、`audio_fx.py`、`qwen_voices.py`）：`.venv/bin/pytest tests/test_voices.py -v`
 - **M5Stack 官方资料检索**（`knowledge.py`）：`.venv/bin/pytest tests/test_knowledge.py -k "not chat_uses and not retrieval_failure"`
 - **网页语音流式回合**（`voice_chat.py`）：`.venv/bin/pytest tests/test_voice_chat.py -k "not voice_routes and not reset_invalidates and not http_disconnect"`
 - **设备配对 / OTA / 控制回读**（`devices.py`）：`.venv/bin/pytest tests/test_devices.py`（仅测配置/鉴权可用 `-k "not real_socket"`；`test_device_audio.py` 与 `test_device_conversation.py` 依赖 Windows `.venv-speech` 及 `output/speech/` 样例，Mac 自动跳过）
 - **前端 JS**（`backend/app/*.js`）：`node --check <修改的 JS 文件>`（修改 `voice.js` 且在 Windows 具备 Chrome/Playwright 时跑 `node tests/voice_browser.cjs`）
-- **历史旧套件边界**：`test_api.py`、`test_api_configuration.py`、`test_tts.py`、`test_settings_workflow.py` 及上述 `-k` 排除用例含默认 `voice_mode="realtime"` 等演进导致的历史失败；仅在改动对应设置/接口且用 `-k` 筛选相关用例时参考，不与本次改动混淆，也不擅自批量修改旧测试。
+- **历史旧套件边界**：`test_api.py`、`test_api_configuration.py`、`test_tts.py`、`test_settings_workflow.py` 及上述 `-k` 排除用例含早期默认架构演进导致的历史失败；仅在改动对应设置/接口且用 `-k` 筛选相关用例时参考，不与本次改动混淆，也不擅自批量修改旧测试。
 
 ## 当前技术与数据边界
 
 - **三端协作与版本同步**：**白天 Mac 开发、晚上 Windows 测试、服务部署在云端**，以 **Gitee（`https://gitee.com/ryan406/xiaoyuan.git`）** 作为国内高速同步与云端免密拉取主通道，Mac 本机 `origin` 配置一键双推同时同步至 GitHub（备份）与 Gitee。
-  - **Mac 端**：负责日常功能开发、增量 Lint、JS 语法校验与无本地语音模型/无真机依赖的路由与单元测试；推送 `git push origin main` 自动同步双端仓库。
-  - **Windows 端**：项目根直接关联 GitHub，`main` 跟踪 `origin/main`，本机补丁用独立分支维护。更新时保留本地 `.env`、`data/` 及虚拟环境，负责本地音频、浏览器实操和真机直连联调。
-  - **云端（`47.112.16.195`）**：安装 Git 后维护公开只读镜像仓 `/opt/xiaodan/repo`（零密钥 HTTPS 拉取 Gitee），通过 [release_from_git.sh](deploy/release_from_git.sh) 导出构建至 `/opt/xiaodan/releases/` 并挂载 `/opt/xiaodan/shared/{.env,data,logs}`、原子切换 `/opt/xiaodan/current`；**不在运行目录直接 `git pull`**，以免破坏软链或权限属主。
-- 技术栈为 FastAPI + 原生 HTML/CSS/JavaScript + SQLite；主线支持百炼 `qwen3.8-omni-flash-realtime` 与 OpenAI 兼容 Realtime，同时支持可切换的分模型 Pipeline（LLM + 在线/可选本地 ASR + MiMo/OpenAI/百炼 TTS）。
-- 已有塔菲复刻音色、语速/音调处理、正式回答首句开场与基础交流继续保留，各 `(mode, provider, model)` 作用域音色与业务选用状态存入 `assistant_state.sqlite3`（不覆盖切换前配置）；改动已跑通/用户确认的功能前先说明并取得相应同意。当前实现和证据以 [progress](agent/docs/progress.md) 为准。
-- 多库与助手能力选择已实现并完成部分真实验证，确切范围看 progress；不能将文字/资料操作通过写成所有语音链通过。外部写/发送/删除/付费工具没有完整对话确认时，不得自动放行。已明确开放的本地设备/声音控制按现有规则执行。
+  - **Mac 端**：负责日常功能开发、增量 Lint、JS 语法校验、Mac `desktop_node` 调试与无硬件/本地语音依赖的回归测试；推送 `git push origin main` 自动同步双端仓库。
+  - **Windows 端**：项目根 `E:\xiaodan` 跟踪 `origin/main`，本机补丁用独立分支维护。更新时保留本地 `.env`、`data/` 及虚拟环境，负责本地音频、Windows `desktop_node` 与真机直连联调。
+  - **云端（`47.112.16.195`）**：维护只读镜像仓 `/opt/xiaodan/repo`（零密钥 HTTPS 拉取 Gitee），通过 [release_from_git.sh](deploy/release_from_git.sh) 导出构建至 `/opt/xiaodan/releases/` 并挂载 `/opt/xiaodan/shared/{.env,data,logs}`、原子切换 `/opt/xiaodan/current`；**不在运行目录直接 `git pull`**，以免破坏软链或权限属主。
+- 技术栈为 FastAPI + 原生 HTML/CSS/JavaScript + SQLite；实时主线为百炼 **`qwen-audio-3.1-realtime-flash`**（顶层 `voice`、24k/16k `pcm`、`fun-asr` 转写、百炼原生 `enable_search` 合并联网与天气搜索、`output_text` 多轮助手历史），同时兼容 OpenAI Realtime 与显式分模型 Pipeline；电脑操控支持百炼原生视觉模型（`qwen3.8-max-0902`、`qwen3.5-plus` 等）。
+- 已有百炼 `voice-enrollment` 塔菲复刻音色、语速/音调处理、正式回答首句开场与基础交流继续保留，各 `(mode, provider, model)` 作用域音色与业务选用状态存入 `assistant_state.sqlite3`（不覆盖切换前配置）；改动已跑通/用户确认的功能前先说明并取得相应同意。当前实现和证据以 [progress](agent/docs/progress.md) 为准。
+- 写操作（含 `desktop_open`/`desktop_gui_action`/`desktop_set_clipboard`/`desktop_run_command` 及外部写工具）走统一确认闭环（卡片确认或 3 分钟租约，语音与网页端均支持即时喊停并撤回租约与关闭桌端悬浮 HUD）；凭证文件（`.env`、`.ssh`、私钥、Keychains）禁止读取。
 - 保留原配置、历史、知识库原文/索引、音色与录音样本；设置保存不得清空对话。完整文字历史与有限活跃上下文分离，不长期保存对话录音。
 - API 地址、模型 ID、参数及工具支持查官方资料，不猜。密钥只存服务端私有配置，不发模型、不入固件/示例/Git，不在日志或群聊回显。
-- 云端2核约1.87GB已部署，设备已切云并完成真实语音问答；云端随机卡顿仍在，用户明确暂缓解决。网页按用户要求免登录，不擅自加回账号密码；HTTPS/WSS、独立设备鉴权、内部代理凭据与同源保护保留。每日独立备份仍待实施，不能写成已交付。
-- Windows 项目根为 `E:\xiaodan`，云端程序在 `/opt/xiaodan/current`。Git 开发快照与云端发布分别管理，部署和刷写按任务授权执行。当前版本与声音参数见 START 及原始证据。
-- 不以旧上游板级AEC说明否定项目后来已有的播放参考/AEC实现；也不以 `aec=true` 或网关发完证明所有打断/播放场景通过。设备打开串口/RTS曾导致复位及下载模式，不把串口读取当成必然无副作用。
+- 云端2核约1.87GB已部署，Mac 电脑操控及云端公网访问已实际验证；网页按用户要求免登录，保留 HTTPS/WSS、独立设备鉴权、内部代理凭据、同源保护与公网屏蔽桌面节点管理接口。每日独立备份仍待实施，真机在新实时模型下的语音打断操控待实测，云端随机卡顿暂缓。
+- 设备打开串口/RTS曾导致复位及下载模式，不把串口读取当成必然无副作用；不擅自刷写固件或变更设备 OTA 地址。
 
 ## 协作与操作
 
 - 主 Bot 负责目标、派工、文件归属、集成和运行调度；同一文件同时只有一个修改负责人。开发用多个 Bot 不代表产品提供多个助手。
 - 服务启动/重启、设备、数据库迁移及付费调用由主 Bot 按授权统一调度；先检查已有实例。并行仅用于互不争抢的工作，数据/编译任务按实际资源串行。
-- 不擅自 commit/push/部署、烧录固件、改设备地址、安装/下载或操作远端。已有密钥不等于允许无限批量调用。本轮文档同步不自动授权这些操作，也不要求已授权的常规动作重新逐项审批。
+- 不擅自 commit/push/部署、烧录固件、改设备地址、安装/下载或操作远端。已有密钥不等于允许无限批量调用。本轮文档同步以外的动作仍须按任务授权执行，也不要求已授权的常规动作重新逐项审批。
 - 下载/安装一旦获得授权，下载、模型、安装包、缓存和语音环境放在项目内，并显式设置项目内 TEMP/TMP/PIP_CACHE_DIR/HF_HOME/TORCH_HOME，不使用 C 盘下载目录。
-- 沿用现有 Codex 灰阶明暗主题，不另选配色。沿用 [agent](agent/agent.md) 文档体系，不建平行 PRD/计划/报告；只更新有效信息，过期要求直接修正，历史证据标历史并保留。
+- 沿用现有 Codex 灰阶明暗主题与暖琥珀金强调色，不另选配色。沿用 [agent](agent/agent.md) 文档体系，不建平行 PRD/计划/报告；只更新有效信息，过期要求直接修正，历史证据标历史并保留。
 - 默认中文、简短直白、先结论。汇报改了什么、实际结果和剩余阻塞，不堆术语，不要求用户替 AI 判断接口是否接通。

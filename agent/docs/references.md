@@ -38,7 +38,7 @@
 
 ## 语音与模型来源（历史核对，非当前选型清单）
 
-- **当前实时主线**为百炼 `qwen3.8-omni-flash-realtime`（OpenAI 兼容 realtime，WebSocket）；实时模式的设备/网页语音与网页文字均以它为准。MiMo/Kokoro 属分模型或历史候选，下列条目为按其核对日期的历史记录。
+- **当前实时主线**已切换为百炼 `qwen-audio-3.1-realtime-flash`（WebSocket，支持 `voice-enrollment` 音色与原生 `enable_search`）；MiMo/Kokoro 与更早 `qwen3.8-omni-flash-realtime` 记录均属历史对照或分模型候选，下列条目为按其核对日期的历史记录。
 - 2026-10-30核对 [TokenDance Chat Completions 示例](https://tokendance.space/docs/protocol-openai-chat-completions.md)：文字及流式示例都可省略 `max_tokens`，正文仍为 `message.content` / `delta.content`。本项目取消默认512限制，未配置时省略该字段，由服务端决定上限；不猜测另一固定上限或网关思考参数。
 - 同日核对 [Spark-X2.5-4B 官方模型卡](https://huggingface.co/XHToken/Spark-X2.5-4B)：默认思考及 `chat_template_kwargs.enable_thinking` 的说明属于其自部署 SGLang/vLLM 示例，不能证明 TokenDance 网关支持同一扩展参数，本项目未发送。历史空正文请求缺少结束原因记录，不能据512输出计数断言发生了思考额度耗尽。
 - 同日核对 [OpenAI Python 的完成类型](https://github.com/openai/openai-python/blob/main/src/openai/types/chat/chat_completion.py)与当前已安装SDK：`finish_reason=length` 表示达到输出上限，`content_filter` 表示内容过滤；可选 `completion_tokens_details.reasoning_tokens` 只在上游报告时使用。日志只记录受限结束原因和数值用量，不记录完整响应或思考正文；没有额外请求流式用量或自动重试。

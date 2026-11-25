@@ -1,53 +1,42 @@
 # 代码与运行位置地图
 
-更新：2026-11-17。此处描述模块职责，不代表磁盘代码已被运行进程加载；版本与暂停事项见 [START](../START.md)。
+更新：2026-11-25。此处描述模块职责，不代表磁盘代码已被运行进程加载；实际版本与实测边界见 [START](../START.md)。
 
-## Windows 工作树与云端发布
-
-| 位置 | 职责 |
-| --- | --- |
-| `E:\xiaodan` | Windows Git 工作树、运行目录和本机私有数据 |
-| `/opt/xiaodan/current` | 云端release链接；共享配置/数据/日志在 `/opt/xiaodan/shared` |
-
-Windows 从项目根运行源码，云端从独立发布目录运行。新电脑以实际 clone 根目录为准。
-
-## 后端关键模块
-
-路径相对各自程序根目录；实际任务先确认要改哪个环境。
+## 三端与运行目录
 
 | 位置 | 职责 |
 | --- | --- |
-| `backend/run_devices.py` | 单进程管理端/设备网关启动；Windows8000/8003，云端8010/8013 |
-| `backend/app/main.py` / `devices.py` / `desktop.py` | 管理路由、OTA/设备WS、Windows/Mac桌面节点WS(`/desktop/v1/`)与屏幕观察 |
-| `realtime.py` / `realtime_text.py` | 百炼实时语音与实时模型文字会话/工具反馈；两种入口时序不同 |
+| Mac 开发根目录 | 日常开发、增量 Lint、JS 语法校验、`desktop_node` Mac 联调与 `git push origin main` 双推 Gitee + GitHub |
+| `E:\xiaodan` | Windows Git 工作树、本地运行目录与本机私有数据（保留 `.env`、`data/`、`logs/`、虚拟环境） |
+| `/opt/xiaodan/current` | 云端生产 release 软链；只读镜像仓 `/opt/xiaodan/repo`，共享配置/数据/日志位于 `/opt/xiaodan/shared` |
+
+## 后端与桌端关键模块
+
+后端模块除特别标注外均位于 `backend/app/`；跨平台桌端节点位于项目根 `desktop_node/`。
+
+| 位置 | 职责 |
+| --- | --- |
+| `backend/run_devices.py` | 单进程管理端与设备网关启动入口；本地通常监听 8000/8003，云端内部监听 8010/8013 |
+| `main.py` / `devices.py` / `desktop.py` | 管理 API、SSE 流对话(`/chat/stream`)、停止打断(`/chat/cancel`)、OTA/设备 WS、`/desktop/v1/` 跨平台节点中心与 `abort_all` |
+| `realtime.py` / `realtime_text.py` | 百炼 `qwen-audio-3.1-realtime-flash`（及 OpenAI 兼容）实时语音与实时文字会话、内置联网搜索、`output_text` 多轮与语音即时打断 |
 | `device_realtime.py` / `voice_transport.py` | 设备实时桥接、Opus/发送节奏/预缓冲、播放结束与取消隔离 |
-| `voice_chat.py` / `conversation.py` / `device_turn.py` | 网页/设备对话协调及显式分模型路径，不是切换实时音色的入口 |
-| `prompt_builder.py` / `prompt_context.py` / `speech_text.py` | 角色/工作档案/规则/时间/渠道提示与朗读规范化 |
-| `tools.py` / `desktop_tools.py` / `tool_dialogue.py` / `tool_gateway.py` | 注册/桌面控制工具、权限与确认闭环(`approval_id`/TTL)、工具循环与审计脱敏 |
-| `text_tool_selection.py` | 网页实时文字候选并集与同轮补充加载；语音尚未接入 |
-| `conversation_memory.py` | 活动历史预算与当前会话原文按需检索，无跨会话画像 |
-| `weather.py` / `knowledge.py` / `api_requests.py` | 天气、M5官方只读资料、自定义HTTP API |
-| `personal_kb.py` / `embeddings.py` / `audit_store.py` | 多库原文/FTS/向量/按库过滤与洞察快照 |
-| `order_confirmation.py` | 特定订单编号确认，不等于通用外部写操作确认平台 |
-| `service.py` / `history_store.py` / `schemas.py` / `error_log.py` | 会话/持久历史、Token明细结构与聚合、SQLite 脱敏系统异常日志（`system_errors`） |
-| `config.py` / `settings_store.py` | 配置读取、单助手选择、原子保存与私有凭据 |
-| `audio_fx.py` / `audio_metrics.py` | 原语速/音调后处理与被动PCM/网关计量；不长期保存音频 |
-| `qwen_voices.py` / `voices.py` / `tts.py` | 百炼/分模型音色元数据及显式TTS适配，不混接实时主线 |
-| `ack_audio.py` / `community.py` / `speech_bridge.py` | 历史应答音、已有社区代码桥、本地worker；不是新主线依赖 |
-| `app.html` / `app.js` / `app.css` / `paths.js` | Agent 优先管理后台、确认卡片/执行胶囊、电脑节点控制台、执行洞察（含异常日志）与子路径支持 |
-| `voice.js` / `voice-capture.js` | 网页音频采集、真实状态与播放 |
-| `desktop_node/` (`client.py` / `overlay.py` / `ui_tree.py` / `platform_windows.py` / `platform_macos.py`) | Windows 与 macOS 跨平台桌面节点客户端、系统辅助功能控件树读取及全屏点击穿透边框/顶部状态条（位于项目根 `desktop_node/`） |
-
-上述后端文件除首行外均位于 `backend/app/`。细节按实际代码核对，不因共享模块断言所有渠道都已通过。
+| `voice_chat.py` / `conversation.py` / `device_turn.py` | 网页/设备对话协调及显式分模型 Pipeline 路径 |
+| `prompt_builder.py` / `prompt_context.py` / `speech_text.py` | 角色/工作档案/内置联网规则/时间/渠道提示与朗读规范化 |
+| `tools.py` / `desktop_tools.py` / `tool_dialogue.py` / `tool_gateway.py` | 工具注册/桌面操控工具、确认卡片闭环(`approval_id`/300s TTL/3 分钟租约与 `revoke_all_desktop_leases`)、参数归一化与 3 轮熔断 |
+| `text_tool_selection.py` | 启用工具超过 5 项时的按需候选筛选与 `_load_task_tools` 同轮补充（自动排除已被原生联网取代的 `web_search`/`get_weather`） |
+| `conversation_memory.py` | 活动历史预算（≤6 轮/6000 字符）与当前会话原文按需检索 |
+| `knowledge.py` / `api_requests.py` / `weather.py` | M5 官方只读资料、自定义 HTTP API（`weather.py` 保留作兼容与分模型后备，主线默认走百炼原生搜索） |
+| `personal_kb.py` / `embeddings.py` / `audit_store.py` | 多库原文/FTS/向量按库硬过滤、洞察读写、会话级 `Agent` 执行轨迹聚合 (`/api/insights/sessions`) |
+| `service.py` / `history_store.py` / `schemas.py` / `error_log.py` | 会话与持久历史、`first_response_ms` 等待耗时、Token 明细聚合、SQLite 脱敏系统异常日志（`system_errors`） |
+| `config.py` / `settings_store.py` / `qwen_voices.py` | 配置读取、单助手选择与 `(mode, provider, model)` 作用域持久状态、百炼 `voice-enrollment` 音色对接 |
+| `audio_fx.py` / `audio_metrics.py` / `ack_cache.py` | 原语速/音调后处理、被动 PCM 计量、实时工具首响本地 PCM 缓存（`data/ack_cache/`） |
+| `voices.py` / `tts.py` / `asr.py` | 分模型显式 TTS/ASR 适配与音色元数据 |
+| `app.html` / `app.js` / `app.css` / `paths.js` | 极简单助手管理台、确认卡片/停止按钮、公网只读电脑状态卡片、4 页签「记录」与左树右详轨迹查看器、子路径适配 |
+| `voice.js` / `voice-capture.js` | 网页音频采集、实时状态呈现与播放 |
+| `desktop_node/` (`client.py` / `som.py` / `ui_tree.py` / `overlay.py` / `platform_macos.py` / `platform_windows.py`) | macOS/Windows 跨平台桌端连接客户端、SoM 高亮编号图渲染、系统辅助功能控件树、穿透边框 HUD（含收到 `abort` 立即隐藏） |
 
 ## 固件、部署与数据
 
-- `firmware/xiaozhi-esp32/main/application.cc`：唤醒/聆听/说话/结束状态；`main/audio/`：AFE、播放参考/AEC、编解码与播放；`main/protocols/`、`main/network/`：设备协议/TCP。
-- `main/boards/atoms3r-echo-base/`与对应sdkconfig：板级显示/声音。工作树的 `robot_display.h`、`animations/`、新UI回调与TCP改动属于保留实验，不是当前稳定设备清单。
-- `build-tafei-mn5-ui-anim`是动画实验构建目录，不据名称当稳定恢复产物；稳定原应用/assets及刷写证据按progress与已有备份定位，未经要求不构建/刷机。
-- Git 工作树的 `deploy/` 包含 Caddy 路由和日志过滤、systemd、访问环境模板及脱敏启动脚本。线上使用已部署的配置。
-- `data/`：私有历史/知识库SQLite、设备/工具/音色配置；`models/voice/`：原音色样本。云端对应共享数据，不随代码回滚。
-- `logs/`、`output/`、`.cache/device-backups/`：日志与历史证据；`firmware/backup/`：既有固件备份。保留原始记录，不当执行指令。
-- `third_party/`、`.venv`、`.venv-speech`、现有模型：按现有用途保留；不为文档统一迁移、下载或重装。
-
-产品行为、设计、操作与证据分别在PRD、architecture、operations、progress。根目录旧咨询报告只作历史意见，不是主线选型或自动操作授权。
+- `firmware/xiaozhi-esp32/`：设备状态机、AFE、播放参考/AEC 与板级代码。工作树中的新动画与相关构建目录（如 `build-tafei-mn5-ui-anim`）属于保留实验，不经授权不编译或刷入设备。
+- `deploy/`：Caddy 路由与日志过滤模板、systemd 配置、`release_from_git.sh` 原子发布脚本及 `backup_shared.sh` 热备脚本。
+- `data/`、`models/voice/`、`logs/`、`output/`、`.env`：私有运行数据、音色样本与历史日志均留在各自运行机/云端 `/opt/xiaodan/shared`，不随 Git 迁移。

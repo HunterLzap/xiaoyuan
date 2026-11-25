@@ -1,6 +1,17 @@
 # 当前进度与证据
 
-更新时间：2026-11-24。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
+更新时间：2026-11-25。**本文件是实跑/测试结果的唯一索引，不是当前执行清单**；当前版本、任务与暂停事项只看 [START](../START.md)。下方按时间保留过程，不删除早期失败，也不把旧“当前/下一步/未部署”当现行要求。
+
+## 实时主线切换、桌面操控云端实测与语音打断（2026-11-25）
+
+- **真实云端与 Mac 联调实测（用户现场目视与实操确认，截至 `a433728`）**：
+  - **音色复刻与实时主线 `qwen-audio-3.1-realtime-flash`**：用户在云端成功完成百炼 `voice-enrollment` 塔菲音色复刻并验证网页实时文字多轮对话与“今天上海天气/金价”百炼原生 `enable_search` 搜索回答；修复 `output_text` 多轮类型报错、工具数量 `≤5` 跳过额外筛选及“这就去查”空口承诺续问后恢复正常回答。
+  - **云端 Mac 桌面操控实测（`qwen3.8-max-0902`）**：本机 Mac (`ryandeMacBook-Air.local`，`1470×956`) 运行 `.venv/bin/python -m desktop_node --server "wss://ryan406.online/xiaoyuan/desktop/v1/" --token ...` 成功连入云端并点亮「电脑」在线状态；用户通过网页向 `qwen3.8-max-0902` 下达操控指令并确认首步卡片后，模型自动完成打开 Antigravity、SoM 截图看屏定位当前对话输入框、键入并点击发送消息的完整闭环。
+  - **UI 与观测实测**：验证「模型」两卡片与 3 项高级设置、独立「天气查询」卡片移除与「联网搜索」测试按钮、消息详情展示「等待耗时（`first_response_ms`）」且无估算费用、公网「设备 → 电脑」优先显示在线/离线电脑卡片并默认折叠连接命令，以及「记录」4 页签（对话历史左树右详「Agent 执行轨迹」视图）。
+- **语音与网页即时打断电脑操控（Mac Darwin `.venv` Python 3.12.13，基线 `a87a8a8`）**：
+  - `backend/app/tool_gateway.py`、`desktop.py`、`desktop_node/client.py`、`realtime.py`、`main.py` 联改完成：支持跨会话取消 `active_task`、`revoke_all_desktop_leases()`、`DesktopHub.abort_all()` 下发 `{"type": "abort"}` 隐藏桌端 HUD 并终止在途 RPC，兼容单/多段中文及英文“停止/别动了/住手/stop/关闭”语音喊停词。
+  - **本地验证**：`.venv/bin/python scripts/lint_incremental.py` 通过（`ruff=8, pyright=119, baseline=146, new=0`）；`.venv/bin/pytest tests/test_realtime_failures.py tests/test_voice_compat.py tests/test_desktop_bridge.py tests/test_gateway_trace.py -v` 实跑 **73 passed, 8 subtests passed**（0 skipped），`node --check backend/app/app.js` 等修改前端 JS 校验通过。
+- **尚未现场实测**：`a87a8a8` 语音喊停打断桌面操控的云端实机表现，以及 AtomS3R 硬件真机在 `qwen-audio-3.1-realtime-flash` 下的连续语音对话、首声延时与 `ack_cache` 首响播报。
 
 ## Batch 5 同音色工具首响与桌面操控（2026-11-24）
 
