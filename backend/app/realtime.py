@@ -190,7 +190,10 @@ class RealtimeTurn:
         tool_names = ([item.get("function", item)["name"] for item in self._realtime_tool_definitions()]
                       if getattr(self.tool_context, "registry", None)
                       and self.tool_rounds < max_rounds and not self.control_continuation else [])
-        return build_system_prompt(self.config, "voice", tool_names, turn_state)
+        return build_system_prompt(
+            self.config, "voice", tool_names, turn_state,
+            native_search=self._uses_native_web_search(),
+        )
 
     async def refresh_tools(self, *, response_turn_id: UUID | None = None):
         max_rounds, _ = turn_limits(getattr(self.tool_context, "allowed", None))

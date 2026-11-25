@@ -775,6 +775,58 @@ class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("fixture-secret-key", err.exception.message)
         self.assertIn("[已隐藏]", err.exception.message)
 
+    async def test_native_search_prompt_and_stub_nudge(self):
+        from backend.app.prompt_builder import build_system_prompt
+        from backend.app.realtime_text import RealtimeTextProvider
+
+        cfg = Settings(
+            _env_file=None,
+            rt_provider="bailian",
+            rt_model="qwen-audio-3.1-realtime-flash",
+            rt_api_key="fixture-secret-key",
+        )
+        prompt = build_system_prompt(cfg, "text", ["get_weather"], compact=True, native_search=True)
+        self.assertIn("内置联网搜索", prompt)
+        self.assertIn("禁止只说“这就去查/稍等”就结束回复", prompt)
+
+        registry = ToolRegistry([
+            SimpleNamespace(spec=ToolSpec("get_weather", "weather", {"type": "object", "properties": {}})),
+            SimpleNamespace(spec=ToolSpec("web_search", "search", {"type": "object", "properties": {}})),
+        ])
+        ctx = SimpleNamespace(
+            session_id="s1", turn_id="t2", question="今日金价", history=(),
+            registry=registry, current_registry=lambda: registry, tool_gateway=None,
+            allowed={"get_weather", "web_search"}, outputs=[], secrets=[],
+            order_state_text=lambda: "", mark_sent=lambda *_: None,
+            definitions=lambda **kw: registry.definitions(nested=kw.get("nested", False)),
+        )
+        socket = _RealtimeSocket()
+        socket.feed("response.output_text.delta", delta="小菲这就去查今日金价喵。")
+        socket.feed("response.done", response={"status": "completed", "usage": {"input_tokens": 100, "output_tokens": 10}})
+        socket.feed("response.output_text.delta", delta="今天国内金价大约762元/克喵。")
+        socket.feed("response.done", response={
+            "status": "completed",
+            "search_info": {"search_results": [{"title": "今日金价", "url": "https://example.com"}]},
+            "usage": {"input_tokens": 120, "output_tokens": 12, "plugins": {"search": {"count": 1}}},
+        })
+
+        @asynccontextmanager
+        async def connect(*args, **kwargs):
+            yield socket
+
+        provider = RealtimeTextProvider(cfg)
+        chunks = []
+        with patch("backend.app.realtime_text.DirectConnect", connect):
+            async for item in provider.complete_stream([{"role": "user", "content": "今日金价"}], tool_context=ctx):
+                chunks.append(item)
+
+        text = "".join(c for c in chunks if isinstance(c, str))
+        self.assertIn("小菲这就去查今日金价喵。", text)
+        self.assertIn("今天国内金价大约762元/克喵。", text)
+        self.assertEqual([x["type"] for x in socket.sent].count("response.create"), 2)
+        self.assertEqual(chunks[-1].usage.prompt_tokens, 220)
+        self.assertEqual(chunks[-1].usage.completion_tokens, 22)
+
 
 if __name__ == "__main__":
     unittest.main()

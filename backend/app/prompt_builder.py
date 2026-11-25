@@ -12,7 +12,7 @@ from .tool_dialogue import BUILTIN_TOOL_NAMES, build_tool_instructions
 
 
 def build_system_prompt(settings, channel="text", tool_names=None, turn_state=None,
-                        assistant_prompt=None, compact=False) -> str:
+                        assistant_prompt=None, compact=False, native_search: bool = False) -> str:
     """拼一条完整系统提示。
 
     channel: "voice" 追加语音朗读规范；"text" 不追加。
@@ -28,11 +28,18 @@ def build_system_prompt(settings, channel="text", tool_names=None, turn_state=No
     profile = (getattr(settings, "agent_profile", "") or "").strip() if settings is not None else ""
     if profile:
         parts.append("\n个人工作档案与偏好：\n" + profile)
-    parts.append(
-        "\n" + now_context_line() +
-        "\n时效事实只依据本轮成功工具结果并说明数据时间；缺依据就说明无法获取，不猜数值。"
-        "日期时间直接用上述北京时间，非实时常识正常回答。"
-        if compact else context_instruction())
+    if compact:
+        timely_rule = (
+            "\n时效事实只依据本轮成功工具结果或内置联网搜索结果并说明数据时间；缺依据就说明无法获取，不猜数值。"
+            if native_search else
+            "\n时效事实只依据本轮成功工具结果并说明数据时间；缺依据就说明无法获取，不猜数值。"
+        )
+        parts.append(
+            "\n" + now_context_line() + timely_rule +
+            "日期时间直接用上述北京时间，非实时常识正常回答。"
+        )
+    else:
+        parts.append(context_instruction())
     if channel == "voice":
         parts.append(SPEECH_OUTPUT_INSTRUCTION)
     else:
@@ -41,6 +48,11 @@ def build_system_prompt(settings, channel="text", tool_names=None, turn_state=No
             "不要长篇大论，不要使用 Emoji、多级标题或冗长项目列表；除非用户明确要求写长文、代码、表格或详细清单。"
         )
     parts.append(build_tool_instructions(tool_names, channel, compact=compact))
+    if native_search:
+        parts.append(
+            "\n已开启内置联网搜索：涉及金价、新闻、汇率、百科等实时公开信息时，"
+            "直接联网检索并一次性给出具体结果与数据时间，禁止只说“这就去查/稍等”就结束回复。"
+        )
     if tool_names is not None and not compact:
         parts.append("\n再次强调：结合当前问题和有效对话上下文，判断用户是否有具体的查询或控制需求；"
                      "遇到省略式追问（如“明天呢？”“发货了吗？”）要结合上一轮意图判断，不要当成闲聊。")

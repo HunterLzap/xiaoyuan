@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from urllib.parse import urlencode
 from uuid import uuid4
 
@@ -16,6 +17,7 @@ from .text_tool_selection import TextToolSelection
 from .tool_dialogue import TOOL_LOADING_NAME
 
 logger = logging.getLogger(__name__)
+_NATIVE_SEARCH_STUB_RE = re.compile(r"(?:这就|马上|立刻|帮你|给你|先去|去).{0,8}(?:查|搜|看)|稍等")
 
 
 def _upstream_error_detail(event: dict, secrets: tuple | list = ()) -> str:
@@ -132,7 +134,8 @@ class RealtimeTextProvider:
                             defs = [item for item in defs if item.get("function", item).get("name") != "web_search"]
                         instructions = build_system_prompt(
                             settings, "text", active_names,
-                            turn_state or None, assistant_prompt=joined, compact=True)
+                            turn_state or None, assistant_prompt=joined, compact=True,
+                            native_search=use_native_search)
                         if selection is not None:
                             instructions += selection.instructions()
                         return {"instructions": instructions, "tools": defs}
@@ -162,6 +165,7 @@ class RealtimeTextProvider:
                     request_pending = True
                     await send("response.create")
                     function_calls, round_index = {}, 0
+                    response_text, native_search_nudged = "", False
                     while True:
                         event = json.loads(await socket.recv())
                         kind = event.get("type")
@@ -170,6 +174,7 @@ class RealtimeTextProvider:
                         if kind in ("response.text.delta", "response.output_text.delta"):
                             delta = event.get("delta") or ""
                             if delta:
+                                response_text += delta
                                 yield delta
                         elif kind == "error":
                             raise_upstream(event)
@@ -184,6 +189,8 @@ class RealtimeTextProvider:
                                 raise_upstream(event)
                             from dataclasses import replace
                             usage = response.get("usage") or {}
+                            search_results = (response.get("search_info") or {}).get("search_results") or []
+                            search_count = ((usage.get("plugins") or {}).get("search") or {}).get("count") or 0
                             for item in response.get("output", []):
                                 if item.get("type") == "function_call":
                                     function_calls[item["call_id"]] = item
@@ -192,6 +199,23 @@ class RealtimeTextProvider:
                             round_results.append(result)
                             request_pending = False
                             if not function_calls:
+                                stub_text = response_text.strip()
+                                if (use_native_search and not native_search_nudged
+                                        and search_count == 0 and not search_results
+                                        and 0 < len(stub_text) <= 32
+                                        and _NATIVE_SEARCH_STUB_RE.search(stub_text)):
+                                    native_search_nudged = True
+                                    logger.info("realtime_text native_search stub detected, nudging once")
+                                    yield "\n\n"
+                                    response_text = ""
+                                    await send("conversation.item.create", item={
+                                        "type": "message",
+                                        "role": "user",
+                                        "content": [{"type": "input_text", "text": "请直接联网搜索并一次性给出具体查询结果与数据时间，不要只说正在查询。"}],
+                                    })
+                                    request_pending = True
+                                    await send("response.create")
+                                    continue
                                 yield replace(result, usage=combine_usage(round_results))
                                 return
                             if tool_context is None:
@@ -219,6 +243,7 @@ class RealtimeTextProvider:
                                         raise_upstream(update)
                                     if update.get("type") == "session.updated":
                                         break
+                            response_text = ""
                             request_pending = True
                             await send("response.create")
         except ProviderError:
