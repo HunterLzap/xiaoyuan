@@ -55,8 +55,24 @@ def _bailian_search_url(settings: Settings) -> str:
 def _client() -> httpx.AsyncClient:
     global _SHARED_CLIENT
     if _SHARED_CLIENT is None or _SHARED_CLIENT.is_closed:
-        _SHARED_CLIENT = httpx.AsyncClient(timeout=10.0, trust_env=False, follow_redirects=False)
+        _SHARED_CLIENT = httpx.AsyncClient(timeout=20.0, trust_env=False, follow_redirects=False)
     return _SHARED_CLIENT
+
+
+def _safe_upstream_detail(response: httpx.Response, secret: str) -> str:
+    detail = ""
+    try:
+        data = response.json()
+        err = data.get("error") if isinstance(data, dict) else None
+        if isinstance(err, dict):
+            detail = str(err.get("message") or err.get("code") or "")
+        elif isinstance(data, dict):
+            detail = str(data.get("message") or "")
+    except ValueError:
+        detail = response.text or ""
+    if secret:
+        detail = detail.replace(secret, "***")
+    return " ".join(detail.split())[:140]
 
 
 async def close_web_search_client() -> None:
@@ -111,8 +127,10 @@ async def _search_bailian(settings: Settings, api_key: str, clean_q: str, count:
                     {"role": "system", "content": "请联网检索最新事实，用简洁中文客观总结关键数据与结论（不超过200字），不要编造。"},
                     {"role": "user", "content": clean_q},
                 ],
+                "stream": False,
+                "enable_thinking": False,
                 "enable_search": True,
-                "search_options": {"search_strategy": "turbo", "enable_source": True},
+                "search_options": {"search_strategy": "turbo", "enable_source": True, "forced_search": True},
                 "temperature": 0.1,
                 "max_tokens": 300,
             },
@@ -123,7 +141,9 @@ async def _search_bailian(settings: Settings, api_key: str, clean_q: str, count:
         raise WebSearchError("web_search_unavailable", "暂时无法连接百炼联网搜索。", 502) from None
 
     if response.status_code != 200:
-        raise WebSearchError("web_search_upstream_error", "百炼联网搜索请求失败。", 502)
+        detail = _safe_upstream_detail(response, api_key)
+        suffix = f"（HTTP {response.status_code}：{detail}）" if detail else f"（HTTP {response.status_code}）"
+        raise WebSearchError("web_search_upstream_error", f"百炼联网搜索请求失败{suffix}。", 502)
     try:
         payload = response.json()
         choice = (payload.get("choices") or [{}])[0]

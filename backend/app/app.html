@@ -127,10 +127,10 @@
       </nav>
     </aside>
     <div class="settings-main">
-      <header class="settings-view-header"><h1 id="settings-view-heading">助手</h1></header>
+      <header class="settings-view-header"><h1 id="settings-view-heading">助手</h1><div class="settings-header-actions"><button id="capability-refresh" type="button" class="text-button" hidden>刷新</button></div></header>
       <div id="settings-notice" class="notice" role="status" aria-live="polite" hidden></div>
       <div class="settings-dialog-body">
-      <section id="settings-view" class="page-view" aria-label="Agent 与档案" hidden><div class="page-content assistant-content">
+      <section id="settings-view" class="page-view" aria-label="助手" hidden><div class="page-content assistant-content">
         <form id="assistant-form"><fieldset id="role-fields" disabled>
           <section id="role-pane" class="assistant-section api-panel">
             <h2 class="api-panel-title"><label for="system_prompt">Agent 人设与指令</label></h2>
@@ -154,7 +154,7 @@
           </section>
 </fieldset><div class="settings-actions assistant-save"><span id="role-dirty-state">设置已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="assistant-reset" type="button" class="secondary-button">取消</button><button id="tts-save" type="submit" class="primary-button" disabled>保存</button></div></div></form>
       </div></section>
-      <section id="connections-view" class="page-view" aria-label="模型与连接" hidden><div class="page-content">
+      <section id="connections-view" class="page-view" aria-label="模型" hidden><div class="page-content">
         <form id="config-form"><fieldset id="config-fields" class="compact-api" disabled>
           <section class="api-panel model-overview-panel" id="model-overview-panel" aria-label="当前生效模型">
             <h2 class="api-panel-title">当前生效模型</h2>
@@ -318,13 +318,13 @@
               <p id="conn-web-search-test-result" class="small-note" role="status" aria-live="polite" hidden></p>
             </div>
           </section>
-          <section class="api-panel api-common"><button type="button" class="text-button" data-view="capabilities">管理技能、电脑操控与知识库 →</button><input id="m5stack_enabled" type="checkbox" checked hidden></section>
+          <input id="m5stack_enabled" type="checkbox" checked hidden>
         </fieldset><div class="settings-actions"><span id="dirty-state">接入已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="settings-api-cancel" type="button" class="secondary-button">取消</button><button id="save" type="submit" class="primary-button" disabled>保存并关闭</button></div></div></form>
       </div></section>
-      <section id="devices-view" class="page-view" aria-label="终端节点" hidden><div class="page-content">
+      <section id="devices-view" class="page-view" aria-label="设备" hidden><div class="page-content">
         <div class="insight-tabbar device-tabbar" role="tablist" aria-label="终端类型">
-          <button id="devices-tab-desktop" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="desktop-panel">个人电脑</button>
-          <button id="devices-tab-hardware" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="hardware-panel" tabindex="-1">语音硬件</button>
+          <button id="devices-tab-desktop" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="desktop-panel">电脑</button>
+          <button id="devices-tab-hardware" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="hardware-panel" tabindex="-1">硬件</button>
         </div>
         <section id="desktop-panel" class="desktop-panel" role="tabpanel" aria-labelledby="devices-tab-desktop">
           <div class="section-toolbar"><div><strong id="desktop-state">个人电脑节点（Windows / macOS）</strong><p id="desktop-state-detail" class="small-note" hidden></p></div><button id="desktop-refresh" type="button" class="text-button"><svg aria-hidden="true"><use href="#i-refresh"/></svg>刷新节点</button></div>
@@ -333,7 +333,7 @@
             <div class="desktop-preview-head"><span id="desktop-preview-meta" class="small-note"></span><button id="desktop-preview-close" type="button" class="text-button">收起预览</button></div>
             <img id="desktop-preview-img" alt="个人电脑实时截图预览">
           </div>
-          <details class="settings-advanced desktop-setup-box">
+          <details class="settings-advanced desktop-setup-box ui-card">
             <summary>接入新电脑（Windows / Mac 一键命令）<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary>
             <section class="settings-section">
               <div class="desktop-cmd-block"><label for="desktop-cmd-macos">macOS 启动命令</label><div class="device-url-row"><input id="desktop-cmd-macos" readonly><button id="desktop-copy-macos" type="button" class="secondary-button">复制</button></div><button id="desktop-download-macos" type="button" class="secondary-button" disabled>下载一键启动脚本 (.command)</button></div>
@@ -351,7 +351,7 @@
           <label class="checkbox-control"><input id="device-original-recorded" type="checkbox" required><span>我已核对设备的原 OTA 设置，包括原值为空的情况。</span></label>
         </section></fieldset><div class="settings-actions"><span class="small-note">保存不会修改设备连接。</span><button type="submit" class="primary-button">保存接入信息</button></div></form>
         <section class="settings-section device-address-section"><h2 id="device-address-title">设备接入地址</h2><p id="device-launch-note" class="small-note"></p><label class="sr-only" for="device-local-url">设备 OTA 接入地址</label><div class="device-url-row"><input id="device-local-url" readonly placeholder="保存接入信息后生成"><button id="device-copy-local" type="button" class="secondary-button" disabled>复制地址</button></div><p class="small-note">在设备配网页的高级选项中填写此地址，保存并按页面提示重新联网。按一下设备按钮建立控制连接。地址包含设备接入凭据，请仅用于自己的设备。</p></section>
-        </details><form id="device-preferences-form"><fieldset id="device-preferences-fields"><section class="settings-section">
+        </details><form id="device-preferences-form" class="ui-card"><fieldset id="device-preferences-fields"><section class="settings-section">
           <div class="settings-row"><label for="device-text">屏幕文字</label><input id="device-text" maxlength="120" required value="已连接电脑服务"></div>
           <div class="settings-row"><label for="device-brightness">屏幕亮度</label><input id="device-brightness" type="number" min="10" max="100" required value="60" placeholder="10–100"></div>
           <div class="settings-row"><label for="device-theme">屏幕主题</label><select id="device-theme"><option value="dark">深色</option><option value="light">浅色</option></select></div>
@@ -360,7 +360,7 @@
         <details class="settings-advanced device-recovery"><summary>切回原服务<svg aria-hidden="true"><use href="#i-chevron"/></svg></summary><ol><li>让设备重新进入配网设置，打开高级选项。</li><li>将保存的原 OTA 地址填回设备；若原值为空，清空设备中的 OTA 字段。保存并重新联网。</li><li>确认小智平台恢复在线，并用设备实际对话验证。</li></ol><p id="device-recovery-value" class="small-note">尚未保存原设备设置。</p><button id="device-copy-original" type="button" class="secondary-button" disabled>复制已保存的原地址</button><p class="small-note">现有固件需要在设备配网页切换；这里不会声称已经远程切回。无需解除原平台绑定。</p></details>
         </section>
       </div></section>
-      <section id="capabilities-view" class="page-view" aria-label="技能与知识" hidden><div class="page-content capability-content">
+      <section id="capabilities-view" class="page-view" aria-label="技能与知识库" hidden><div class="page-content capability-content">
         <div class="insight-tabbar" role="tablist" aria-label="技能与知识分类" hidden>
           <button id="capabilities-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="capabilities-panel-tools" data-capability-tab="tools"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-wrench"/></svg><span>技能</span></button>
           <button id="capabilities-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="capabilities-panel-kb" data-capability-tab="kb" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>知识库</span></button>
@@ -368,7 +368,7 @@
         <p id="capability-notice" class="small-note" role="status" aria-live="polite"></p>
         <section id="capabilities-panel-tools" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-tools">
           <section class="capability-section" aria-labelledby="capability-tools-title">
-            <div class="capability-heading"><h2 id="capability-tools-title">可用技能</h2><div class="capability-heading-actions"><button id="tool-new" type="button" class="secondary-button">+ 新建 HTTP 工具</button><button id="capability-refresh" type="button" class="text-button">刷新</button></div></div>
+            <div class="capability-heading"><h2 id="capability-tools-title">可用技能</h2><div class="capability-heading-actions"><button id="tool-new" type="button" class="secondary-button">+ 新建 HTTP 工具</button></div></div>
             <div class="cap-panes">
               <div class="cap-list" id="capability-tools" role="list" aria-live="polite"></div>
               <div class="cap-detail" id="capability-detail" aria-live="polite"></div>
@@ -378,31 +378,29 @@
         <section id="capabilities-panel-kb" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-kb" hidden>
           <div class="kb-layout">
             <aside class="kb-libs" aria-label="知识库列表">
-              <div class="kb-libs-head"><strong>知识库</strong><button id="kb-new-library" type="button" class="text-button" disabled title="新建知识库">新建库</button></div>
+              <div class="kb-libs-head"><strong>知识库</strong><button id="kb-new-library" type="button" class="text-button" disabled title="新建知识库">+ 新建</button></div>
               <div id="kb-library-list" class="kb-library-list" aria-live="polite"><p class="small-note">默认库</p></div>
-              <p class="small-note">在这里新建、改名、删除知识库。</p>
             </aside>
             <div class="kb-main">
-          <section class="capability-section" aria-labelledby="kb-upload-title">
-            <div class="capability-heading"><h2 id="kb-upload-title">上传资料</h2><span id="kb-total" class="small-note"></span></div>
-            <p id="kb-file-types" class="small-note">支持 TXT、Markdown、DOCX，单份不超过 10MB。上传后自动解析并建立索引。</p>
-            <form id="kb-upload-form" class="capability-editor"><fieldset id="kb-upload-fields">
-              <div class="kb-upload-row"><label class="kb-upload-file">选择资料<input id="kb-file" type="file" accept=".txt,.md,.markdown,.docx" required></label>
-              <label>名称<input id="kb-title" maxlength="200" placeholder="留空使用文件名"></label>
-              <label>分组<input id="kb-group" maxlength="80" placeholder="可选"></label>
-              <div class="kb-upload-action"><button type="submit" class="secondary-button">上传并建立索引</button></div></div></fieldset></form>
+          <section class="capability-section ui-card" aria-labelledby="kb-upload-title">
+            <div class="capability-heading"><h2 id="kb-upload-title">上传资料</h2><span id="kb-file-types" class="small-note">支持 TXT / Markdown / DOCX / PDF</span></div>
+            <form id="kb-upload-form" class="kb-inline-form"><fieldset id="kb-upload-fields">
+              <div class="kb-upload-row"><input id="kb-file" type="file" accept=".txt,.md,.markdown,.docx" aria-label="选择资料" required>
+              <input id="kb-title" maxlength="200" placeholder="资料名称（可选）" aria-label="资料名称">
+              <input id="kb-group" maxlength="80" placeholder="分组标签（可选）" aria-label="分组标签">
+              <div class="kb-upload-action"><button type="submit" class="primary-button">上传并索引</button></div></div></fieldset></form>
           </section>
-          <section class="capability-section" aria-labelledby="kb-docs-title">
-            <div class="capability-heading"><h2 id="kb-docs-title">资料列表</h2><span class="small-note">点「查看内容」看正文；资料状态、片段数、更新时间都在这。</span></div>
+          <section class="capability-section ui-card" aria-labelledby="kb-docs-title">
+            <div class="capability-heading"><h2 id="kb-docs-title">资料列表</h2><span id="kb-total" class="small-note"></span></div>
             <div id="kb-documents" class="kb-doc-list" aria-live="polite"><p class="small-note">正在加载资料…</p></div>
             <button id="kb-more" class="text-button" type="button" hidden>加载更多资料</button>
             <input id="kb-replacement" type="file" accept=".txt,.md,.markdown,.docx" hidden aria-label="选择替换资料">
           </section>
-          <section class="capability-section" aria-labelledby="kb-search-title">
-            <div class="capability-heading"><h2 id="kb-search-title">试查</h2><span class="small-note">试查＝当前查看的知识库（可含未选入助手的库）；正式对话仍只检索助手所选库。</span></div>
-            <form id="kb-search-form" class="capability-editor"><fieldset id="kb-search-fields">
-              <div class="kb-upload-row"><label class="kb-upload-file">输入问题<input id="kb-query" required maxlength="1000" placeholder="比如：下一步做什么"></label>
-              <label>限定分组<input id="kb-search-group" maxlength="80" placeholder="留空查全部分组"></label>
+          <section class="capability-section ui-card" aria-labelledby="kb-search-title">
+            <div class="capability-heading"><h2 id="kb-search-title">检索试查</h2></div>
+            <form id="kb-search-form" class="kb-inline-form"><fieldset id="kb-search-fields">
+              <div class="kb-upload-row"><input id="kb-query" required maxlength="1000" placeholder="输入问题测试当前库命中片段…" aria-label="试查问题">
+              <input id="kb-search-group" maxlength="80" placeholder="限定分组（可选）" aria-label="限定分组">
               <div class="kb-upload-action"><button type="submit" class="secondary-button">查询</button></div></div></fieldset></form>
             <div id="kb-results" class="kb-results" aria-live="polite"></div>
           </section>
@@ -410,7 +408,7 @@
           </div>
         </section>
       </div></section>
-      <section id="insights-view" class="page-view" aria-label="数据洞察" hidden><div class="page-content capability-content">
+      <section id="insights-view" class="page-view" aria-label="记录" hidden><div class="page-content capability-content">
         <div id="insights-list-view">
         <span id="insights-intro" class="sr-only">数据洞察</span>
         <div class="insight-tabbar" role="tablist" aria-label="数据洞察分类">
@@ -421,7 +419,7 @@
           <button id="insights-refresh" type="button" class="text-button tabbar-refresh">刷新</button>
         </div>
         <p id="insights-notice" class="small-note" role="status" aria-live="polite"></p>
-        <section id="insights-panel-kb" class="capability-section insight-panel" role="tabpanel" aria-labelledby="insights-tab-kb">
+        <section id="insights-panel-kb" class="capability-section insight-panel ui-card" role="tabpanel" aria-labelledby="insights-tab-kb">
           <div class="insight-filters">
             <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-kb-q" type="search" maxlength="200" placeholder="搜索问题或答案" aria-label="搜索知识库记录"></label>
             <select id="insights-kb-type" aria-label="按回答类型筛选"><option value="">全部类型</option><option value="rag">资料辅助回答</option><option value="tool_answer">工具续答</option><option value="model_answer">模型回答</option><option value="retrieval_only">仅检索</option><option value="tool_only">仅工具调用</option></select>
@@ -433,7 +431,7 @@
           <div id="insights-kb" class="insight-list" aria-live="polite"><p class="small-note">尚未加载记录。</p></div>
           <div class="insight-pagination"><button id="insights-kb-prev" type="button" class="text-button" disabled>上一页</button><span id="insights-kb-page" class="small-note"></span><button id="insights-kb-next" type="button" class="text-button" disabled>下一页</button></div>
         </section>
-        <section id="insights-panel-tools" class="capability-section insight-panel" role="tabpanel" aria-labelledby="insights-tab-tools" hidden>
+        <section id="insights-panel-tools" class="capability-section insight-panel ui-card" role="tabpanel" aria-labelledby="insights-tab-tools" hidden>
           <div class="insight-filters">
             <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-tools-q" type="search" maxlength="200" placeholder="搜索工具或请求摘要" aria-label="搜索 API 记录"></label>
             <select id="insights-tools-status" aria-label="按状态筛选"><option value="">全部状态</option><option value="ok">成功</option><option value="empty">未命中</option><option value="error">失败</option><option value="unavailable">不可用</option><option value="not_requested">未调用</option><option value="cancelled">已取消</option><option value="failed">执行失败</option><option value="interrupted">已打断</option></select>
@@ -446,7 +444,7 @@
           <div id="insights-tools" class="insight-list" aria-live="polite"><p class="small-note">尚未加载记录。</p></div>
           <div class="insight-pagination"><button id="insights-tools-prev" type="button" class="text-button" disabled>上一页</button><span id="insights-tools-page" class="small-note"></span><button id="insights-tools-next" type="button" class="text-button" disabled>下一页</button></div>
         </section>
-        <section id="insights-panel-traces" class="capability-section insight-panel" role="tabpanel" aria-labelledby="insights-tab-traces" hidden>
+        <section id="insights-panel-traces" class="capability-section insight-panel ui-card" role="tabpanel" aria-labelledby="insights-tab-traces" hidden>
           <div class="insight-filters">
             <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-traces-q" type="search" maxlength="200" placeholder="搜索问题、回答或模型" aria-label="搜索全链路追踪"></label>
             <select id="insights-traces-source" aria-label="按通道来源筛选"><option value="">全部来源</option><option value="text">网页文字</option><option value="voice">网页语音</option><option value="device">硬件设备</option></select>
@@ -458,7 +456,7 @@
           <div id="insights-traces" class="insight-list" aria-live="polite"><p class="small-note">尚未加载记录。</p></div>
           <div class="insight-pagination"><button id="insights-traces-prev" type="button" class="text-button" disabled>上一页</button><span id="insights-traces-page" class="small-note"></span><button id="insights-traces-next" type="button" class="text-button" disabled>下一页</button></div>
         </section>
-        <section id="insights-panel-errors" class="capability-section insight-panel" role="tabpanel" aria-labelledby="insights-tab-errors" hidden>
+        <section id="insights-panel-errors" class="capability-section insight-panel ui-card" role="tabpanel" aria-labelledby="insights-tab-errors" hidden>
           <div class="insight-filters">
             <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-errors-q" type="search" maxlength="200" placeholder="搜索错误码、报错内容或节点" aria-label="搜索系统异常日志"></label>
             <select id="insights-errors-source" aria-label="按模块筛选"><option value="">全部模块</option><option value="device">语音硬件</option><option value="desktop">桌面节点</option><option value="model">模型与语音</option><option value="tool">工具调用</option><option value="system">服务端系统</option></select>

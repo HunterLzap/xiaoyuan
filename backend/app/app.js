@@ -129,6 +129,7 @@ function navigate(view, push = true, deviceTab = "desktop") {
   const title = view === "chat" ? state.detail?.title || "新对话" : {settings:"助手", connections:"模型", role:"助手", devices:"设备", capabilities:"技能", kb:"知识库", insights:"记录"}[view];
   el("view-title").textContent = title;
   if (el("settings-view-heading") && view !== "chat") el("settings-view-heading").textContent = title;
+  if (el("capability-refresh")) el("capability-refresh").hidden = !(view === "capabilities" || view === "kb");
   el("rename-form").hidden = true; el("view-title").hidden = false;
   const path = appPath({settings:"/settings", connections:"/settings#api", role:"/settings#role", devices:"/devices", capabilities:"/settings#capabilities", kb:"/settings#kb", insights:"/settings#insights", chat:"/"}[view]);
   if (push && location.pathname + location.hash !== path) history.pushState({view}, "", path);
@@ -1223,7 +1224,7 @@ function renderConnectionStatus() {
   if (savedConfig?.voice_mode === "realtime" ? !savedConfig.rt_key_configured : !savedTtsConfig?.api_key_configured) missing.push("语音");
   if (savedConfig?.voice_mode !== "realtime" && savedConfig?.asr_provider !== "local" && !savedConfig?.asr_key_configured) missing.push("识别");
   let hint;
-  if (missing.length) hint = `${missing.join("、")}服务尚未接入，请到「API接入」填写`;
+  if (missing.length) hint = `${missing.join("、")}服务尚未接入，请到「模型」填写`;
   else hint = savedConfig.voice_mode === "realtime" ? savedConfig.rt_model : `${savedConfig.model || "未选择"} · ${savedTtsConfig.tts_model}`;
   document.querySelectorAll(".model-hint").forEach(node => { node.textContent = hint; });
 }
@@ -1684,7 +1685,7 @@ document.querySelectorAll("#empty-state [data-prompt]").forEach(button => button
   fitComposer();
   el("message").focus();
   if (state.configured) sendMessage(el("message").value);
-  else notice("请先在「模型与连接」完成配置，再发送消息。");
+  else notice("请先在「模型」完成配置，再发送消息。");
 }));
 for (const id of ["model-button", "configure-link"]) el(id).addEventListener("click", () => navigate("connections"));
 el("desktop-planner-preset").addEventListener("change", () => {
@@ -1840,7 +1841,7 @@ function updateCapabilityCatalog(data) {
   if (Array.isArray(data.supported_file_types)) capabilityState.supportedFileTypes = data.supported_file_types.map(type => `.${type.replace(/^\./,"")}`);
   for (const id of ["kb-file","kb-replacement"]) el(id).accept = capabilityState.supportedFileTypes.join(",");
   const pdf = capabilityState.supportedFileTypes.includes(".pdf");
-  el("kb-file-types").textContent = `支持 TXT、Markdown、DOCX${pdf ? "、文字版 PDF" : ""}，单份不超过 10MB。${pdf ? "扫描件与图片识别尚未接入。" : "PDF 暂不可用。"}检索结果显示来源文件与片段位置。`;
+  el("kb-file-types").textContent = pdf ? "支持 TXT / Markdown / DOCX / PDF" : "支持 TXT / Markdown / DOCX";
   if (el("capability-integration")) el("capability-integration").textContent = data.conversation_integration ? "能力已接入对话" : "外部工具与个人知识库尚未接入对话";
   const official = data.tools.find(tool => tool.name === "search_m5stack");
   if (official) {
@@ -1940,16 +1941,23 @@ function applyWeatherSettings(data) {
 function weatherHeading() {
   const titleWrap = node("div","capability-item-title"); titleWrap.append(node("h3","","天气查询")); return titleWrap;
 }
+function makeSkillSwitch(checked, onChange, { id = "", ariaLabel = "" } = {}) {
+  const label = node("label", "skill-switch"), toggle = node("input");
+  toggle.type = "checkbox"; toggle.checked = checked;
+  if (id) toggle.id = id;
+  if (ariaLabel) toggle.setAttribute("aria-label", ariaLabel);
+  const track = node("span", "skill-switch-track");
+  const text = node("span", "", checked ? "已开启" : "已停用");
+  toggle.addEventListener("change", () => onChange(toggle, checked));
+  label.append(toggle, track, text);
+  return { label, toggle };
+}
 function weatherToolCard(tool) {
   const active = isSkillActive(tool);
   const card = node("div","capability-item"), header = node("div","capability-item-header");
   header.append(weatherHeading());
-  const toggleLabel = node("label","checkbox-control"), toggle = node("input");
-  toggle.type = "checkbox"; toggle.id = "weather_enabled"; toggle.checked = active;
-  toggle.setAttribute("aria-label","开启天气查询技能");
-  const toggleText = document.createTextNode(active ? "已开启" : "已停用");
-  toggle.addEventListener("change", async () => {
-    const enabled = toggle.checked, previous = active;
+  const { label: toggleLabel } = makeSkillSwitch(active, async (toggle, previous) => {
+    const enabled = toggle.checked;
     toggle.disabled = true;
     try {
       await setSkillEnabled(tool, enabled);
@@ -1960,8 +1968,8 @@ function weatherToolCard(tool) {
       toggle.checked = previous;
       capabilityNotice(error.message, true);
     } finally { toggle.disabled = false; }
-  });
-  toggleLabel.append(toggle,toggleText); header.append(toggleLabel);
+  }, { id: "weather_enabled", ariaLabel: "开启天气查询技能" });
+  header.append(toggleLabel);
   const details = node("details","weather-city-config"), summary = node("summary","","常用城市 · 可选");
   const row = node("label","weather-city-row"), city = node("input");
   city.id = "weather_default_city"; city.maxLength = 80; city.value = savedWeather.city || ""; city.placeholder = "例如：上海；留空则每次先问你在哪";
@@ -1999,18 +2007,15 @@ function desktopToolCard(tool) {
   const titleWrap = node("div", "capability-item-title");
   titleWrap.append(node("h3", "", "个人电脑操控（Windows / Mac）"));
   header.append(titleWrap);
-  const toggleLabel = node("label", "checkbox-control"), toggle = node("input");
-  toggle.type = "checkbox"; toggle.checked = active;
-  const toggleText = document.createTextNode(active ? "已开启" : "已停用");
-  toggle.addEventListener("change", () => {
-    const enabled = toggle.checked; toggle.checked = active;
+  const { label: toggleLabel } = makeSkillSwitch(active, (toggle, previous) => {
+    const enabled = toggle.checked; toggle.checked = previous;
     capabilityAction(async () => {
       await setSkillEnabled(tool, enabled);
       if (savedConfig) savedConfig.desktop_enabled = enabled;
-      capabilityNotice(enabled ? "已开启个人电脑操控；请在「终端节点」连接电脑。" : "已停用个人电脑操控。");
+      capabilityNotice(enabled ? "已开启个人电脑操控；请在「设备」连接电脑。" : "已停用个人电脑操控。");
     });
   });
-  toggleLabel.append(toggle, toggleText); header.append(toggleLabel);
+  header.append(toggleLabel);
   const st = resolveDesktopModelState();
   card.append(
     header,
@@ -2021,7 +2026,7 @@ function desktopToolCard(tool) {
     navigate("connections");
     requestAnimationFrame(() => el("desktop-planner-preset")?.focus());
   });
-  const goDevices = capabilityButton("管理终端节点 →", () => navigate("devices"));
+  const goDevices = capabilityButton("管理设备 →", () => navigate("devices"));
   actions.append(goModels, goDevices);
   card.append(actions);
   return card;
@@ -2107,7 +2112,7 @@ async function runQuickWebSearchTest(query, resultEl, triggerBtn) {
     if (resultEl) resultEl.textContent = summary;
     return {ok: true, summary};
   } catch (error) {
-    const msg = error.code === "tool_not_found" ? "联网搜索尚未开启，请先到「技能与知识 → 技能中心」开启「联网搜索」。" : error.message;
+    const msg = error.code === "tool_not_found" ? "联网搜索尚未开启，请先到「技能」开启「联网搜索」。" : error.message;
     if (resultEl) { resultEl.textContent = msg; resultEl.dataset.kind = "error"; }
     return {ok: false, message: msg};
   } finally {
@@ -2164,16 +2169,13 @@ function webSearchToolCard(tool) {
   title.append(node("h3", "", "联网搜索"), node("p", "small-note", "百炼自带搜索 / DeepSeek（选填）"));
   header.append(title);
 
-  const toggleLabel = node("label", "checkbox-control"), toggle = node("input");
-  toggle.type = "checkbox"; toggle.checked = active;
-  toggle.addEventListener("change", () => {
-    const enabled = toggle.checked; toggle.checked = active;
+  const { label: toggleLabel } = makeSkillSwitch(active, (toggle, previous) => {
+    const enabled = toggle.checked; toggle.checked = previous;
     capabilityAction(async () => {
       await setSkillEnabled(tool, enabled);
       capabilityNotice(enabled ? "已为 Agent 开启「联网搜索」。" : "已停用。");
     });
   });
-  toggleLabel.append(toggle, document.createTextNode(active ? "已开启" : "已停用"));
   header.append(toggleLabel);
 
   const keySection = node("div", "search-key-config");
@@ -2258,17 +2260,14 @@ function toolDetailCard(tool) {
   const card = node("div","capability-item");
   const header = node("div","capability-item-header");
   header.append(node("h3","", CAPABILITY_LABELS[tool.name] || tool.name));
-  const toggleLabel = node("label","checkbox-control"), toggle = node("input");
-  toggle.type = "checkbox"; toggle.checked = active;
-  const toggleText = document.createTextNode(active ? "已开启" : "已停用");
-  toggle.addEventListener("change", () => {
-    const enabled = toggle.checked; toggle.checked = active;
+  const { label: toggleLabel } = makeSkillSwitch(active, (toggle, previous) => {
+    const enabled = toggle.checked; toggle.checked = previous;
     capabilityAction(async () => {
       await setSkillEnabled(tool, enabled);
       capabilityNotice(enabled ? `已为 Agent 开启「${CAPABILITY_LABELS[tool.name] || tool.name}」。` : "已停用。");
     });
   });
-  toggleLabel.append(toggle,toggleText); header.append(toggleLabel);
+  header.append(toggleLabel);
   card.append(header,node("p","small-note",tool.description || ""));
   if (tool.kind === "http") card.append(node("p","small-note",`${tool.request?.method || tool.method} ${tool.request?.url || tool.url}`));
   const actions = node("div","capability-item-actions");
@@ -3196,7 +3195,7 @@ function renderInsightRecords(kind, data) {
   el(`insights-${kind}-page`).textContent = data.items.length ? `${panel.offset + 1}–${panel.offset + data.items.length} 条` : "";
   if (kind === "errors") {
     const labelEl = el("insights-tab-errors-label");
-    if (labelEl) labelEl.textContent = data.total > 0 ? `异常日志 (${data.total})` : "异常日志";
+    if (labelEl) labelEl.textContent = data.total > 0 ? `异常 (${data.total})` : "异常";
   }
   if (!data.items.length) {area.append(node("p","insight-empty",panel.offset ? "本页已无记录，请返回上一页或刷新。" : insightFiltersActive(kind) ? "没有匹配的记录，试试调整搜索或筛选条件。" : kind === "errors" ? "暂无异常报错记录。" : "尚无记录。实际问答或调用后可在这里查看。")); return;}
   const statusLabels = {complete:"成功",ok:"成功",empty:"未命中",error:"失败",unavailable:"不可用",not_requested:"未调用",cancelled:"已取消",failed:"执行失败",interrupted:"已打断"};

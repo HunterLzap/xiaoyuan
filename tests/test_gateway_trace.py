@@ -644,8 +644,12 @@ def test_bailian_web_search_fallback_and_public_settings(connection_settings_cli
             assert call.args[0] == "https://ws-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"
             assert call.kwargs["headers"]["Authorization"] == "Bearer bailian-test-key"
             assert call.kwargs["json"]["model"] == "qwen-flash"
+            assert call.kwargs["json"]["stream"] is False
+            assert call.kwargs["json"]["enable_thinking"] is False
             assert call.kwargs["json"]["enable_search"] is True
-            assert call.kwargs["json"]["search_options"] == {"search_strategy": "turbo", "enable_source": True}
+            assert call.kwargs["json"]["search_options"] == {
+                "search_strategy": "turbo", "enable_source": True, "forced_search": True,
+            }
             assert result["provider"] == "bailian"
             assert result["answer"] == "今天北京多云，最高气温 12°C。"
             assert result["results"] == [
@@ -654,6 +658,15 @@ def test_bailian_web_search_fallback_and_public_settings(connection_settings_cli
             clock[0] += 100
             assert await web_search.search_web(settings, "北京天气", count=3) == result
             assert post.await_count == 1
+
+            post.return_value = httpx.Response(
+                400, json={"error": {"message": "bad param with bailian-test-key"}}
+            )
+            with pytest.raises(web_search.WebSearchError) as err:
+                await web_search.search_web(settings, "未缓存的百炼错误", count=1)
+            assert (err.value.code, err.value.status) == ("web_search_upstream_error", 502)
+            assert "HTTP 400" in err.value.message
+            assert "bailian-test-key" not in err.value.message
         finally:
             await web_search.close_web_search_client()
 
