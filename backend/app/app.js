@@ -2106,8 +2106,6 @@ const CAPABILITY_LABELS = {
 };
 function capabilityItems() {
   const items = [];
-  const weather = capabilityState.tools.find(tool => tool.name === "get_weather");
-  items.push({key:"get_weather", title:CAPABILITY_LABELS.get_weather, type:"weather", available:Boolean(weather), enabled:isSkillActive(weather), tool:weather || null});
   const desktop = capabilityState.tools.find(tool => tool.name === "desktop_control");
   if (desktop) {
     items.push({key:desktop.name, title:CAPABILITY_LABELS.desktop_control, type:"desktop", available:true, enabled:isSkillActive(desktop), tool:desktop});
@@ -2235,7 +2233,7 @@ function webSearchToolCard(tool) {
   const card = node("div", "capability-item");
   const header = node("div", "capability-item-header");
   const title = node("div", "capability-item-title");
-  title.append(node("h3", "", "联网搜索"), node("p", "small-note", nativeRealtimeSearch ? "已由实时模型原生支持（开启即生效）" : "百炼自带搜索 / DeepSeek（选填）"));
+  title.append(node("h3", "", "联网搜索"), node("p", "small-note", nativeRealtimeSearch ? "已由实时模型原生支持（含天气、金价、新闻等，开启即生效）" : "百炼自带搜索 / DeepSeek（选填）"));
   header.append(title);
 
   const { label: toggleLabel } = makeSkillSwitch(active, (toggle, previous) => {

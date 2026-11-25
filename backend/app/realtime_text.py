@@ -62,6 +62,7 @@ class RealtimeTextProvider:
             and is_qwen_audio_realtime(settings.rt_model)
             and "web_search" in allowed
         )
+        excluded_tools = {"web_search", "get_weather"} if use_native_search else set()
         assistant_content_type = (
             "output_text"
             if settings.rt_provider == "bailian" and is_qwen_audio_realtime(settings.rt_model)
@@ -99,11 +100,11 @@ class RealtimeTextProvider:
                     joined = "\n".join(message["content"] for message in messages if message["role"] == "system")
                     eligible_defs = (
                         [item for item in tool_context.definitions(compact=True)
-                         if not (use_native_search and item.get("function", item).get("name") == "web_search")]
+                         if item.get("function", item).get("name") not in excluded_tools]
                         if tool_context is not None else []
                     )
                     selection = (
-                        TextToolSelection(tool_context, exclude={"web_search"} if use_native_search else ())
+                        TextToolSelection(tool_context, exclude=excluded_tools)
                         if (tool_context is not None
                             and getattr(tool_context, "registry", None) is not None
                             and getattr(settings, "rt_lazy_tools", True)
@@ -118,7 +119,7 @@ class RealtimeTextProvider:
                         if selection is not None:
                             active_names = [
                                 n for n in selection.active_names()
-                                if not (use_native_search and n == "web_search")
+                                if n not in excluded_tools
                             ]
                             defs = selection.definitions(nested=nested)
                         elif tool_context is not None:
@@ -126,12 +127,12 @@ class RealtimeTextProvider:
                             active_names = [
                                 item.get("function", item).get("name") for item in defs
                                 if item.get("function", item).get("name")
-                                and not (use_native_search and item.get("function", item).get("name") == "web_search")
+                                and item.get("function", item).get("name") not in excluded_tools
                             ]
                         else:
                             active_names, defs = [], []
-                        if use_native_search:
-                            defs = [item for item in defs if item.get("function", item).get("name") != "web_search"]
+                        if excluded_tools:
+                            defs = [item for item in defs if item.get("function", item).get("name") not in excluded_tools]
                         instructions = build_system_prompt(
                             settings, "text", active_names,
                             turn_state or None, assistant_prompt=joined, compact=True,

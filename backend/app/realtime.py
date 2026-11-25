@@ -174,7 +174,8 @@ class RealtimeTurn:
             defs = (gateway.definitions(registry, nested=nested, include_side_effects=True)
                     if gateway is not None else registry.definitions(nested=nested))
         if self._uses_native_web_search():
-            defs = [item for item in defs if item.get("function", item).get("name") != "web_search"]
+            excluded = {"web_search", "get_weather"}
+            defs = [item for item in defs if item.get("function", item).get("name") not in excluded]
         return defs
 
     def tool_instructions(self):

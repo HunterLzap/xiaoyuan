@@ -644,10 +644,11 @@ class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
         registry = ToolRegistry([
             SimpleNamespace(spec=ToolSpec("get_weather", "weather", {"type": "object", "properties": {}})),
             SimpleNamespace(spec=ToolSpec("web_search", "search", {"type": "object", "properties": {}})),
+            SimpleNamespace(spec=ToolSpec("search_m5stack", "m5", {"type": "object", "properties": {}})),
         ])
         turn.tool_context = SimpleNamespace(
             registry=registry, tool_gateway=None,
-            allowed={"get_weather", "web_search"}, order_state_text=lambda: "",
+            allowed={"get_weather", "web_search", "search_m5stack"}, order_state_text=lambda: "",
         )
         session = turn._build_session_config()
         self.assertEqual(session["voice"], "longanqian_v3.1")
@@ -658,7 +659,7 @@ class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session["search_options"], {"enable_source": True})
         self.assertNotIn("audio", session)
         tool_names = [item["function"]["name"] for item in turn._realtime_tool_definitions(nested=True)]
-        self.assertEqual(tool_names, ["get_weather"])
+        self.assertEqual(tool_names, ["search_m5stack"])
 
         socket = _RealtimeSocket()
         pcm = bytes([1, 0]) * 120
@@ -724,11 +725,12 @@ class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
         registry = ToolRegistry([
             SimpleNamespace(spec=ToolSpec("get_weather", "weather", {"type": "object", "properties": {}})),
             SimpleNamespace(spec=ToolSpec("web_search", "search", {"type": "object", "properties": {}})),
+            SimpleNamespace(spec=ToolSpec("search_m5stack", "m5", {"type": "object", "properties": {}})),
         ])
         ctx = SimpleNamespace(
             session_id="s1", turn_id="t1", question="今日金价", history=(),
             registry=registry, current_registry=lambda: registry, tool_gateway=None,
-            allowed={"get_weather", "web_search"}, outputs=[], secrets=["fixture-secret-key"],
+            allowed={"get_weather", "web_search", "search_m5stack"}, outputs=[], secrets=["fixture-secret-key"],
             order_state_text=lambda: "", mark_sent=lambda *_: None,
             definitions=lambda **kw: registry.definitions(nested=kw.get("nested", False)),
         )
@@ -755,7 +757,7 @@ class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks[0], "今天黄金大约760元一克喵。")
         session_cfg = socket.sent[0]["session"]
         tool_names = [t["function"]["name"] for t in session_cfg["tools"]]
-        self.assertEqual(tool_names, ["get_weather"])
+        self.assertEqual(tool_names, ["search_m5stack"])
         self.assertNotIn("_load_task_tools", tool_names)
         created_items = [x["item"] for x in socket.sent if x["type"] == "conversation.item.create"]
         self.assertEqual(created_items[1]["role"], "assistant")
@@ -785,8 +787,9 @@ class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
             rt_model="qwen-audio-3.1-realtime-flash",
             rt_api_key="fixture-secret-key",
         )
-        prompt = build_system_prompt(cfg, "text", ["get_weather"], compact=True, native_search=True)
+        prompt = build_system_prompt(cfg, "text", ["search_m5stack"], compact=True, native_search=True)
         self.assertIn("内置联网搜索", prompt)
+        self.assertIn("问天气未说明城市时直接反问城市", prompt)
         self.assertIn("禁止只说“这就去查/稍等”就结束回复", prompt)
 
         registry = ToolRegistry([

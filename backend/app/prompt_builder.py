@@ -50,8 +50,8 @@ def build_system_prompt(settings, channel="text", tool_names=None, turn_state=No
     parts.append(build_tool_instructions(tool_names, channel, compact=compact))
     if native_search:
         parts.append(
-            "\n已开启内置联网搜索：涉及金价、新闻、汇率、百科等实时公开信息时，"
-            "直接联网检索并一次性给出具体结果与数据时间，禁止只说“这就去查/稍等”就结束回复。"
+            "\n已开启内置联网搜索：涉及天气、金价、新闻、汇率、百科等实时公开信息时，"
+            "直接联网检索并一次性给出具体结果与数据时间；问天气未说明城市时直接反问城市；禁止只说“这就去查/稍等”就结束回复。"
         )
     if tool_names is not None and not compact:
         parts.append("\n再次强调：结合当前问题和有效对话上下文，判断用户是否有具体的查询或控制需求；"
