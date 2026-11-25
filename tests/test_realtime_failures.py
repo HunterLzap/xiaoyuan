@@ -880,6 +880,153 @@ class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunks[-1].usage.prompt_tokens, 220)
         self.assertEqual(chunks[-1].usage.completion_tokens, 22)
 
+    async def test_realtime_voice_delegates_desktop_turn_and_voice_confirm_grants_lease(self):
+        from backend.app.desktop import DesktopHub
+        from backend.app.desktop_tools import build_desktop_tools
+        from backend.app.llm import Completion
+        from backend.app.realtime import RealtimeTurn
+        from backend.app.schemas import TokenUsage
+        from backend.app.service import ChatService
+
+        planner_calls = []
+        opened_targets = []
+        clicked_actions = []
+
+        class _PlannerProvider:
+            def __init__(self, cfg):
+                self.cfg = cfg
+
+            async def complete_stream(self, messages, tools=None):
+                planner_calls.append({"model": self.cfg.model, "tool_names": [t.get("function", t)["name"] for t in (tools or [])]})
+                # Turn 1 step 1 -> requests desktop_open -> gets confirmation_required; step 2 -> asks user.
+                if len(planner_calls) == 1:
+                    yield Completion(None, TokenUsage(prompt_tokens=20, completion_tokens=5, total_tokens=25), "tool_calls", tool_calls=[
+                        {"id": "c1", "function": {"name": "desktop_open", "arguments": json.dumps({"target": "Google Chrome", "kind": "app"})}},
+                    ])
+                    return
+                if len(planner_calls) == 2:
+                    msg = "塔菲准备打开谷歌浏览器，确认可以执行吗？"
+                    yield msg
+                    yield Completion(msg, TokenUsage(prompt_tokens=25, completion_tokens=8, total_tokens=33), "stop")
+                    return
+                # Turn 2 after voice confirmation -> executes desktop_open + desktop_gui_action (via auto lease) -> speaks result.
+                if len(planner_calls) == 3:
+                    yield Completion(None, TokenUsage(prompt_tokens=30, completion_tokens=6, total_tokens=36), "tool_calls", tool_calls=[
+                        {"id": "c2", "function": {"name": "desktop_open", "arguments": json.dumps({"target": "Google Chrome", "kind": "app"})}},
+                    ])
+                    return
+                if len(planner_calls) == 4:
+                    yield Completion(None, TokenUsage(prompt_tokens=35, completion_tokens=6, total_tokens=41), "tool_calls", tool_calls=[
+                        {"id": "c3", "function": {"name": "desktop_gui_action", "arguments": json.dumps({"action": "click", "x": 100, "y": 200})}},
+                    ])
+                    return
+                done_msg = "已经帮你打开谷歌浏览器并点击完毕啦！"
+                yield done_msg
+                yield Completion(done_msg, TokenUsage(prompt_tokens=40, completion_tokens=8, total_tokens=48), "stop")
+
+            async def close(self):
+                return None
+
+        import tempfile
+        from pathlib import Path
+
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        hub = DesktopHub(path=Path(tmp_dir.name) / "desktop_nodes.json")
+
+        lease_active_at_gui_action = []
+
+        async def fake_rpc(method, params=None, **kwargs):
+            if method == "open":
+                opened_targets.append(params)
+                return {"ok": True, "opened": params}
+            if method == "gui_action":
+                lease_active_at_gui_action.append(service.tool_gateway.confirmations.has_desktop_lease(sid))
+                clicked_actions.append(params)
+                return {"ok": True, "action": params}
+            return {"ok": True}
+
+        fake_conn = SimpleNamespace(
+            node_id="win-1", name="win-1", os_name="windows",
+            screen={"width": 1920, "height": 1080},
+            last_screenshot=None,
+            rpc=fake_rpc,
+        )
+        hub.list_nodes = lambda: [{"node_id": "win-1", "display_name": "win-1", "platform": "windows", "online": True, "screen": {"width": 1920, "height": 1080}}]
+        hub.resolve_node = lambda node_id=None: fake_conn
+
+        cfg = Settings(
+            _env_file=None,
+            voice_mode="realtime",
+            rt_provider="bailian",
+            rt_model="qwen-audio-3.1-realtime-flash",
+            rt_api_key="fixture-secret-key",
+            desktop_planner_model="qwen3.8-max-0902",
+            desktop_control_enabled=True,
+            history_db_path=None,
+            usage_log_path=None,
+        )
+        service = ChatService(cfg, None, planner_factory=_PlannerProvider)
+        service.desktop = hub
+        service.tools = ToolRegistry(build_desktop_tools(hub))
+
+        sid = service.new_session()
+        events = []
+
+        async def emit(kind, data):
+            events.append((kind, data))
+
+        socket = _RealtimeSocket()
+        # Drain initial session.created / session.updated added by _RealtimeSocket.__init__.
+        await socket.recv()
+        await socket.recv()
+        turn = RealtimeTurn(service, sid, "device_voice", emit, manual=False, config=cfg)
+        turn.continuous = True
+        turn.ws = socket
+        turn.audio = SimpleNamespace(push=AsyncMock(), finish=AsyncMock(), close=AsyncMock())
+
+        receiver = asyncio.create_task(turn.receive())
+        # Turn 1: user asks to open Chrome -> upstream starts an eager empty promise ("resp-eager") before transcription completes.
+        socket.feed("input_audio_buffer.speech_started", item_id="item-1")
+        socket.feed("response.created", response={"id": "resp-eager"})
+        socket.feed("response.output_audio_transcript.delta", response_id="resp-eager", delta="好嘞这就")
+        socket.feed("conversation.item.input_audio_transcription.completed", transcript="帮我打开谷歌浏览器，然后搜索百度")
+        await socket.wait_for_send("response.cancel")
+        # Upstream emits late done from cancelled eager promise (must be ignored)
+        socket.feed("response.done", response_id="resp-eager", response={"id": "resp-eager", "status": "cancelled"})
+        # Wait for planner -> continue_in_session sends response.create to speak confirmation question.
+        await socket.wait_for_send("response.create")
+        socket.feed("response.created", response={"id": "resp-confirm-ask"})
+        socket.feed("response.output_audio_transcript.delta", response_id="resp-confirm-ask", delta="塔菲准备打开谷歌浏览器，确认可以执行吗？")
+        socket.feed("response.done", response_id="resp-confirm-ask", response={"id": "resp-confirm-ask", "status": "completed", "usage": {"input_tokens": 50, "output_tokens": 10}})
+        # Turn 2: continuous speech -> user speaks "确认执行"
+        socket.feed("input_audio_buffer.speech_started", item_id="item-2")
+        socket.feed("conversation.item.input_audio_transcription.completed", transcript="确认执行")
+        await socket.wait_for_send("response.create")
+        socket.feed("response.created", response={"id": "resp-final"})
+        socket.feed("response.output_audio_transcript.delta", response_id="resp-final", delta="已经帮你打开谷歌浏览器并点击完毕啦！")
+        socket.feed("response.done", response_id="resp-final", response={"id": "resp-final", "status": "completed", "usage": {"input_tokens": 60, "output_tokens": 12}})
+        socket.feed("input_audio_buffer.speech_started", item_id="item-3")
+        socket.feed("conversation.item.input_audio_transcription.completed", transcript="退下")
+        await asyncio.wait_for(receiver, timeout=3.0)
+
+        self.assertGreaterEqual(len(planner_calls), 5)
+        self.assertEqual(planner_calls[0]["model"], "qwen3.8-max-0902")
+        self.assertEqual(len(opened_targets), 1)
+        self.assertEqual(opened_targets[0]["target"], "Google Chrome")
+        self.assertEqual(len(clicked_actions), 1)
+        self.assertEqual(clicked_actions[0]["action"], "click")
+        self.assertEqual(lease_active_at_gui_action, [True])
+        # Saying "退下" revokes active desktop leases cleanly.
+        self.assertFalse(service.tool_gateway.confirmations.has_desktop_lease(sid))
+        sent_types = [item["type"] for item in socket.sent]
+        self.assertIn("response.cancel", sent_types)
+        notice_texts = [data for kind, data in events if kind == "notice"]
+        self.assertTrue(any("确认" in text for text in notice_texts))
+        self.assertTrue(any("打开谷歌浏览器" in text for text in notice_texts))
+        done_replies = [data["reply"] for kind, data in events if kind == "done"]
+        self.assertTrue(any("点击完毕" in r for r in done_replies))
+
 
 if __name__ == "__main__":
     unittest.main()

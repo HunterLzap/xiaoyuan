@@ -13,7 +13,9 @@ from .audit_store import redact_value
 from .llm import ProviderError
 
 _CONFIRM_RE = re.compile(
-    r"^(?:好[的呀啦]?|是[的啊呀]?|对|没错|确定|确认|可以|行|没问题|执行吧?|继续|就这么[办定]|准)[。！!，,\s]*$",
+    r"^(?:(?:好[的呀啦]?|嗯|行|是[的啊呀]?|可以)[，,、\s]*)?"
+    r"(?:好[的呀啦]?|是[的啊呀]?|对|没错|确定|确认|可以|行|没问题|执行|继续|就这么[办定]|准)"
+    r"(?:[，,、\s]*(?:确认|执行|操作))?[吧呀啊啦呢]?[。！!，,\s]*$",
 )
 _DENY_RE = re.compile(
     r"(?:取消|算了|别执行|不要执行|不用了|不是|不对|先别|停止执行|放弃)",
@@ -152,11 +154,16 @@ class SideEffectConfirmationStore:
             state.pending = None
             return
         if pending.status == "approved" or _CONFIRM_RE.match(text):
+            was_pending = pending.status == "pending"
             pending.status = "consumed"
             state.confirmed_for_turn = turn_id
             state.confirmed_tool = pending.tool_name
             state.confirmed_digest = pending.args_digest
             state.confirmed_summary = pending.summary
+            # Voice/text confirmation of an interactive desktop tool also grants the 3-minute
+            # desktop lease so multi-step GUI follow-ups don't prompt on every single click.
+            if was_pending and pending.tool_name in DESKTOP_LEASE_TOOLS:
+                state.desktop_lease_until = monotonic() + 180.0
             state.pending = None
             return
         # New unrelated question clears stale pending confirmation safely.

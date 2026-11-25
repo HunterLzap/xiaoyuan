@@ -14,11 +14,12 @@ from websockets.exceptions import ConnectionClosed
 
 from .ack_cache import pick_ack_pcm
 from .audio_codec import resample_pcm16_mono
-from .llm import Completion, ProviderError
+from .desktop import build_desktop_planner_config, supports_native_vision
+from .llm import Completion, OpenAICompatibleProvider, ProviderError
 from .schemas import TokenUsage
-from .text_tool_selection import TextToolSelection
-from .tool_dialogue import (MUTATING_CONTROL_TOOLS, combine_usage,
-                            control_history,
+from .text_tool_selection import TextToolSelection, is_desktop_task_turn
+from .tool_dialogue import (DESKTOP_TOOL_NAMES, MUTATING_CONTROL_TOOLS,
+                            ToolConversation, combine_usage, control_history,
                             control_plan, describe_control, turn_limits)
 from .order_confirmation import RealtimeOrderGuard
 from .speech_text import normalize_for_speech, function_call_output_payload
@@ -165,6 +166,7 @@ class RealtimeTurn:
         self.control_plan_cache = None
         self.control_continuation = False
         self.control_notice = ""
+        self._delegating_desktop = False
         self.order_guard = RealtimeOrderGuard()
         self._compatible_ga = False
 
@@ -596,6 +598,7 @@ class RealtimeTurn:
                     self._voice_tool_selection = None
                     if self.begun and self.continuous:
                         await self.audio.close()
+                        self._delegating_desktop = False
                         if self.tool_task:
                             self.tool_task.cancel()
                             await asyncio.gather(self.tool_task, return_exceptions=True)
@@ -640,6 +643,9 @@ class RealtimeTurn:
                     self.begun = True
                 rid = event.get("response_id") or (event.get("response") or {}).get("id")
                 if (rid and rid in self.ignore_responses) or (self.previous_item and event.get("item_id")==self.previous_item):
+                    continue
+                if getattr(self, "_delegating_desktop", False) and kind and (kind.startswith("response.") or kind == "rate_limits.updated"):
+                    await self._discard_delegated_response(kind, rid)
                     continue
                 if kind == "response.created":
                     self.active_response = rid
@@ -694,6 +700,10 @@ class RealtimeTurn:
                             continue
                         await self.emit("idle", {"reason": "abort_task"})
                         return
+
+                    if self._should_delegate_desktop_turn():
+                        await self._start_desktop_delegation()
+                        continue
 
                     if self._defer_response:
                         if (getattr(self.tool_context, "registry", None) is not None
@@ -922,22 +932,146 @@ class RealtimeTurn:
         return ProviderError(502, "realtime_upstream_error",
                              json.dumps(redact_value(details, secrets), ensure_ascii=False))
 
+    async def _discard_delegated_response(self, kind: str, rid: str | None) -> None:
+        if kind == "response.created":
+            if rid:
+                self.ignore_responses.add(rid)
+            with suppress(ConnectionClosed, OSError, RuntimeError):
+                await self.send("response.cancel")
+
+    async def _start_desktop_delegation(self) -> None:
+        self._delegating_desktop = True
+        if self.active_response:
+            self.ignore_responses.add(self.active_response)
+            self.active_response = None
+            with suppress(ConnectionClosed, OSError, RuntimeError):
+                await self.send("response.cancel")
+        self.pending_tools.clear()
+        self.pending_audio.clear()
+        self.reply = ""
+        self._response_text = ""
+        self.held_text = False
+        self.response_done = False
+        await self.audio.close()
+        await self.emit("interrupt", {})
+        await self.emit("user", self.user)
+        self.tool_task = asyncio.create_task(
+            self._run_desktop_planner_turn(self.user, self.turn_id)
+        )
+
+    async def _push_tool_ack_if_ready(self, turn_id: UUID) -> None:
+        if (self.turn_id == turn_id and self.config.rt_provider == "bailian"
+                and getattr(self.config, "rt_ack_enabled", True)
+                and not self.reply.strip() and self.first_audio_ms is None):
+            ack_pcm = pick_ack_pcm(self.config.rt_voice)
+            if ack_pcm:
+                for offset in range(0, len(ack_pcm), 4800):
+                    await self.audio.push(ack_pcm[offset:offset + 4800])
+                await self.audio.finish()
+
+    def _should_delegate_desktop_turn(self) -> bool:
+        allowed = getattr(self.tool_context, "allowed", None) or set()
+        if not (allowed & DESKTOP_TOOL_NAMES):
+            return False
+        if build_desktop_planner_config(self.config) is None:
+            return False
+        gateway = getattr(self.tool_context, "tool_gateway", None)
+        confirmations = getattr(gateway, "confirmations", None) if gateway is not None else None
+        if confirmations is not None:
+            confirmed = confirmations.confirmed_action(self.sid, self.turn_id)
+            if confirmed and confirmed.get("tool_name") in DESKTOP_TOOL_NAMES:
+                return True
+            denied = confirmations.denied_action(self.sid, self.turn_id)
+            if denied and denied.get("tool_name") in DESKTOP_TOOL_NAMES:
+                return True
+        return is_desktop_task_turn(self.user, self.session.history)
+
+    async def _run_desktop_planner_turn(self, question: str, turn_id: UUID) -> None:
+        planner_cfg = build_desktop_planner_config(self.config)
+        if planner_cfg is None or self.turn_id != turn_id:
+            if self.turn_id == turn_id:
+                self._delegating_desktop = False
+            return
+        turn_planner = None
+        honest = ""
+        try:
+            await self._push_tool_ack_if_ready(turn_id)
+            if self.turn_id != turn_id:
+                return
+            if self.source == "device_voice":
+                await self.emit("activity", {"state": "searching", "turn_id": str(turn_id)})
+            planner_factory = getattr(self.service, "planner_factory", None)
+            turn_planner = (planner_factory or OpenAICompatibleProvider)(planner_cfg)
+            self.tool_context.direct_vision = supports_native_vision(planner_cfg.model)
+            self.service.rebuild_context(self.session, planner_cfg.history_turns)
+            tool_names = ([item["name"] for item in self.tool_context.definitions()]
+                          if self.tool_context.allowed and self.tool_context.registry is not None else [])
+            system_prompt = build_system_prompt(
+                planner_cfg, "voice", tool_names, self.tool_context.order_state_text() or None,
+            )
+            messages = [{"role": "system", "content": system_prompt}]
+            messages.extend(self.session.messages)
+            messages.append({"role": "user", "content": question})
+            tool_conv = ToolConversation(turn_planner, self.tool_context)
+            result = await tool_conv.complete(messages)
+            if self.turn_id != turn_id:
+                return
+            for res in tool_conv.results:
+                self.model_results.append(res)
+                self.service.record(
+                    self.session, self.sid, res.usage, None, True, None,
+                    max(0.0, monotonic() - self.started), planner_cfg, res,
+                )
+            self.usage = combine_usage(self.model_results)
+            honest = (result.reply or "").strip() or "电脑操作已处理完毕。"
+            if self.source == "device_voice":
+                activity = "clarification" if self.tool_context.pending_approval else "success"
+                await self.emit("activity", {"state": activity, "turn_id": str(turn_id)})
+        except asyncio.CancelledError:
+            raise
+        except ProviderError as error:
+            if self.turn_id != turn_id:
+                return
+            logger.warning("realtime_desktop_planner_failed turn_id=%s code=%s", turn_id, error.code)
+            self.control_failure = error.code
+            honest = error.message or "电脑操控执行失败，请稍后重试。"
+            if self.source == "device_voice":
+                await self.emit("activity", {"state": "error", "turn_id": str(turn_id)})
+        except Exception:
+            if self.turn_id != turn_id:
+                return
+            logger.exception("realtime_desktop_planner_crashed turn_id=%s", turn_id)
+            self.control_failure = "desktop_planner_error"
+            honest = "电脑操控执行失败，具体原因已记录到后端日志。"
+            if self.source == "device_voice":
+                await self.emit("activity", {"state": "error", "turn_id": str(turn_id)})
+        finally:
+            if self.turn_id == turn_id:
+                self._delegating_desktop = False
+            if turn_planner is not None and hasattr(turn_planner, "close"):
+                with suppress(Exception):
+                    await turn_planner.close()
+            if self.tool_task is asyncio.current_task():
+                self.tool_task = None
+        if self.turn_id != turn_id or not honest:
+            return
+        self.response_done = False
+        self.reply = ""
+        self._response_text = ""
+        if await self.continue_in_session(honest):
+            return
+        await self.finish_notice_as_text()
+
     async def run_tools(self, items, turn_id, context):
         try:
             if self.control_continuation:
                 return
             if self.required_controls or self.held_text:
                 await self.audio.finish()
-            if (self.turn_id == turn_id and self.config.rt_provider == "bailian"
-                    and getattr(self.config, "rt_ack_enabled", True) and self.tool_rounds == 1
-                    and not self.reply.strip() and self.first_audio_ms is None
+            if (self.tool_rounds == 1
                     and any(item.get("name") in _ACK_TRIGGER_TOOLS for item in items)
                     and not self.output_blocked()):
-                ack_pcm = pick_ack_pcm(self.config.rt_voice)
-                if ack_pcm:
-                    for offset in range(0, len(ack_pcm), 4800):
-                        await self.audio.push(ack_pcm[offset:offset + 4800])
-                    await self.audio.finish()
+                await self._push_tool_ack_if_ready(turn_id)
             outputs = []
             for item in items:
                 if item.get("name") in MUTATING_CONTROL_TOOLS:
