@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <title>AtomS3R · 个人助理</title>
+  <title>小圆 · 个人助理</title>
   <meta name="app-base-path" content="__APP_BASE_PATH__">
   <link rel="stylesheet" href="__APP_BASE_PATH__/app.css?v=__ASSET_VERSION__">
   <script src="__APP_BASE_PATH__/paths.js?v=__ASSET_VERSION__" defer></script>
@@ -37,14 +37,17 @@
   </svg>
   <div id="app-shell" class="app-shell">
     <aside id="sidebar" class="sidebar" aria-label="导航和会话">
-      <div class="sidebar-brand"><a class="brand" href="__APP_BASE_PATH__/" data-view="chat"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><strong>AtomS3R</strong></a><button class="icon-button" id="collapse-sidebar" aria-label="收起侧栏"><svg><use href="#i-panel"/></svg></button></div>
+      <div class="sidebar-brand"><a class="brand" href="__APP_BASE_PATH__/" data-view="chat"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><strong>小圆</strong></a><button class="icon-button" id="collapse-sidebar" aria-label="收起侧栏"><svg><use href="#i-panel"/></svg></button></div>
       <button id="new-session" class="nav-button"><svg><use href="#i-plus"/></svg><span>新对话</span><kbd>Ctrl Alt N</kbd></button>
       <div class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="session-search" maxlength="200" type="search" placeholder="搜索对话" aria-label="搜索对话" autocomplete="off"><kbd>Ctrl K</kbd></div>
-      <div class="history-heading">最近对话</div>
+      <div class="history-heading"><span>最近对话</span><button id="session-manage-toggle" type="button" class="text-button">批量删除</button></div>
+      <div id="session-bulk-bar" class="session-bulk-bar" hidden><label class="checkbox-control"><input id="session-select-all" type="checkbox"><span>全选</span></label><div class="session-bulk-actions"><button id="session-bulk-delete" type="button" class="text-button danger" disabled>删除</button><button id="session-manage-done" type="button" class="text-button">完成</button></div></div>
       <nav id="session-list" class="session-list" aria-label="历史会话"><p class="sidebar-empty">正在加载…</p></nav>
       <div class="sidebar-bottom">
-        <a id="settings-button" class="nav-button" href="__APP_BASE_PATH__/settings" data-view="settings"><svg><use href="#i-settings"/></svg><span>设置</span></a>
-        <div class="local-profile"><span class="profile-avatar">小</span><div><strong>个人工作区</strong></div><button id="theme-toggle" class="icon-button" aria-label="切换主题" title="切换明暗主题"><svg><use href="#i-theme"/></svg></button></div>
+        <div class="sidebar-footer-row">
+          <a id="settings-button" class="nav-button" href="__APP_BASE_PATH__/settings" data-view="settings"><svg><use href="#i-settings"/></svg><span>设置</span></a>
+          <button id="theme-toggle" class="icon-button" aria-label="切换主题" title="切换明暗主题"><svg><use href="#i-theme"/></svg></button>
+        </div>
       </div>
     </aside>
     <button id="sidebar-overlay" class="sidebar-overlay" aria-label="关闭导航" hidden></button>
@@ -77,7 +80,7 @@
   </div>
   <section id="voice-panel" class="voice-workspace" aria-label="语音对话" hidden>
     <header class="voice-header">
-      <div class="voice-wordmark"><span class="voice-dot" aria-hidden="true"></span><span>AtomS3R 语音</span></div>
+      <div class="voice-wordmark"><span class="voice-dot" aria-hidden="true"></span><span>小圆语音</span></div>
       <span id="voice-session-title" class="voice-session-title">当前对话</span>
     </header>
     <div class="voice-center">
@@ -107,7 +110,6 @@
         <button type="button" data-view="connections">模型与连接</button>
         <p class="settings-group">技能与知识</p>
         <button type="button" data-view="capabilities">技能与知识</button>
-        <button type="button" data-action="api-workbench">新建 / 编辑 HTTP 工具</button>
         <p class="settings-group">终端</p>
         <button type="button" data-view="devices">终端节点（电脑 &amp; 硬件）</button>
         <p class="settings-group">运行</p>
@@ -119,19 +121,25 @@
       <div class="settings-dialog-body">
       <section id="settings-view" class="page-view" aria-label="Agent 与档案" hidden><div class="page-content assistant-content">
         <form id="assistant-form"><fieldset id="role-fields" disabled>
-          <section id="role-pane" class="assistant-section">
-            <h2><label for="system_prompt">Agent 人设与指令</label></h2>
-            <textarea id="system_prompt" maxlength="4000" rows="6" required placeholder="写清楚它是谁、什么性格、怎么回答、如何做事。例如：你是我的个人 AI Agent 小圆，回复简短干脆，先给结论，动手前先核对高风险操作。"></textarea>
-            <div class="agent-profile-block">
-              <h3><label for="agent_profile">个人工作档案与偏好</label></h3>
-              <textarea id="agent_profile" maxlength="2000" rows="4" placeholder="常用电脑名、工作目录、偏好或命名规范（勿填密码与密钥），例如：Mac 目录 ~/Projects；Windows 目录 D:\Work"></textarea>
+          <section id="role-pane" class="assistant-section api-panel">
+            <h2 class="api-panel-title"><label for="system_prompt">Agent 人设与指令</label></h2>
+            <div class="api-group role-card-group">
+              <div class="role-card-field">
+                <textarea id="system_prompt" maxlength="4000" rows="6" required placeholder="写清楚它是谁、什么性格、怎么回答、如何做事。例如：你是我的个人 AI Agent 小圆，回复简短干脆，先给结论，动手前先核对高风险操作。"></textarea>
+              </div>
+              <div class="agent-profile-block">
+                <h3><label for="agent_profile">个人工作档案与偏好</label></h3>
+                <textarea id="agent_profile" maxlength="2000" rows="4" placeholder="常用电脑名、工作目录、偏好或命名规范（勿填密码与密钥），例如：Mac 目录 ~/Projects；Windows 目录 D:\Work"></textarea>
+              </div>
             </div>
           </section>
-          <section id="voice-pane" class="assistant-section" aria-label="声音调节"><h2>声音调节</h2>
-            <div class="settings-row voice-row"><label for="device-volume">设备音量</label><div class="voice-inline tuning"><input id="device-volume" type="range" min="0" max="100" step="1" value="75"><span id="device-volume-value" class="tuning-value">75</span><button id="volume-apply" type="button" class="secondary-button">应用到设备</button><span id="volume-status" class="small-note" role="status"></span></div></div>
-            <div class="settings-row voice-row"><label for="tts_rate">语速</label><div class="voice-inline tuning"><input id="tts_rate" type="range" min="0.5" max="2" step="0.05" value="1"><span id="tts_rate-value" class="tuning-value">1.00x</span></div></div>
-            <div class="settings-row voice-row"><label for="tts_pitch">音调</label><div class="voice-inline tuning"><input id="tts_pitch" type="range" min="-8" max="8" step="1" value="0"><span id="tts_pitch-value" class="tuning-value">0</span><button id="tuning-reset" type="button" class="text-button">恢复默认</button></div></div>
-            <div class="voice-preview"><label class="sr-only" for="tts-text">试听文字</label><input id="tts-text" maxlength="500" value="你好，我是你的个人助理。很高兴认识你。"><button id="tts-preview" type="button" class="secondary-button" disabled>试听</button><button id="tts-cancel" type="button" class="secondary-button" hidden>取消合成</button></div><p id="tts-result" class="small-note" role="status" aria-live="polite"></p><audio id="tts-audio" controls preload="none" hidden aria-label="声音调节试听"></audio>
+          <section id="voice-pane" class="assistant-section api-panel" aria-label="声音调节"><h2 class="api-panel-title">声音调节</h2>
+            <div class="api-group voice-card-group">
+              <div class="settings-row voice-row"><label for="device-volume">设备音量</label><div class="voice-inline tuning"><input id="device-volume" type="range" min="0" max="100" step="1" value="75"><span id="device-volume-value" class="tuning-value">75</span><button id="volume-apply" type="button" class="secondary-button">应用到设备</button><span id="volume-status" class="small-note" role="status"></span></div></div>
+              <div class="settings-row voice-row"><label for="tts_rate">语速</label><div class="voice-inline tuning"><input id="tts_rate" type="range" min="0.5" max="2" step="0.05" value="1"><span id="tts_rate-value" class="tuning-value">1.00x</span></div></div>
+              <div class="settings-row voice-row"><label for="tts_pitch">音调</label><div class="voice-inline tuning"><input id="tts_pitch" type="range" min="-8" max="8" step="1" value="0"><span id="tts_pitch-value" class="tuning-value">0</span><button id="tuning-reset" type="button" class="text-button">恢复默认</button></div></div>
+              <div class="voice-preview"><label class="sr-only" for="tts-text">试听文字</label><input id="tts-text" maxlength="500" value="你好，我是你的个人助理。很高兴认识你。"><button id="tts-preview" type="button" class="secondary-button" disabled>试听</button><button id="tts-cancel" type="button" class="secondary-button" hidden>取消合成</button></div><p id="tts-result" class="small-note" role="status" aria-live="polite"></p><audio id="tts-audio" controls preload="none" hidden aria-label="声音调节试听"></audio>
+            </div>
           </section>
 </fieldset><div class="settings-actions assistant-save"><span id="role-dirty-state">设置已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="assistant-reset" type="button" class="secondary-button">取消</button><button id="tts-save" type="submit" class="primary-button" disabled>保存</button></div></div></form>
       </div></section>
@@ -226,19 +234,23 @@
 </div></details></section>
           <section class="api-text-settings" id="text-services" hidden><h2 id="text-services-title" hidden>分模型</h2><section class="api-panel">
             <h2 class="api-panel-title">文字服务<span id="connection-summary" class="connection-label"></span></h2>
-            <div class="settings-row"><label for="provider">服务名称</label><input id="provider" maxlength="80" autocomplete="off" required value="tokendance"></div>
-            <div class="settings-row"><label for="base_url">接口地址</label><input id="base_url" type="url" maxlength="500" autocomplete="off" required></div>
-            <div class="settings-row"><label for="api_key">API Key</label><div class="key-input"><input id="api_key" type="password" autocomplete="new-password" spellcheck="false"><button id="show-key" type="button" class="text-button" aria-pressed="false">显示</button></div></div>
-            <div class="settings-row"><label for="models_protocol">获取模型</label><select id="models_protocol"><option value="auto">自动识别</option><option value="openai">OpenAI兼容列表</option><option value="disabled">只手动填写</option></select></div>
-            <div class="api-service-choice"><label class="checkbox-control"><input id="tts-separate-service" type="checkbox"><span>语音使用不同服务</span></label><span id="shared-service-note" class="small-note">文字与语音共用此API</span></div>
-            <section id="tts-separate-fields" hidden><div class="api-section-label">语音服务<span id="speech-api-state" class="connection-label"></span></div><div class="settings-row"><label for="tts_base_url">接口地址</label><input id="tts_base_url" type="url" maxlength="500" autocomplete="off" required></div><div class="settings-row"><label for="tts_api_key">API Key</label><div class="key-input"><input id="tts_api_key" type="password" autocomplete="new-password" spellcheck="false"><button id="tts-show-key" type="button" class="text-button" aria-pressed="false">显示</button></div></div></section>
+            <div class="api-group">
+              <div class="settings-row"><label for="provider">服务名称</label><input id="provider" maxlength="80" autocomplete="off" required value="tokendance"></div>
+              <div class="settings-row"><label for="base_url">接口地址</label><input id="base_url" type="url" maxlength="500" autocomplete="off" required></div>
+              <div class="settings-row"><label for="api_key">API Key</label><div class="key-input"><input id="api_key" type="password" autocomplete="new-password" spellcheck="false"><button id="show-key" type="button" class="text-button" aria-pressed="false">显示</button></div></div>
+              <div class="settings-row"><label for="models_protocol">获取模型</label><select id="models_protocol"><option value="auto">自动识别</option><option value="openai">OpenAI兼容列表</option><option value="disabled">只手动填写</option></select></div>
+              <div class="api-service-choice"><label class="checkbox-control"><input id="tts-separate-service" type="checkbox"><span>语音使用不同服务</span></label><span id="shared-service-note" class="small-note">文字与语音共用此API</span></div>
+              <section id="tts-separate-fields" hidden><div class="api-section-label">语音服务<span id="speech-api-state" class="connection-label"></span></div><div class="settings-row"><label for="tts_base_url">接口地址</label><input id="tts_base_url" type="url" maxlength="500" autocomplete="off" required></div><div class="settings-row"><label for="tts_api_key">API Key</label><div class="key-input"><input id="tts_api_key" type="password" autocomplete="new-password" spellcheck="false"><button id="tts-show-key" type="button" class="text-button" aria-pressed="false">显示</button></div></div></section>
+            </div>
           </section>
           <section class="api-panel api-models">
             <h2 class="api-panel-title">对话模型</h2>
-            <div class="model-picker"><select id="model-options" aria-label="对话模型"><option value="">先接入API或刷新模型</option><option value="__manual__">手动填写模型 ID…</option></select><button id="fetch-models" type="button" class="secondary-button" disabled>刷新</button><button id="test" type="button" class="secondary-button" disabled>测试</button></div>
-            <input id="model" maxlength="200" autocomplete="off" placeholder="供应商提供的准确模型ID" hidden>
-            <p id="models-status" class="small-note" role="status" aria-live="polite"></p>
-            <div id="test-panel" class="test-panel" hidden><h2>模型测试</h2><p id="test-result"></p><div id="test-usage" class="metadata"></div></div>
+            <div class="api-group api-models-group">
+              <div class="model-picker"><select id="model-options" aria-label="对话模型"><option value="">先接入API或刷新模型</option><option value="__manual__">手动填写模型 ID…</option></select><button id="fetch-models" type="button" class="secondary-button" disabled>刷新</button><button id="test" type="button" class="secondary-button" disabled>测试</button></div>
+              <input id="model" maxlength="200" autocomplete="off" placeholder="供应商提供的准确模型ID" hidden>
+              <p id="models-status" class="small-note" role="status" aria-live="polite"></p>
+              <div id="test-panel" class="test-panel" hidden><h2>模型测试</h2><p id="test-result"></p><div id="test-usage" class="metadata"></div></div>
+            </div>
           </section>
           <section class="api-panel"><h2 class="api-panel-title">语音识别<span id="asr-api-state" class="connection-label"></span></h2><div class="api-group">
             <div class="settings-row"><label for="asr_provider">识别服务</label><select id="asr_provider"><option value="openai">OpenAI 兼容接口</option><option value="bailian">百炼实时识别</option><option value="local">本地 SenseVoice (.venv-speech)</option></select></div>
@@ -251,9 +263,11 @@
             </div>
           </div></section>
           <section class="api-panel"><h2 class="api-panel-title">语音合成</h2>
-            <div class="settings-row"><label for="tts_provider">合成服务</label><select id="tts_provider"><option value="mimo">小米 MiMo</option><option value="openai">OpenAI 兼容 TTS</option><option value="bailian">百炼实时 TTS</option></select></div>
-            <div class="settings-row voice-row"><label for="tts_model">模型</label><div class="voice-inline"><select id="tts_model" aria-label="声音模型"><option value="mimo-v2.5-tts">mimo-v2.5-tts</option><option value="mimo-v2.5-tts-voicedesign">mimo-v2.5-tts-voicedesign</option><option value="mimo-v2.5-tts-voiceclone">mimo-v2.5-tts-voiceclone</option><option value="__manual__">手动填写模型 ID…</option></select><input id="tts_model_custom" maxlength="200" autocomplete="off" placeholder="例如：tts-1 / qwen3-tts-flash-realtime" hidden><button id="fetch-speech-models" type="button" class="secondary-button" disabled>刷新</button></div></div>
-            <div class="settings-row voice-row" id="voice-pick-row"><label for="tts_voice">音色</label><div class="voice-inline"><select id="tts_voice" aria-label="音色"><option value="mimo_default">默认</option></select><input id="tts_voice_custom" maxlength="80" autocomplete="off" placeholder="填写目标音色 ID" hidden><button id="clone-new" type="button" class="secondary-button">新建复刻</button><button id="delete-clone" type="button" class="secondary-button" hidden>删除</button></div></div>
+            <div class="api-group">
+              <div class="settings-row"><label for="tts_provider">合成服务</label><select id="tts_provider"><option value="mimo">小米 MiMo</option><option value="openai">OpenAI 兼容 TTS</option><option value="bailian">百炼实时 TTS</option></select></div>
+              <div class="settings-row voice-row"><label for="tts_model">模型</label><div class="voice-inline"><select id="tts_model" aria-label="声音模型"><option value="mimo-v2.5-tts">mimo-v2.5-tts</option><option value="mimo-v2.5-tts-voicedesign">mimo-v2.5-tts-voicedesign</option><option value="mimo-v2.5-tts-voiceclone">mimo-v2.5-tts-voiceclone</option><option value="__manual__">手动填写模型 ID…</option></select><input id="tts_model_custom" maxlength="200" autocomplete="off" placeholder="例如：tts-1 / qwen3-tts-flash-realtime" hidden><button id="fetch-speech-models" type="button" class="secondary-button" disabled>刷新</button></div></div>
+              <div class="settings-row voice-row" id="voice-pick-row"><label for="tts_voice">音色</label><div class="voice-inline"><select id="tts_voice" aria-label="音色"><option value="mimo_default">默认</option></select><input id="tts_voice_custom" maxlength="80" autocomplete="off" placeholder="填写目标音色 ID" hidden><button id="clone-new" type="button" class="secondary-button">新建复刻</button><button id="delete-clone" type="button" class="secondary-button" hidden>删除</button></div></div>
+            </div>
           </section></section>
           <section class="api-panel" id="desktop-model-panel" aria-label="电脑操控模型">
             <h2 class="api-panel-title">电脑操控模型</h2>
@@ -336,12 +350,12 @@
         </section>
       </div></section>
       <section id="capabilities-view" class="page-view" aria-label="技能与知识" hidden><div class="page-content capability-content">
-        <div class="section-toolbar"><span id="capability-integration">正在加载技能与知识…</span><button id="capability-refresh" type="button" class="text-button">刷新</button></div>
-        <p id="capability-notice" class="small-note" role="status" aria-live="polite"></p>
         <div class="insight-tabbar" role="tablist" aria-label="技能与知识分类">
           <button id="capabilities-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="capabilities-panel-tools" data-capability-tab="tools"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-wrench"/></svg><span>技能中心</span></button>
           <button id="capabilities-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="capabilities-panel-kb" data-capability-tab="kb" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>个人知识库</span></button>
+          <button id="capability-refresh" type="button" class="text-button tabbar-refresh">刷新</button>
         </div>
+        <p id="capability-notice" class="small-note" role="status" aria-live="polite"></p>
         <section id="capabilities-panel-tools" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-tools">
           <section class="capability-section" aria-labelledby="capability-tools-title">
             <div class="capability-heading"><h2 id="capability-tools-title">Agent 可用技能</h2><button id="tool-new" type="button" class="secondary-button">+ 新建 HTTP 工具</button></div>
@@ -349,9 +363,6 @@
               <div class="cap-list" id="capability-tools" role="list" aria-live="polite"></div>
               <div class="cap-detail" id="capability-detail" aria-live="polite"></div>
             </div>
-          </section>
-          <section class="capability-section" aria-labelledby="device-control-title">
-            <div class="capability-heading"><h2 id="device-control-title">电脑与硬件终端</h2><button type="button" class="text-button" data-view="devices">管理 Windows / Mac 与 AtomS3R →</button></div>
           </section>
         </section>
         <section id="capabilities-panel-kb" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-kb" hidden>
@@ -391,14 +402,15 @@
       </div></section>
       <section id="insights-view" class="page-view" aria-label="数据洞察" hidden><div class="page-content capability-content">
         <div id="insights-list-view">
-        <div class="section-toolbar insight-toolbar"><span id="insights-intro" class="sr-only">数据洞察</span><button id="insights-refresh" type="button" class="text-button">刷新</button></div>
-        <p id="insights-notice" class="small-note" role="status" aria-live="polite"></p>
+        <span id="insights-intro" class="sr-only">数据洞察</span>
         <div class="insight-tabbar" role="tablist" aria-label="数据洞察分类">
-          <button id="insights-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="insights-panel-kb" data-insight-tab="kb"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>知识库记录</span><span class="insight-hint" data-tip="问题、回答类型、答案与时间；点「详情」看引用片段与调用记录。没有真实生成时显示“暂无生成回答”；检索分数不代表答案准确率。">ⓘ</span></button>
-          <button id="insights-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-tools" data-insight-tab="tools" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-plug"/></svg><span>API记录</span><span class="insight-hint" data-tip="工具名称、请求摘要、状态与耗时；缺失字段显示「未提供」，此处不计算费用。点「详情」查看请求与响应。">ⓘ</span></button>
-          <button id="insights-tab-traces" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-traces" data-insight-tab="traces" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-panel"/></svg><span>全链路追踪</span><span class="insight-hint" data-tip="按轮次查看文字、网页语音与设备语音全链路：ASR/TTS 厂商、模型、首包音频耗时、总耗时与关联工具。">ⓘ</span></button>
-          <button id="insights-tab-errors" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-errors" data-insight-tab="errors" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-alert"/></svg><span id="insights-tab-errors-label">异常日志</span><span class="insight-hint" data-tip="自动记录语音硬件、桌面节点、模型/工具调用及服务后台最近 300 条脱敏异常，便于排查设备屏幕“出错了”与连接失败。">ⓘ</span></button>
+          <button id="insights-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="insights-panel-kb" data-insight-tab="kb"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>知识库记录</span></button>
+          <button id="insights-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-tools" data-insight-tab="tools" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-plug"/></svg><span>API记录</span></button>
+          <button id="insights-tab-traces" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-traces" data-insight-tab="traces" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-panel"/></svg><span>全链路追踪</span></button>
+          <button id="insights-tab-errors" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-errors" data-insight-tab="errors" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-alert"/></svg><span id="insights-tab-errors-label">异常日志</span></button>
+          <button id="insights-refresh" type="button" class="text-button tabbar-refresh">刷新</button>
         </div>
+        <p id="insights-notice" class="small-note" role="status" aria-live="polite"></p>
         <section id="insights-panel-kb" class="capability-section insight-panel" role="tabpanel" aria-labelledby="insights-tab-kb">
           <div class="insight-filters">
             <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-kb-q" type="search" maxlength="200" placeholder="搜索问题或答案" aria-label="搜索知识库记录"></label>
@@ -467,7 +479,8 @@
     </form>
   </dialog>
   <div id="api-workbench" class="api-workbench-page" hidden aria-label="API 配置工作台">
-    <header class="api-workbench-header"><div><h2 id="api-workbench-title">API 配置工作台</h2><p class="small-note">调试业务接口，再保存为助手工具。模型连接仍在「API接入」管理。</p></div><button id="api-workbench-close" type="button" class="icon-button" aria-label="关闭 API 工作台"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
+    <div class="api-workbench-modal" role="dialog" aria-modal="true" aria-labelledby="api-workbench-title">
+    <header class="api-workbench-header"><div><h2 id="api-workbench-title">API 配置工作台</h2><p class="small-note">调试业务接口，保存为 Agent 技能工具。</p></div><button id="api-workbench-close" type="button" class="icon-button" aria-label="关闭 API 工作台"><svg aria-hidden="true"><use href="#i-close"/></svg></button></header>
     <div class="api-workbench-layout">
       <aside class="api-request-sidebar" aria-label="保存的接口"><div class="api-sidebar-heading"><strong>接口列表</strong><button id="api-new-request" type="button" class="text-button">新建</button></div><input id="api-request-search" type="search" placeholder="搜索接口" aria-label="搜索保存的接口"><div id="api-request-list"></div></aside>
       <div class="api-request-main">
@@ -510,6 +523,7 @@
         <div id="api-inflight" class="api-inflight" hidden><span>请求发送中…</span><button id="api-cancel-request" type="button" class="secondary-button">取消请求</button></div>
         <section id="api-response" class="api-response" aria-labelledby="api-response-title" hidden><div class="api-response-heading"><h3 id="api-response-title">响应</h3><span id="api-response-meta" class="small-note">尚未发送</span></div><nav class="api-workbench-tabs" aria-label="响应内容"><button id="api-response-body-tab" type="button" aria-pressed="true">Body</button><button id="api-response-headers-tab" type="button" aria-pressed="false">Headers</button><button id="api-pretty-response" type="button" class="text-button" hidden>格式化 JSON</button></nav><pre id="api-response-body" tabindex="0">发送后在这里显示实际响应。</pre><div id="api-response-headers" hidden></div></section>
       </div>
+    </div>
     </div>
   </div>
   <dialog id="api-send-dialog" aria-labelledby="api-send-title"><form id="api-send-form"><h2 id="api-send-title">核对本次请求</h2><p class="small-note">发送的是当前草稿；不会自动保存为工具，敏感值在下方隐藏。</p><pre id="api-send-preview"></pre><label id="api-send-confirm-row" class="checkbox-control" hidden><input id="api-send-confirm" type="checkbox">确认本次修改或付费请求；取消请求不保证外部操作撤销。</label><div class="dialog-actions"><button id="api-send-back" type="button" class="secondary-button">返回修改</button><button type="submit" class="primary-button">发送本次请求</button></div></form></dialog>

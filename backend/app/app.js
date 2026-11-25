@@ -89,6 +89,11 @@ function refreshControls() {
     el(id).hidden = state.view !== "chat"; el(id).disabled = state.busy || !state.active;
   }
   document.querySelectorAll(".session-item").forEach(button => { button.disabled = state.busy; });
+  document.querySelectorAll(".session-row-check input").forEach(input => { input.disabled = state.busy; });
+  if (el("session-manage-toggle")) el("session-manage-toggle").disabled = state.busy;
+  if (el("session-select-all")) el("session-select-all").disabled = state.busy || !state.sessions.length;
+  if (el("session-bulk-delete")) el("session-bulk-delete").disabled = state.busy || selectedSessionIds.size === 0;
+  if (el("session-manage-done")) el("session-manage-done").disabled = state.busy;
   const label = state.busy ? "正在处理请求…" : state.configured ? "已配置，随时提问" : state.loaded ? "尚未配置模型" : "正在连接本机服务";
   el("composer-state").replaceChildren(node("span", "state-dot"), document.createTextNode(label));
   el("composer-state").classList.toggle("sr-only", !state.busy);
@@ -125,7 +130,7 @@ function navigate(view, push = true, deviceTab = "desktop") {
   el("rename-form").hidden = true; el("view-title").hidden = false;
   const path = appPath({settings:"/settings", connections:"/settings#api", role:"/settings#role", devices:"/devices", capabilities:"/settings#capabilities", insights:"/settings#insights", chat:"/"}[view]);
   if (push && location.pathname + location.hash !== path) history.pushState({view}, "", path);
-  document.title = `${title} · AtomS3R`;
+  document.title = `${title} · 小圆`;
   closeSidebar(); notice(); refreshControls(); renderSessions();
   if (view === "connections" && state.loaded && savedConfig?.voice_mode === "pipeline" && savedConfig?.api_key_configured && !modelsFetched && !state.busy) queueMicrotask(refreshModelChoices);
   if (view === "role" && state.loaded && !deviceData) loadDevices(true).catch(error => notice(error.message,"error"));
@@ -133,15 +138,44 @@ function navigate(view, push = true, deviceTab = "desktop") {
   if (view === "capabilities") loadCapabilities().catch(error => capabilityNotice(error.message,true));
   if (view === "insights") loadInsights().catch(error => insightNotice(error.message,true));
 }
+let sessionManageMode = false;
+const selectedSessionIds = new Set();
+function syncBulkSessionControls() {
+  const toggleBtn = el("session-manage-toggle"), bar = el("session-bulk-bar");
+  const selectAll = el("session-select-all"), delBtn = el("session-bulk-delete");
+  if (!toggleBtn || !bar || !selectAll || !delBtn) return;
+  toggleBtn.hidden = sessionManageMode || !state.sessions.length;
+  bar.hidden = !sessionManageMode;
+  const visibleIds = state.sessions.map(session => session.session_id);
+  const selectedVisible = visibleIds.filter(id => selectedSessionIds.has(id)).length;
+  selectAll.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
+  selectAll.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
+  delBtn.textContent = selectedSessionIds.size ? `删除 (${selectedSessionIds.size})` : "删除";
+  delBtn.disabled = state.busy || selectedSessionIds.size === 0;
+}
 function renderSessions() {
   const list = el("session-list"), scrollTop = list.scrollTop; list.replaceChildren();
   const query = el("session-search").value.trim();
   if (!state.sessions.length && !sessionError) list.append(node("p", "sidebar-empty", sessionLoading ? "正在加载…" : query ? "没有匹配的对话" : "开始对话后，记录会出现在这里。"));
   for (const session of state.sessions) {
-    const button = node("button", "session-item" + (session.session_id === state.active && state.view === "chat" ? " active" : ""));
-    button.title = session.title; button.append(node("span", "", session.title));
-    button.setAttribute("aria-current", session.session_id === state.active && state.view === "chat" ? "page" : "false");
-    button.addEventListener("click", () => selectSession(session.session_id)); list.append(button);
+    if (sessionManageMode) {
+      const row = node("label", "session-row-check");
+      const box = node("input"); box.type = "checkbox"; box.checked = selectedSessionIds.has(session.session_id);
+      box.disabled = state.busy;
+      box.addEventListener("change", () => {
+        if (box.checked) selectedSessionIds.add(session.session_id);
+        else selectedSessionIds.delete(session.session_id);
+        syncBulkSessionControls();
+      });
+      row.title = session.title;
+      row.append(box, node("span", "", session.title));
+      list.append(row);
+    } else {
+      const button = node("button", "session-item" + (session.session_id === state.active && state.view === "chat" ? " active" : ""));
+      button.title = session.title; button.append(node("span", "", session.title));
+      button.setAttribute("aria-current", session.session_id === state.active && state.view === "chat" ? "page" : "false");
+      button.addEventListener("click", () => selectSession(session.session_id)); list.append(button);
+    }
   }
   if (sessionError) list.append(node("p", "sidebar-empty", sessionError));
   if (sessionHasMore || sessionError) {
@@ -149,8 +183,44 @@ function renderSessions() {
     more.type = "button"; more.disabled = sessionLoading;
     more.addEventListener("click", () => loadSessions(state.sessions.length > 0).catch(() => {})); list.append(more);
   }
-  list.scrollTop = scrollTop; refreshControls();
+  list.scrollTop = scrollTop; syncBulkSessionControls(); refreshControls();
 }
+el("session-manage-toggle")?.addEventListener("click", () => {
+  if (state.busy) return;
+  sessionManageMode = true; selectedSessionIds.clear(); renderSessions();
+});
+el("session-manage-done")?.addEventListener("click", () => {
+  sessionManageMode = false; selectedSessionIds.clear(); renderSessions();
+});
+el("session-select-all")?.addEventListener("change", () => {
+  const checked = el("session-select-all").checked;
+  for (const session of state.sessions) {
+    if (checked) selectedSessionIds.add(session.session_id);
+    else selectedSessionIds.delete(session.session_id);
+  }
+  renderSessions();
+});
+el("session-bulk-delete")?.addEventListener("click", async () => {
+  const ids = Array.from(selectedSessionIds);
+  if (!ids.length || state.busy) return;
+  if (!confirm(`确定删除选中的 ${ids.length} 段对话？删除后无法恢复。`)) return;
+  busy(true);
+  try {
+    const results = await Promise.allSettled(ids.map(id => request(`/sessions/${encodeURIComponent(id)}`, "DELETE")));
+    const deleted = ids.filter((_, idx) => results[idx].status === "fulfilled");
+    const failed = ids.filter((_, idx) => results[idx].status === "rejected");
+    for (const id of deleted) selectedSessionIds.delete(id);
+    if (state.active && deleted.includes(state.active)) {
+      state.active = null; state.detail = null; state.pending = null; state.pendingSteps = []; state.pendingText = ""; state.failure = null;
+      remember("atoms3r.active", null); renderMessages();
+    }
+    if (!failed.length) sessionManageMode = false;
+    busy(false);
+    await loadSessions();
+    if (failed.length) notice(`已删除 ${deleted.length} 段，${failed.length} 段删除失败。`, "error");
+    else notice(`已删除 ${deleted.length} 段对话。`, "success");
+  } catch (error) { notice(error.message, "error"); } finally { busy(false); }
+});
 async function loadSessions(append = false) {
   clearTimeout(sessionSearchTimer);
   sessionController?.abort(); const controller = new AbortController(); sessionController = controller;
@@ -251,7 +321,7 @@ function markdown(text) {
 function messageNode(message) {
   const article = node("article", `message ${message.role}`);
   if (message.role === "user") { article.append(node("div", "user-text", message.content)); return article; }
-  const label = node("div", "assistant-label"); label.append(icon("chat"), document.createTextNode("AtomS3R 助理"));
+  const label = node("div", "assistant-label"); label.append(icon("chat"), document.createTextNode("小圆 助理"));
   article.append(label, markdown(message.content));
   const footer = node("div", "message-footer"); const copy = node("button", "icon-button");
   copy.setAttribute("aria-label", "复制回答"); copy.title = "复制回答"; copy.append(icon("copy"));
@@ -545,7 +615,7 @@ window.atoms3rVoiceMessages = {
     );
     if (state.view === "chat") {
       el("view-title").textContent = state.detail.title;
-      document.title = `${state.detail.title} · AtomS3R`;
+      document.title = `${state.detail.title} · 小圆`;
     }
     user.dataset.voiceExchange = ""; assistant.dataset.voiceExchange = "";
     area.append(user, assistant); el("empty-state").hidden = true;
@@ -743,7 +813,7 @@ async function sendMessage(value, useKnowledge = state.useKnowledge) {
     const now = new Date().toISOString();
     state.detail.messages.push({role:"user",content:message,created_at:now}, {role:"assistant",content:data.reply,created_at:now,model:data.model,provider:data.provider,usage:data.usage,estimated_cost:data.estimated_cost,currency:data.currency,finish_reason:data.finish_reason,knowledge:data.knowledge,sources:data.sources,tool_calls:data.tool_calls,pending_approval:data.pending_approval || null});
     state.pending = null; state.pendingSteps = []; state.pendingText = ""; state.failure = null; renderMessages();
-    if (state.view === "chat") { el("view-title").textContent = state.detail.title; document.title = `${state.detail.title} · AtomS3R`; }
+    if (state.view === "chat") { el("view-title").textContent = state.detail.title; document.title = `${state.detail.title} · 小圆`; }
     if (data.history_persisted === false) notice("已收到回答，但历史记录未能写入本机；当前对话仅保留在内存。", "error");
     // A sidebar refresh failure must never turn a successful paid call into a retry.
     try { await loadSessions(); } catch { notice("回答已收到；会话列表暂时无法刷新，请刷新页面重试。", "error"); }
@@ -1759,7 +1829,7 @@ function updateCapabilityCatalog(data) {
   for (const id of ["kb-file","kb-replacement"]) el(id).accept = capabilityState.supportedFileTypes.join(",");
   const pdf = capabilityState.supportedFileTypes.includes(".pdf");
   el("kb-file-types").textContent = `支持 TXT、Markdown、DOCX${pdf ? "、文字版 PDF" : ""}，单份不超过 10MB。${pdf ? "扫描件与图片识别尚未接入。" : "PDF 暂不可用。"}检索结果显示来源文件与片段位置。`;
-  el("capability-integration").textContent = data.conversation_integration ? "能力已接入对话" : "外部工具与个人知识库尚未接入对话";
+  if (el("capability-integration")) el("capability-integration").textContent = data.conversation_integration ? "能力已接入对话" : "外部工具与个人知识库尚未接入对话";
   const official = data.tools.find(tool => tool.name === "search_m5stack");
   if (official) {
     state.m5stackEnabled = official.enabled; el("m5stack_enabled").checked = official.enabled;
@@ -1806,7 +1876,7 @@ async function loadCapabilities() {
     ]);
     const failures = [];
     if (results[0].status === "fulfilled") updateCapabilityCatalog(results[0].value);
-    else {capabilityState.toolsLoaded = false; el("capability-integration").textContent = "技能目录加载失败"; failures.push(results[0].reason.message);}
+    else {capabilityState.toolsLoaded = false; if (el("capability-integration")) el("capability-integration").textContent = "技能目录加载失败"; failures.push(results[0].reason.message);}
     if (results[1].status === "fulfilled") {
       capabilityState.documents = results[1].value.documents; capabilityState.total = results[1].value.total;
       capabilityState.offset = capabilityState.documents.length; renderKnowledgeDocuments();
@@ -2069,47 +2139,39 @@ el("conn-web-search-test")?.addEventListener("click", async () => {
   await runQuickWebSearchTest("今日新闻", resultEl, btn);
 });
 function webSearchToolCard(tool) {
+  const active = isSkillActive(tool);
   const card = node("div", "capability-item");
   const header = node("div", "capability-item-header");
   const title = node("div", "capability-item-title");
   title.append(node("h3", "", "联网搜索"), node("p", "small-note", "DeepSeek Search"));
   header.append(title);
 
-  const switches = node("div", "search-tool-switches");
-  const addSwitch = (text, checked, action) => {
-    const label = node("label", "checkbox-control"), input = node("input");
-    input.type = "checkbox"; input.checked = checked;
-    input.addEventListener("change", () => {
-      const next = input.checked;
-      input.checked = checked;
-      capabilityAction(() => action(next));
+  const toggleLabel = node("label", "checkbox-control"), toggle = node("input");
+  toggle.type = "checkbox"; toggle.checked = active;
+  toggle.addEventListener("change", () => {
+    const enabled = toggle.checked; toggle.checked = active;
+    capabilityAction(async () => {
+      await setSkillEnabled(tool, enabled);
+      capabilityNotice(enabled ? "已为 Agent 开启「联网搜索」。" : "已停用。");
     });
-    label.append(input, node("span", "", text)); switches.append(label);
-    return input;
-  };
-  addSwitch("启用资源", tool.enabled, async enabled => {
-    updateCapabilityCatalog(await request("/api/tools/web_search/enabled", "PUT", {enabled}));
-    capabilityNotice(enabled ? "联网搜索资源已启用。" : "联网搜索资源已停用。");
   });
-  addSwitch("选入助手", capabilityState.selectedTools.includes(tool.name), async selected => {
-    const tools = selected ? [...capabilityState.selectedTools, tool.name]
-      : capabilityState.selectedTools.filter(id => id !== tool.name);
-    await syncAssistantSelection(tools, capabilityState.selectedKbs);
-    renderCapabilityTools();
-    capabilityNotice(selected ? "联网搜索已选入助手。" : "联网搜索已从助手移除。");
-  }).dataset.requiresEnabled = String(capabilityState.selectionSupported);
-  header.append(switches);
+  toggleLabel.append(toggle, document.createTextNode(active ? "已开启" : "已停用"));
+  header.append(toggleLabel);
 
   const keySection = node("div", "search-key-config");
+  const keyHead = node("div", "search-key-head");
   const label = node("label", "", "DeepSeek API Key");
   label.htmlFor = "web_search_api_key";
+  const status = node("p", "small-note", webSearchKeyStateText(savedConfig));
+  status.id = "web-search-key-status";
+  keyHead.append(label, status);
+
+  const keyRow = node("div", "search-key-row");
   const field = node("input");
   field.id = "web_search_api_key"; field.type = "password"; field.autocomplete = "off"; field.spellcheck = false;
   field.placeholder = "填 DeepSeek API Key；主模型已是 DeepSeek 可留空";
-  const separate = Boolean(savedConfig?.web_search_separate_key_configured);
-  const status = node("p", "small-note", webSearchKeyStateText(savedConfig));
-  status.id = "web-search-key-status";
   field.setAttribute("aria-describedby", status.id);
+  const separate = Boolean(savedConfig?.web_search_separate_key_configured);
 
   const saveKey = clear => capabilityAction(async () => {
     const value = clear ? "" : field.value.trim();
@@ -2127,14 +2189,13 @@ function webSearchToolCard(tool) {
     renderCapabilityTools();
     capabilityNotice(clear ? "独立密钥已清除。" : "密钥已保存。");
   });
-  const actions = node("div", "capability-item-actions");
   const saveBtn = node("button", "secondary-button", "保存密钥");
   saveBtn.type = "button"; saveBtn.addEventListener("click", () => saveKey(false));
-  actions.append(saveBtn);
+  keyRow.append(field, saveBtn);
   if (separate) {
-    const clearBtn = node("button", "secondary-button", "清除密钥");
+    const clearBtn = node("button", "text-button", "清除");
     clearBtn.type = "button"; clearBtn.addEventListener("click", () => saveKey(true));
-    actions.append(clearBtn);
+    keyRow.append(clearBtn);
   }
   field.addEventListener("keydown", event => {
     if (event.key === "Enter" && !event.isComposing) {
@@ -2142,7 +2203,7 @@ function webSearchToolCard(tool) {
       saveKey(false);
     }
   });
-  keySection.append(label, field, status, actions);
+  keySection.append(keyHead, keyRow);
 
   const quickTest = node("div", "search-quick-test");
   const testRow = node("div", "search-quick-test-row");
@@ -2153,6 +2214,8 @@ function webSearchToolCard(tool) {
   const quickBtn = node("button", "secondary-button", "测试搜索");
   quickBtn.type = "button";
   quickBtn.disabled = !tool.enabled; quickBtn.dataset.requiresEnabled = String(tool.enabled);
+  const debugBtn = capabilityButton("JSON 调试", () => openToolCall(tool));
+  debugBtn.disabled = !tool.enabled; debugBtn.dataset.requiresEnabled = String(tool.enabled);
   const quickResult = node("p", "small-note");
   quickResult.hidden = true;
   const runQuick = () => runQuickWebSearchTest(testInput.value, quickResult, quickBtn).then(res => {
@@ -2165,14 +2228,10 @@ function webSearchToolCard(tool) {
       if (!quickBtn.disabled) runQuick();
     }
   });
-  testRow.append(testInput, quickBtn);
-  quickTest.append(node("label", "", "快速提问测试（免填 JSON）"), testRow, quickResult);
+  testRow.append(testInput, quickBtn, debugBtn);
+  quickTest.append(node("label", "", "快速提问测试"), testRow, quickResult);
 
-  const toolActions = node("div", "capability-item-actions");
-  const test = capabilityButton("JSON 调试", () => openToolCall(tool));
-  test.disabled = !tool.enabled; test.dataset.requiresEnabled = String(tool.enabled);
-  toolActions.append(test);
-  card.append(header, node("p", "small-note", tool.description), keySection, quickTest, toolActions);
+  card.append(header, keySection, quickTest);
   return card;
 }
 function toolDetailCard(tool) {
@@ -2798,7 +2857,6 @@ el("tool-editor").addEventListener("submit",async event => {
   finally {apiWorkbench.saving = false; apiControls();}
 });
 function openApiWorkbenchPage() {
-  el("settings-page").hidden = true;
   el("api-workbench").hidden = false;
   document.body.classList.add("workbench-open");
 }
@@ -2808,10 +2866,12 @@ function closeApiWorkbench() {
   el("api-params").replaceChildren(); el("api-headers").replaceChildren(); el("api-form-fields").replaceChildren(); el("api-body-text").value = "";
   el("api-definition").value = ""; apiWorkbench.mode = "visual"; el("api-definition-status").textContent = "";
   el("api-workbench").hidden = true; document.body.classList.remove("workbench-open");
-  el("settings-page").hidden = state.view === "chat";
   el("tool-new").focus();
 }
 el("api-workbench-close").addEventListener("click",closeApiWorkbench);
+el("api-workbench").addEventListener("click", event => {
+  if (event.target === el("api-workbench")) closeApiWorkbench();
+});
 let toolCallSelection = null, toolCallController = null;
 function openToolCall(tool) {
   if (!tool.enabled || capabilityState.busy || toolCallController) return;
@@ -3655,7 +3715,40 @@ function renderDesktopNodes(data) {
     list.append(card);
   }
 }
-async function loadDesktopNodes() { renderDesktopNodes(await request("/api/desktop")); }
+function renderPublicDesktopStatus(health) {
+  desktopData = null;
+  const online = Number(health?.desktop_online_nodes || 0);
+  el("desktop-state").textContent = online > 0
+    ? `当前云端已连接 ${online} 台个人电脑`
+    : "个人电脑节点（公网只读）";
+  el("desktop-state-detail").hidden = true;
+  const setupBox = document.querySelector(".desktop-setup-box");
+  if (setupBox) setupBox.hidden = true;
+  const list = el("desktop-nodes"); list.replaceChildren();
+  const card = node("div", `desktop-node-card desktop-readonly-card${online > 0 ? " online" : ""}`);
+  const head = node("div", "desktop-node-head");
+  const titleWrap = node("div", "desktop-node-title");
+  titleWrap.append(node("strong", "", "个人电脑节点管理仅限本机回环访问"));
+  head.append(titleWrap, node("span", `desktop-status-dot ${online > 0 ? "online" : "offline"}`, online > 0 ? `${online} 台在线` : "暂无在线"));
+  card.append(head, node("p", "small-note", "公网访问时已自动隐藏桌面配对令牌、一键启动命令及截屏预览，以保护电脑控制权限。"));
+  list.append(card);
+}
+async function loadDesktopNodes() {
+  try {
+    const data = await request("/api/desktop");
+    const setupBox = document.querySelector(".desktop-setup-box");
+    if (setupBox) setupBox.hidden = false;
+    el("desktop-state-detail").hidden = false;
+    renderDesktopNodes(data);
+  } catch (error) {
+    if (error.status === 403 || error.code === "desktop_admin_local_only") {
+      const health = await request("/health").catch(() => null);
+      renderPublicDesktopStatus(health);
+      return;
+    }
+    throw error;
+  }
+}
 async function desktopAction(action) {
   if (desktopBusy) return;
   desktopBusy = true;
@@ -3800,7 +3893,7 @@ window.addEventListener("popstate", () => navigate(routeView(),false));
     if (active) {
       try {
         state.detail = await request(`/sessions/${encodeURIComponent(active)}`); state.active = active;
-        if (state.view === "chat") { el("view-title").textContent = state.detail.title; document.title = `${state.detail.title} · AtomS3R`; }
+        if (state.view === "chat") { el("view-title").textContent = state.detail.title; document.title = `${state.detail.title} · 小圆`; }
       } catch (error) {
         if (error.code === "session_not_found") remember("atoms3r.active",null);
         else notice(error.message,"error");
