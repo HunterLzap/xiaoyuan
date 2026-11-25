@@ -781,6 +781,7 @@ function connectionPayload() {
   result.asr_language = el("asr_language").value.trim();
   result.asr_use_text_connection = !el("asr-separate-service").checked;
   if (el("api_key").value.trim()) result.api_key = el("api_key").value.trim();
+  if (el("conn_web_search_api_key")?.value.trim()) result.web_search_api_key = el("conn_web_search_api_key").value.trim();
   if (!result.tts_use_text_connection) {
     result.tts_base_url = el("tts_base_url").value.trim();
     if (el("tts_api_key").value.trim()) result.tts_api_key = el("tts_api_key").value.trim();
@@ -956,8 +957,8 @@ el("tts_provider").addEventListener("change", () => {
   updateConnectionMode(); updateTtsMode(); assistantDirty(); dirty();
 });
 function fingerprint() { const payload = {...connectionPayload(), ...desktopModelsPayload(), model:el("model").value.trim(),
-  tts_provider:el("tts_provider").value, tts_model:selectedSpeechModel(), tts_voice:selectedSpeechVoice()}; Object.assign(payload,realtimePayload()); delete payload.rt_api_key; delete payload.api_key; delete payload.tts_api_key; delete payload.asr_api_key; return JSON.stringify(payload); }
-function dirty() { el("dirty-state").textContent = fingerprint() !== savedFingerprint || el("rt_api_key").value || el("api_key").value || el("tts_api_key").value || el("asr_api_key").value ? "有未保存的修改" : ""; }
+  tts_provider:el("tts_provider").value, tts_model:selectedSpeechModel(), tts_voice:selectedSpeechVoice()}; Object.assign(payload,realtimePayload()); delete payload.rt_api_key; delete payload.api_key; delete payload.tts_api_key; delete payload.asr_api_key; delete payload.web_search_api_key; return JSON.stringify(payload); }
+function dirty() { el("dirty-state").textContent = fingerprint() !== savedFingerprint || el("rt_api_key").value || el("api_key").value || el("tts_api_key").value || el("asr_api_key").value || el("conn_web_search_api_key")?.value ? "有未保存的修改" : ""; }
 function voiceChoice() {
   // Only the voice id travels from the page; the server resolves the sample path so a
   // request can never point the clone model at an arbitrary file.
@@ -1187,6 +1188,7 @@ function applyConfig(data, preserve = false) {
   }
   savedConfig = data; state.configured = data.configured;
   renderAckCache();
+  renderWebSearchConnectionState();
   applyWeatherSettings(data);
   syncDesktopPlannerPreset(data.desktop_planner_model || "");
   el("desktop_vision_model").value = data.desktop_vision_model || "";
@@ -1200,6 +1202,7 @@ function applyConfig(data, preserve = false) {
   if (preserve) el("model").value = model;
   el("api_key").value = ""; el("api_key").type = "password"; el("show-key").textContent = "显示"; el("show-key").setAttribute("aria-pressed", "false");
   el("api_key").placeholder = data.api_key_configured ? "已保存，留空保留" : "输入文字服务密钥";
+  if (el("conn_web_search_api_key")) el("conn_web_search_api_key").value = "";
   el("model-label").textContent = data.active_model || data.model || "未选择模型";
   syncModelOption(); renderConnectionStatus(); refreshControls();
 }
@@ -1994,6 +1997,77 @@ function renderCapabilityDetail(item) {
   }
   detail.append(toolDetailCard(item.tool));
 }
+function webSearchKeyStateText(cfg) {
+  if (cfg?.web_search_separate_key_configured) return "已配置独立 Key";
+  if (cfg?.web_search_configured) return "自动复用 DeepSeek 主模型 Key";
+  return "尚未配置密钥";
+}
+function renderWebSearchConnectionState() {
+  const stateEl = el("conn-web-search-key-state"), clearBtn = el("conn-web-search-clear");
+  if (!stateEl) return;
+  stateEl.textContent = webSearchKeyStateText(savedConfig);
+  if (clearBtn) clearBtn.hidden = !savedConfig?.web_search_separate_key_configured;
+}
+async function runQuickWebSearchTest(query, resultEl, triggerBtn) {
+  const clean = (query || "").trim() || "今日新闻";
+  if (triggerBtn) triggerBtn.disabled = true;
+  if (resultEl) { resultEl.hidden = false; resultEl.dataset.kind = ""; resultEl.textContent = `正在测试搜索「${clean}」…`; }
+  const started = performance.now();
+  try {
+    const res = await request("/api/tools/web_search/call", "POST", {arguments: {query: clean, count: 1}, confirmed: false});
+    const ms = Math.round(performance.now() - started);
+    const items = Array.isArray(res?.results) ? res.results : [];
+    const summary = items.length ? `搜索正常（${ms}ms，返回 ${items.length} 条）：${items[0].title || items[0].url || ""}` : `接口连通（${ms}ms），但本次未返回结果。`;
+    if (resultEl) resultEl.textContent = summary;
+    return {ok: true, summary};
+  } catch (error) {
+    const msg = error.code === "tool_not_found" ? "联网搜索尚未启用，请先到「技能与知识 → 技能中心」勾选“启用资源”。" : error.message;
+    if (resultEl) { resultEl.textContent = msg; resultEl.dataset.kind = "error"; }
+    return {ok: false, message: msg};
+  } finally {
+    if (triggerBtn) triggerBtn.disabled = false;
+  }
+}
+el("conn-web-search-clear")?.addEventListener("click", async () => {
+  if (state.busy) return;
+  busy(true);
+  try {
+    const {text} = await request("/api/settings/connections", "PUT", {web_search_api_key: ""});
+    if (savedConfig) {
+      savedConfig.web_search_configured = text.web_search_configured;
+      savedConfig.web_search_separate_key_configured = text.web_search_separate_key_configured;
+    }
+    renderWebSearchConnectionState();
+    if (capabilityState.tools.length) renderCapabilityTools();
+    notice("独立联网搜索密钥已清除。", "success");
+  } catch (error) { notice(error.message, "error"); }
+  finally { busy(false); }
+});
+el("conn-web-search-test")?.addEventListener("click", async () => {
+  if (state.busy) return;
+  const resultEl = el("conn-web-search-test-result"), btn = el("conn-web-search-test");
+  const draftKey = el("conn_web_search_api_key")?.value.trim();
+  if (draftKey) {
+    btn.disabled = true;
+    resultEl.hidden = false; resultEl.dataset.kind = ""; resultEl.textContent = "正在保存搜索密钥并测试…";
+    try {
+      const {text} = await request("/api/settings/connections", "PUT", {web_search_api_key: draftKey});
+      el("conn_web_search_api_key").value = "";
+      if (savedConfig) {
+        savedConfig.web_search_configured = text.web_search_configured;
+        savedConfig.web_search_separate_key_configured = text.web_search_separate_key_configured;
+      }
+      renderWebSearchConnectionState();
+      if (capabilityState.tools.length) renderCapabilityTools();
+      dirty();
+    } catch (error) {
+      resultEl.textContent = error.message; resultEl.dataset.kind = "error";
+      btn.disabled = false;
+      return;
+    }
+  }
+  await runQuickWebSearchTest("今日新闻", resultEl, btn);
+});
 function webSearchToolCard(tool) {
   const card = node("div", "capability-item");
   const header = node("div", "capability-item-header");
@@ -2033,8 +2107,7 @@ function webSearchToolCard(tool) {
   field.id = "web_search_api_key"; field.type = "password"; field.autocomplete = "off"; field.spellcheck = false;
   field.placeholder = "填 DeepSeek API Key；主模型已是 DeepSeek 可留空";
   const separate = Boolean(savedConfig?.web_search_separate_key_configured);
-  const status = node("p", "small-note", separate ? "已配置独立 Key"
-    : savedConfig?.web_search_configured ? "自动复用 DeepSeek 主模型 Key" : "尚未配置密钥");
+  const status = node("p", "small-note", webSearchKeyStateText(savedConfig));
   status.id = "web-search-key-status";
   field.setAttribute("aria-describedby", status.id);
 
@@ -2050,12 +2123,19 @@ function webSearchToolCard(tool) {
       savedConfig.web_search_configured = text.web_search_configured;
       savedConfig.web_search_separate_key_configured = text.web_search_separate_key_configured;
     }
+    renderWebSearchConnectionState();
     renderCapabilityTools();
     capabilityNotice(clear ? "独立密钥已清除。" : "密钥已保存。");
   });
   const actions = node("div", "capability-item-actions");
-  actions.append(capabilityButton("保存密钥", () => saveKey(false)));
-  if (separate) actions.append(capabilityButton("清除密钥", () => saveKey(true)));
+  const saveBtn = node("button", "secondary-button", "保存密钥");
+  saveBtn.type = "button"; saveBtn.addEventListener("click", () => saveKey(false));
+  actions.append(saveBtn);
+  if (separate) {
+    const clearBtn = node("button", "secondary-button", "清除密钥");
+    clearBtn.type = "button"; clearBtn.addEventListener("click", () => saveKey(true));
+    actions.append(clearBtn);
+  }
   field.addEventListener("keydown", event => {
     if (event.key === "Enter" && !event.isComposing) {
       event.preventDefault();
@@ -2063,11 +2143,36 @@ function webSearchToolCard(tool) {
     }
   });
   keySection.append(label, field, status, actions);
+
+  const quickTest = node("div", "search-quick-test");
+  const testRow = node("div", "search-quick-test-row");
+  const testInput = node("input");
+  testInput.type = "text"; testInput.maxLength = 128; testInput.value = "今日新闻";
+  testInput.placeholder = "输入测试关键词，例如：今天金价";
+  testInput.setAttribute("aria-label", "测试搜索关键词");
+  const quickBtn = node("button", "secondary-button", "测试搜索");
+  quickBtn.type = "button";
+  quickBtn.disabled = !tool.enabled; quickBtn.dataset.requiresEnabled = String(tool.enabled);
+  const quickResult = node("p", "small-note");
+  quickResult.hidden = true;
+  const runQuick = () => runQuickWebSearchTest(testInput.value, quickResult, quickBtn).then(res => {
+    capabilityNotice(res.ok ? res.summary : res.message, !res.ok);
+  });
+  quickBtn.addEventListener("click", runQuick);
+  testInput.addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.isComposing) {
+      event.preventDefault();
+      if (!quickBtn.disabled) runQuick();
+    }
+  });
+  testRow.append(testInput, quickBtn);
+  quickTest.append(node("label", "", "快速提问测试（免填 JSON）"), testRow, quickResult);
+
   const toolActions = node("div", "capability-item-actions");
-  const test = capabilityButton("手动测试", () => openToolCall(tool));
+  const test = capabilityButton("JSON 调试", () => openToolCall(tool));
   test.disabled = !tool.enabled; test.dataset.requiresEnabled = String(tool.enabled);
   toolActions.append(test);
-  card.append(header, node("p", "small-note", tool.description), keySection, toolActions);
+  card.append(header, node("p", "small-note", tool.description), keySection, quickTest, toolActions);
   return card;
 }
 function toolDetailCard(tool) {
@@ -2713,7 +2818,7 @@ function openToolCall(tool) {
   toolCallSelection = tool;
   el("tool-call-title").textContent = `手动调用：${tool.name}`;
   el("tool-call-description").textContent = tool.kind === "http" ? `${tool.request?.method || tool.method} ${tool.request?.url || tool.url}\n${tool.description}` : tool.description;
-  el("tool-call-arguments").value = "{}"; el("tool-call-confirm").checked = false;
+  el("tool-call-arguments").value = tool.name === "web_search" ? '{\n  "query": "今日新闻",\n  "count": 3\n}' : "{}"; el("tool-call-confirm").checked = false;
   el("tool-call-confirm-row").hidden = tool.permission === "read"; el("tool-call-confirm").required = tool.permission !== "read";
   el("tool-call-warning").textContent = tool.permission === "read" ? "会发送真实查询请求，不自动重试。" : "会执行真实修改或付费操作；核对参数并勾选确认后才执行，不自动重试。";
   el("tool-call-status").textContent = ""; el("tool-call-result").hidden = true; el("tool-call-submit").disabled = false;

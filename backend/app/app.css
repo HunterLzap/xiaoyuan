@@ -940,3 +940,8 @@ body.voice-mode { overflow:hidden; }
 .step-preview-details { max-width:320px; color:var(--muted); font-size:12px; }
 .step-preview-details summary { cursor:pointer; width:fit-content; }
 .step-preview-details img { display:block; width:100%; height:auto; margin-top:6px; border:1px solid var(--border); border-radius:8px; }
+.search-conn-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; padding-left:122px; }
+.search-quick-test { display:grid; gap:8px; border-top:1px solid var(--border); padding-top:12px; }
+.search-quick-test-row { display:flex; align-items:center; gap:8px; }
+.search-quick-test-row input { flex:1; min-width:0; padding:8px 10px; border:1px solid var(--input-border); border-radius:7px; background:var(--bg); font:inherit; }
+@media (max-width:700px) { .search-conn-actions { padding-left:0; } }

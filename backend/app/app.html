@@ -276,6 +276,23 @@
               <div class="settings-row"><label for="desktop_vision_model">纯视觉备用</label><input id="desktop_vision_model" list="desktop-vision-models" maxlength="200" autocomplete="off" placeholder="qwen3-vl-plus（主控非多模态时使用）"><datalist id="desktop-vision-models"><option value="qwen3-vl-plus"><option value="qwen3.5-plus"><option value="qwen-vl-max"></datalist></div>
             </div></details>
           </section>
+          <section class="api-panel" id="web-search-connection-panel" aria-label="联网搜索">
+            <h2 class="api-panel-title">联网搜索 <small>DeepSeek Search</small></h2>
+            <div class="api-group">
+              <div class="settings-row">
+                <label for="conn_web_search_api_key">DeepSeek API Key</label>
+                <div class="api-secret">
+                  <input id="conn_web_search_api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="填 DeepSeek API Key；主模型已是 DeepSeek 可留空">
+                  <small id="conn-web-search-key-state" role="status"></small>
+                </div>
+              </div>
+              <div class="search-conn-actions">
+                <button id="conn-web-search-test" type="button" class="secondary-button">测试搜索</button>
+                <button id="conn-web-search-clear" type="button" class="text-button" hidden>清除独立密钥</button>
+              </div>
+              <p id="conn-web-search-test-result" class="small-note" role="status" aria-live="polite" hidden></p>
+            </div>
+          </section>
           <section class="api-panel api-common"><button type="button" class="text-button" data-view="capabilities">管理技能、电脑操控与知识库 →</button><input id="m5stack_enabled" type="checkbox" checked hidden></section>
         </fieldset><div class="settings-actions"><span id="dirty-state">接入已同步</span><span class="model-hint"></span><div class="actions-buttons"><button id="settings-api-cancel" type="button" class="secondary-button">取消</button><button id="save" type="submit" class="primary-button" disabled>保存并关闭</button></div></div></form>
       </div></section>
