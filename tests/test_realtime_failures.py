@@ -675,6 +675,43 @@ class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(socket.sent[0]["session"]["voice"], "longanqian_v3.1")
             self.assertEqual(socket.sent[0]["session"]["output_audio_format"], "pcm")
 
+        requests = []
+
+        async def fake_request(settings, payload):
+            requests.append(payload)
+            action = payload["input"]["action"]
+            if action == "create_voice":
+                return {"output": {"voice_id": "qwen-audio-3.1-realtime-flash-v1234-taffy"}}
+            if action == "list_voice":
+                return {"output": {"voice_list": [{"voice_id": "qwen-audio-3.1-realtime-flash-v1234-taffy"}]}}
+            return {"output": {}}
+
+        with TemporaryDirectory() as directory:
+            index_path = Path(directory) / "qwen_voices.json"
+            sample_path = Path(directory) / "taffy.mp3"
+            sample_path.write_bytes(b"mp3-bytes")
+            with (
+                patch.object(qwen_voices, "INDEX", index_path),
+                patch.object(qwen_voices.voices, "process_upload", return_value={"id": "tmp1", "name": "塔菲", "sample": "tmp.mp3"}),
+                patch.object(qwen_voices.voices, "resolve", return_value=sample_path),
+                patch.object(qwen_voices.voices, "delete"),
+                patch.object(qwen_voices, "_request", side_effect=fake_request),
+            ):
+                created = await qwen_voices.create(cfg, b"wav-bytes", "taffy.wav", "塔菲", target_model="qwen-audio-3.1-realtime-flash")
+                self.assertEqual(created["voice"], "qwen-audio-3.1-realtime-flash-v1234-taffy")
+                listed = await qwen_voices.list_public(cfg, target_model="qwen-audio-3.1-realtime-flash")
+                self.assertEqual(listed[0]["name"], "塔菲")
+                await qwen_voices.delete(cfg, created["voice"])
+
+        self.assertEqual(requests[0]["model"], "voice-enrollment")
+        self.assertEqual(requests[0]["input"]["action"], "create_voice")
+        self.assertEqual(requests[0]["input"]["target_model"], "qwen-audio-3.1-realtime-flash")
+        self.assertLessEqual(len(requests[0]["input"]["prefix"]), 10)
+        self.assertTrue(requests[0]["input"]["audio"].startswith("data:audio/mpeg;base64,"))
+        self.assertEqual(requests[0]["input"]["language_hints"], ["zh"])
+        self.assertEqual(requests[1]["input"]["action"], "list_voice")
+        self.assertEqual(requests[2]["input"], {"action": "delete_voice", "voice_id": "qwen-audio-3.1-realtime-flash-v1234-taffy"})
+
 
 if __name__ == "__main__":
     unittest.main()

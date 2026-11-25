@@ -34,6 +34,10 @@ def is_supported_target_model(model: str) -> bool:
     return name in SUPPORTED_MODELS or name.startswith(("qwen3-tts-vc-realtime", "qwen-audio-"))
 
 
+def _is_voice_enrollment_model(model: str) -> bool:
+    return (model or "").strip().lower().startswith("qwen-audio-")
+
+
 def _active_target_model(settings: Settings) -> str:
     if settings.voice_mode == "pipeline" and settings.tts_provider == "bailian":
         return settings.tts_model
@@ -128,6 +132,8 @@ def _merge_remote(settings: Settings, remote: list[dict], target_model: str | No
         item_model = item.get("target_model") or model
         if target_model and item.get("target_model") and item_model != target_model:
             continue
+        if target_model and not item.get("target_model") and voice.startswith("qwen-audio-") and not voice.startswith(f"{target_model}-"):
+            continue
         saved = local.get(voice)
         name = saved["name"] if saved else f"克隆音色 {voice[-6:]}"
         result.append({
@@ -144,10 +150,16 @@ def _merge_remote(settings: Settings, remote: list[dict], target_model: str | No
 
 async def list_public(settings: Settings, target_model: str | None = None) -> list[dict]:
     model = target_model or _active_target_model(settings)
-    data = await _request(settings, {
-        "model": "qwen-voice-enrollment",
-        "input": {"action": "list", "page_index": 0, "page_size": 100},
-    })
+    if _is_voice_enrollment_model(model):
+        data = await _request(settings, {
+            "model": "voice-enrollment",
+            "input": {"action": "list_voice", "page_index": 0, "page_size": 100},
+        })
+    else:
+        data = await _request(settings, {
+            "model": "qwen-voice-enrollment",
+            "input": {"action": "list", "page_index": 0, "page_size": 100},
+        })
     remote = data.get("output", {}).get("voice_list") or []
     return _merge_remote(settings, [item for item in remote if isinstance(item, dict)], target_model=model)
 
@@ -162,25 +174,39 @@ async def create(settings: Settings, raw: bytes, filename: str, name: str, targe
         if sample is None:
             raise ProviderError(500, "qwen_clone_sample", "无法读取处理后的复刻音频。")
         encoded = sample.read_bytes()
-        preferred_name = "v" + secrets.token_hex(7)
-        data = await _request(settings, {
-            "model": "qwen-voice-enrollment",
-            "input": {
-                "action": "create",
-                "target_model": model,
-                "preferred_name": preferred_name,
-                "audio": {"data": "data:audio/mpeg;base64," + base64.b64encode(encoded).decode("ascii")},
-                "language": "zh",
-                "text": "",
-            },
-            "parameters": {"skip_audio_process": False, "voice_clone_mode": "normal"},
-        })
+        data_uri = "data:audio/mpeg;base64," + base64.b64encode(encoded).decode("ascii")
+        if _is_voice_enrollment_model(model):
+            payload = {
+                "model": "voice-enrollment",
+                "input": {
+                    "action": "create_voice",
+                    "target_model": model,
+                    "prefix": "v" + secrets.token_hex(4),
+                    "audio": data_uri,
+                    "language_hints": ["zh"],
+                },
+            }
+        else:
+            payload = {
+                "model": "qwen-voice-enrollment",
+                "input": {
+                    "action": "create",
+                    "target_model": model,
+                    "preferred_name": "v" + secrets.token_hex(7),
+                    "audio": {"data": data_uri},
+                    "language": "zh",
+                    "text": "",
+                },
+                "parameters": {"skip_audio_process": False, "voice_clone_mode": "normal"},
+            }
+        data = await _request(settings, payload)
     finally:
         try:
             voices.delete(local["id"])
         except ProviderError:
             pass
-    voice = data.get("output", {}).get("voice")
+    output = data.get("output") or {}
+    voice = output.get("voice_id") or output.get("voice")
     if not isinstance(voice, str) or not voice:
         raise ProviderError(502, "qwen_clone_invalid", "百炼没有返回可用的音色 ID。")
     record = {
@@ -196,10 +222,16 @@ async def create(settings: Settings, raw: bytes, filename: str, name: str, targe
 
 
 async def delete(settings: Settings, voice: str) -> None:
-    await _request(settings, {
-        "model": "qwen-voice-enrollment",
-        "input": {"action": "delete", "voice": voice},
-    })
+    if _is_voice_enrollment_model(_active_target_model(settings)) or voice.startswith("qwen-audio-"):
+        await _request(settings, {
+            "model": "voice-enrollment",
+            "input": {"action": "delete_voice", "voice_id": voice},
+        })
+    else:
+        await _request(settings, {
+            "model": "qwen-voice-enrollment",
+            "input": {"action": "delete", "voice": voice},
+        })
     _write_records([item for item in _read_records() if item.get("voice") != voice])
 
 
