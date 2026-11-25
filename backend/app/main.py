@@ -156,6 +156,7 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         app.state.service.error_logger = log_system_error
         app.state.devices.error_logger = log_system_error
         app.state.desktop.error_logger = log_system_error
+        app.state.service.desktop = app.state.desktop
         refresh_tools()
         # Pay the TTS client's CA-load cost at startup instead of on the first turn.
         shared_client(config.tts_timeout_seconds)
@@ -546,6 +547,13 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         turn_id 为空表示“停止该会话当前回合”（/api/voice/turn 的混合通道场景）。
         """
         service = app.state.service
+        tool_gateway = getattr(service, "tool_gateway", None)
+        confirmations = getattr(tool_gateway, "confirmations", None) if tool_gateway is not None else None
+        if confirmations is not None and hasattr(confirmations, "revoke_all_desktop_leases"):
+            confirmations.revoke_all_desktop_leases()
+        desktop = getattr(app.state, "desktop", None)
+        if desktop is not None and hasattr(desktop, "abort_all"):
+            await desktop.abort_all()
         session = service.get_session(session_id)
         task = session.active_task
         if (task is not None and task is not asyncio.current_task() and not task.done()

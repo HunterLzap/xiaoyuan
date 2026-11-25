@@ -270,6 +270,56 @@ class RealtimeFailures(unittest.IsolatedAsyncioTestCase):
         ])
         bridge.conn.ws.close.assert_awaited_once()
 
+    async def test_voice_abort_task_intent_stops_desktop_and_cross_session_tasks(self):
+        from backend.app.realtime import _is_abort_task_intent
+
+        for phrase in ("停止", "别动了", "塔菲，停止操作吧！", "stop", "别操作了", "住手"):
+            self.assertTrue(_is_abort_task_intent(phrase), phrase)
+        for safe_phrase in ("怎么停止服务", "帮我取消明天的日程", "停止说话是什么意思"):
+            self.assertFalse(_is_abort_task_intent(safe_phrase), safe_phrase)
+
+        turn = self.make_turn()
+        turn.continuous = True
+        turn.active_response = "resp_abort"
+        turn.pending_tools = {"c1": {"name": "desktop_gui_action"}}
+        turn.ws.send = AsyncMock()
+        turn.tool_task = asyncio.create_task(asyncio.sleep(10))
+        web_desktop_task = asyncio.create_task(asyncio.sleep(10))
+        confirmations = SimpleNamespace(revoke_all_desktop_leases=Mock())
+        desktop = SimpleNamespace(abort_all=AsyncMock(return_value=1))
+        turn.service = SimpleNamespace(
+            sessions={"web-1": SimpleNamespace(active_task=web_desktop_task)},
+            tool_gateway=SimpleNamespace(confirmations=confirmations),
+            desktop=desktop,
+        )
+        turn.ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "别动了，停止操作"}),
+            asyncio.CancelledError(),
+        ])
+        with self.assertRaises(asyncio.CancelledError):
+            await turn.receive()
+        self.assertTrue(web_desktop_task.cancelled() or web_desktop_task.done())
+        self.assertIsNone(turn.tool_task)
+        confirmations.revoke_all_desktop_leases.assert_called_once()
+        desktop.abort_all.assert_awaited_once()
+        turn.emit.assert_any_await("notice", "好的，已停止操作")
+        for call in turn.emit.await_args_list:
+            self.assertNotEqual(call.args[0], "idle")
+
+        # "关闭" triggers both _abort_running_tasks and idle sleep
+        turn2 = self.make_turn()
+        turn2.continuous = False
+        turn2.pending_tools = {}
+        turn2.ws.send = AsyncMock()
+        desktop2 = SimpleNamespace(abort_all=AsyncMock(return_value=1))
+        turn2.service = SimpleNamespace(sessions={}, tool_gateway=None, desktop=desktop2)
+        turn2.ws.recv = AsyncMock(side_effect=[
+            json.dumps({"type": "conversation.item.input_audio_transcription.completed", "transcript": "关闭"}),
+        ])
+        await turn2.receive()
+        desktop2.abort_all.assert_awaited_once()
+        turn2.emit.assert_any_await("idle", {"reason": "end_intent"})
+
     async def test_provider_finish_close_does_not_close_device(self):
         bridge = self.make_bridge()
         with self.assertLogs("backend.app.device_realtime", level="ERROR"):

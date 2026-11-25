@@ -46,24 +46,61 @@ _EXACT_STOP_COMMANDS = {
     "休息", "去休息", "先休息", "休眠", "结束",
 }
 _POLITE_GOODBYE_COMMANDS = {"再见", "拜拜", "不聊了", "不说了", "先这样", "结束对话", "结束聊天"}
+_TASK_ABORT_COMMANDS = {
+    "停", "停一停", "停止", "停止操作", "停下来", "别动", "别动了",
+    "别操作", "别操作了", "不要动", "不要操作", "取消", "取消操作",
+    "住手", "别点", "别点了", "stop", "cancel",
+}
 _QUESTION_MARKERS = re.compile(r"[吗？?]|怎么|什么|为什么|哪个|几|意思")
 
 
-def _is_end_intent(text: str) -> bool:
-    """仅识别明确指向结束本轮对话的短指令，避免误伤包含“结束/不用”的正常句子。"""
+def _normalize_short_command(text: str) -> tuple[str, str] | None:
     if not text:
-        return False
+        return None
     raw = text.strip().lower()
     if _QUESTION_MARKERS.search(raw):
-        return False
+        return None
     cleaned = _TRAILING_PUNCT.sub("", raw)
     cleaned = _WAKE_PREFIX.sub("", cleaned).strip()
     cleaned = _POLITE_PREFIX.sub("", cleaned).strip()
     cleaned_no_suffix = _TRAILING_PUNCT.sub("", _POLITE_SUFFIX.sub("", cleaned)).strip()
+    return cleaned, cleaned_no_suffix
+
+
+def _is_end_intent(text: str) -> bool:
+    """仅识别明确指向结束本轮对话的短指令，避免误伤包含“结束/不用”的正常句子。"""
+    normalized = _normalize_short_command(text)
+    if normalized is None:
+        return False
+    cleaned, cleaned_no_suffix = normalized
     if cleaned in _EXACT_STOP_COMMANDS or cleaned_no_suffix in _EXACT_STOP_COMMANDS:
         return True
     if len(cleaned_no_suffix) <= 8 and (cleaned in _POLITE_GOODBYE_COMMANDS or cleaned_no_suffix in _POLITE_GOODBYE_COMMANDS):
         return True
+    return False
+
+
+def _is_abort_task_intent(text: str) -> bool:
+    """识别电脑/工具执行过程中的即时中止短指令（如“停止”“别动”“住手”）。"""
+    normalized = _normalize_short_command(text)
+    if normalized is None:
+        return False
+    cleaned, cleaned_no_suffix = normalized
+    if len(cleaned_no_suffix) <= 10 and (cleaned in _TASK_ABORT_COMMANDS or cleaned_no_suffix in _TASK_ABORT_COMMANDS):
+        return True
+    parts = [part.strip() for part in re.split(r"[，,、\s]+", cleaned) if part.strip()]
+    if 1 < len(parts) <= 3:
+        matched_abort = False
+        for part in parts:
+            part_norm = _normalize_short_command(part)
+            if part_norm is None:
+                return False
+            p_clean, p_no_suffix = part_norm
+            if p_clean in _TASK_ABORT_COMMANDS or p_no_suffix in _TASK_ABORT_COMMANDS:
+                matched_abort = True
+            elif p_clean not in _EXACT_STOP_COMMANDS and p_no_suffix not in _EXACT_STOP_COMMANDS:
+                return False
+        return matched_abort
     return False
 
 
@@ -563,6 +600,9 @@ class RealtimeTurn:
                             self.tool_task.cancel()
                             await asyncio.gather(self.tool_task, return_exceptions=True)
                             self.tool_task = None
+                            desktop = getattr(getattr(self, "service", None), "desktop", None)
+                            if desktop is not None and hasattr(desktop, "abort_all"):
+                                await desktop.abort_all()
                         self.pending_tools.clear()
                         if self.active_response:
                             self.ignore_responses.add(self.active_response)
@@ -622,6 +662,7 @@ class RealtimeTurn:
 
                     # Check for conversation end intent
                     if _is_end_intent(self.user):
+                        await self._abort_running_tasks()
                         if self.active_response:
                             self.ignore_responses.add(self.active_response)
                             with suppress(ConnectionClosed, OSError, RuntimeError):
@@ -635,6 +676,23 @@ class RealtimeTurn:
                             await self.send("session.update", session={"turn_detection": None})
                         await self.emit("notice", "好的，我先休息了")
                         await self.emit("idle", {"reason": "end_intent"})
+                        return
+
+                    if _is_abort_task_intent(self.user):
+                        await self._abort_running_tasks()
+                        if self.active_response:
+                            self.ignore_responses.add(self.active_response)
+                            with suppress(ConnectionClosed, OSError, RuntimeError):
+                                await self.send("response.cancel")
+                        self.pending_tools.clear()
+                        self.pending_audio.clear()
+                        self.reply = ""
+                        self.saved = True
+                        await self.audio.close()
+                        await self.emit("notice", "好的，已停止操作")
+                        if self.continuous:
+                            continue
+                        await self.emit("idle", {"reason": "abort_task"})
                         return
 
                     if self._defer_response:
@@ -816,6 +874,38 @@ class RealtimeTurn:
             await self.ws.close()
             if not self.saved:
                 await self.persist("interrupted")
+
+    async def _abort_running_tasks(self) -> int:
+        aborted = 0
+        tool_task = getattr(self, "tool_task", None)
+        if tool_task is not None:
+            tool_task.cancel()
+            await asyncio.gather(tool_task, return_exceptions=True)
+            self.tool_task = None
+            aborted += 1
+        if getattr(self, "pending_tools", None):
+            self.pending_tools.clear()
+        service = getattr(self, "service", None)
+        if service is not None:
+            current = asyncio.current_task()
+            sessions = getattr(service, "sessions", None) or {}
+            cancelled_other = False
+            for session in list(sessions.values()):
+                task = getattr(session, "active_task", None)
+                if task is not None and task is not current and not task.done() and not task.cancelling():
+                    task.cancel("voice_abort")
+                    cancelled_other = True
+                    aborted += 1
+            gateway = getattr(service, "tool_gateway", None)
+            confirmations = getattr(gateway, "confirmations", None) if gateway is not None else None
+            if confirmations is not None and hasattr(confirmations, "revoke_all_desktop_leases"):
+                confirmations.revoke_all_desktop_leases()
+            desktop = getattr(service, "desktop", None)
+            if desktop is not None and hasattr(desktop, "abort_all"):
+                aborted += await desktop.abort_all()
+            if cancelled_other:
+                await asyncio.sleep(0)
+        return aborted
 
     def upstream_error(self, event):
         response = event.get("response") or {}

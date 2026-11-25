@@ -268,6 +268,11 @@ class SideEffectConfirmationStore:
             raise ProviderError(422, "invalid_decision", "仅支持 approve、approve_desktop_lease 或 deny。")
         return action.to_public()
 
+    def revoke_all_desktop_leases(self) -> None:
+        for state in self._sessions.values():
+            state.desktop_lease_until = 0.0
+            state.pending = None
+
     def clear_session(self, session_id: UUID) -> None:
         self._sessions.pop(session_id, None)
         for key, item in list(self._approvals.items()):

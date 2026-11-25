@@ -58,6 +58,7 @@ class ChatService:
         self.provider_users: dict[int, int] = {}
         self.retired_providers: dict[int, ChatProvider] = {}
         self.tools = None
+        self.desktop: Any = None
         self.audit = None
         self.error_logger: Callable[..., None] | None = None
         self.tool_secrets = None

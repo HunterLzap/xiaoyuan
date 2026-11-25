@@ -271,6 +271,9 @@ async def run_node(
                         kind = msg.get("type")
                         if kind == "welcome":
                             logger.info("Connected! Node ready: %s (%s)", resolved_name, screen)
+                        elif kind == "abort":
+                            logger.info("Received abort signal from server; hiding HUD")
+                            hud.hide()
                         elif kind == "rpc_request":
                             asyncio.create_task(_handle_request(
                                 ws, adapter, msg, allow_shell=allow_shell, allow_gui=allow_gui, hud=hud,

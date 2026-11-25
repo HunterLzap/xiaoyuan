@@ -413,6 +413,19 @@ class DesktopHub:
             raise ProviderError(409, "desktop_node_ambiguous", f"当前同时在线多台电脑（{names}），请指明要操作哪一台或在终端节点中设为默认。")
         raise ProviderError(409, "desktop_offline", "目前没有在线的个人电脑节点；请先在 Windows 或 Mac 上启动 desktop_node 连接。")
 
+    async def abort_all(self) -> int:
+        aborted = 0
+        for conn in list(self.active.values()):
+            for future in list(conn.pending.values()):
+                if not future.done():
+                    future.set_exception(ProviderError(409, "desktop_aborted", "用户已中止当前电脑操作。"))
+                    aborted += 1
+            conn.pending.clear()
+            with suppress(Exception):
+                await conn.ws.send_json({"type": "abort"})
+                aborted += 1
+        return aborted
+
     async def disconnect(self) -> None:
         for conn in list(self.active.values()):
             conn.close()
