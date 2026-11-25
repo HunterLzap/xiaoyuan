@@ -3303,90 +3303,160 @@ function renderSessionTraceDetail(data) {
   for (const m of (data.models || [])) meta.append(node("span","insight-tag",m));
   head.append(meta); area.append(head);
 
-  const timeline = node("div", "trace-session-list");
-  for (const [idx, turn] of (data.turns || []).entries()) {
-    const card = node("article", "trace-turn-card");
-    const userBox = node("div", "trace-turn-user");
-    const userMeta = node("div", "trace-turn-head");
-    const channel = `${sourceLabels[turn.source] || turn.source || "文字"} · ${turn.voice_mode || "realtime"}`;
-    userMeta.append(node("strong", "", `第 ${idx + 1} 轮 · 用户`), node("span", "small-note", `${channel} · ${insightTime(turn.ts)}`));
-    userBox.append(userMeta, node("div", "trace-turn-text", turn.user_text || "（无用户输入文本）"));
-    card.append(userBox);
+  const split = node("div", "trace-split");
+  const treePane = node("aside", "trace-tree-pane");
+  treePane.append(node("div", "trace-tree-heading", "Agent 执行轨迹"));
+  const inspectorPane = node("section", "trace-inspector-pane");
+  split.append(treePane, inspectorPane);
+  area.append(split);
 
-    const traj = node("div", "trace-trajectory");
-    const trajHead = node("div", "trace-trajectory-head");
-    const turnStatus = INSIGHT_STATUS_LABELS[turn.status] || turn.status || "未记录";
-    const statusBadge = node("span", "insight-status", turnStatus); statusBadge.dataset.state = turn.status || "unknown";
+  const section = (title, bodyNode) => {
+    const wrap = node("div", "trace-section");
+    wrap.append(node("h3", "trace-section-title", title), bodyNode);
+    return wrap;
+  };
+  const emptyBox = (text = "暂无输出") => node("div", "trace-empty-box", text);
+  const textBox = text => node("div", "trace-box", text);
+  const codeBox = value => node("pre", "insight-json trace-code-box", insightJson(value));
+
+  let activeBtn = null;
+  let firstAction = null;
+  const selectEntry = (btn, entry) => {
+    if (activeBtn) activeBtn.classList.remove("is-selected");
+    activeBtn = btn;
+    btn.classList.add("is-selected");
+    inspectorPane.replaceChildren();
+
+    const header = node("div", "trace-inspector-head");
+    const titleRow = node("div", "trace-inspector-title-row");
+    titleRow.append(node("h3", "", "执行详情"), node("span", "insight-tag", entry.subtitle));
+    const statusBadge = node("span", "insight-status", INSIGHT_STATUS_LABELS[entry.status] || entry.status || "未记录");
+    statusBadge.dataset.state = entry.status || "unknown";
+    titleRow.append(statusBadge);
+    header.append(titleRow);
+
+    const metaRow = node("div", "trace-inspector-meta");
+    if (entry.metaLeft) metaRow.append(node("span", "small-note", entry.metaLeft));
+    if (entry.metaRight) metaRow.append(node("span", "small-note", entry.metaRight));
+    if (metaRow.childNodes.length) header.append(metaRow);
+    inspectorPane.append(header);
+
+    for (const blk of entry.blocks) inspectorPane.append(section(blk.title, blk.node));
+  };
+
+  const makeTreeBtn = (kind, label, sub, status, entry) => {
+    const btn = node("button", `trace-tree-btn ${kind}`);
+    btn.type = "button";
+    const iconName = kind === "root" ? "user" : kind === "tool" ? "wrench" : "cpu";
+    const left = node("span", "trace-tree-main");
+    left.append(icon(iconName), node("span", "trace-tree-label", label));
+    btn.append(left);
+    const right = node("span", "trace-tree-right");
+    if (sub) right.append(node("span", "trace-tree-sub", sub));
+    if (status) {
+      const dot = node("span", "trace-node-dot");
+      dot.dataset.state = status;
+      right.append(dot);
+    }
+    btn.append(right);
+    const trigger = () => selectEntry(btn, entry);
+    btn.addEventListener("click", trigger);
+    if (!firstAction) firstAction = trigger;
+    return btn;
+  };
+
+  for (const [idx, turn] of (data.turns || []).entries()) {
+    const group = node("div", "trace-turn-group");
+    if ((data.turns || []).length > 1) {
+      group.append(node("div", "trace-turn-label", `第 ${idx + 1} 轮`));
+    }
+    const channel = `${sourceLabels[turn.source] || turn.source || "文字"} · ${turn.voice_mode || "realtime"}`;
     const tokBits = [];
     if (turn.prompt_tokens != null) tokBits.push(`输入 ${turn.prompt_tokens}`);
     if (turn.completion_tokens != null) tokBits.push(`输出 ${turn.completion_tokens}`);
     if (turn.total_tokens != null) tokBits.push(`合计 ${turn.total_tokens}`);
-    const metrics = [
-      [turn.provider, turn.model].filter(Boolean).join(" ") || null,
-      turn.first_audio_ms != null ? `首响 ${turn.first_audio_ms} ms` : null,
-      `总耗时 ${insightNumber(turn.elapsed_ms, " ms")}`,
-      tokBits.length ? `Token（${tokBits.join(" / ")}）` : null,
-      turn.error_code ? `错误 ${turn.error_code}` : null,
-    ].filter(Boolean).join(" · ");
-    trajHead.append(node("span", "trace-trajectory-title", "Agent 执行轨迹"), statusBadge, node("span", "small-note", metrics));
-    traj.append(trajHead);
+    const tokText = tokBits.length ? tokBits.join(" / ") : "未报告";
 
     const auditByCallId = new Map();
-    const extraAudits = [];
+    const kbSnapshots = [];
     for (const audit of (turn.audits || [])) {
-      let matched = false;
       for (const ac of (audit.calls || [])) {
-        if (ac.call_id) { auditByCallId.set(ac.call_id, ac); matched = true; }
+        if (ac.call_id) auditByCallId.set(ac.call_id, ac);
       }
-      if (!matched || (audit.snapshots || []).length) extraAudits.push(audit);
-    }
-
-    const calls = turn.tool_calls || [];
-    if (!calls.length) {
-      traj.append(node("p", "small-note trace-no-steps", "本轮由模型直接生成回复，未调用工具。"));
-    } else {
-      const stepsList = node("ol", "trace-step-list");
-      for (const [sIdx, call] of calls.entries()) {
-        const li = node("li", "trace-step-item");
-        const stepHead = node("div", "trace-step-head");
-        const rawName = call.tool_name || call.name || "tool";
-        const displayName = `${toolDisplayName(rawName)} (${rawName})`;
-        const callState = INSIGHT_STATUS_LABELS[call.status] || call.status || "-";
-        const callTag = node("span", "insight-status", callState); callTag.dataset.state = call.status || "unknown";
-        stepHead.append(
-          node("span", "trace-step-index", `步骤 ${sIdx + 1}`),
-          node("strong", "trace-step-name", displayName),
-          callTag,
-          node("span", "small-note", `${insightNumber(call.elapsed_ms, " ms")}${call.detail ? ` · ${call.detail}` : ""}${call.error_code ? ` · ${call.error_code}` : ""}`),
-        );
-        li.append(stepHead);
-        const fullAudit = call.call_id ? auditByCallId.get(call.call_id) : null;
-        const payload = fullAudit
-          ? { request: fullAudit.request, response: fullAudit.response }
-          : (call.request || call.response ? { request: call.request, response: call.response } : call);
-        const det = node("details", "trace-step-details");
-        det.append(node("summary", "small-note", "查看输入参数与返回明细"), node("pre", "insight-json", insightJson(payload)));
-        li.append(det);
-        stepsList.append(li);
+      if (Array.isArray(audit.snapshots) && audit.snapshots.length) {
+        kbSnapshots.push(...audit.snapshots);
       }
-      traj.append(stepsList);
     }
 
-    for (const audit of extraAudits) {
-      const det = node("details", "trace-step-details");
-      const aStatus = INSIGHT_STATUS_LABELS[audit.status] || audit.status || "-";
-      const snapInfo = (audit.snapshots || []).length ? ` · 命中片段 ${(audit.snapshots || []).length} 条` : "";
-      det.append(node("summary", "small-note", `关联检索 / 审计：${audit.surface} · ${audit.tool_name || "-"} · ${aStatus} (${insightNumber(audit.elapsed_ms, " ms")})${snapInfo}`), node("pre", "insight-json", insightJson(audit)));
-      traj.append(det);
-    }
-    card.append(traj);
+    const userPreview = (turn.user_text || "").trim().slice(0, 14) || "用户输入";
+    const rootEntry = {
+      subtitle: `第 ${idx + 1} 轮 · 用户输入`,
+      status: turn.status,
+      metaLeft: `开始时间：${insightTime(turn.ts)} · 渠道：${channel}`,
+      metaRight: `总耗时：${insightNumber(turn.elapsed_ms, " ms")} · Token：${tokText}`,
+      blocks: [
+        { title: "用户输入", node: turn.user_text ? textBox(turn.user_text) : emptyBox("暂无输入") },
+        { title: "输出", node: turn.reply_text ? textBox(turn.reply_text) : emptyBox("暂无输出") },
+      ],
+    };
+    group.append(makeTreeBtn("root", "用户输入", userPreview, null, rootEntry));
 
-    const replyBox = node("div", "trace-turn-reply");
-    replyBox.append(node("div", "trace-turn-head", node("strong", "", "小圆 助理")), node("div", "trace-turn-text", turn.reply_text || "暂无回复正文。"));
-    card.append(replyBox);
-    timeline.append(card);
+    const children = node("div", "trace-tree-children");
+    for (const [sIdx, call] of (turn.tool_calls || []).entries()) {
+      const rawName = call.tool_name || call.name || "tool";
+      const displayName = toolDisplayName(rawName);
+      const fullAudit = call.call_id ? auditByCallId.get(call.call_id) : null;
+      const reqVal = fullAudit?.request ?? call.request ?? (call.detail ? { detail: call.detail } : null);
+      const respVal = fullAudit?.response ?? call.response ?? (call.error_code ? { error_code: call.error_code } : null);
+      const toolEntry = {
+        subtitle: `第 ${idx + 1} 轮 · 步骤 ${sIdx + 1} (${rawName})`,
+        status: call.status,
+        metaLeft: `工具：${displayName} (${rawName})${call.error_code ? ` · 错误码：${call.error_code}` : ""}`,
+        metaRight: `耗时：${insightNumber(call.elapsed_ms, " ms")}`,
+        blocks: [
+          { title: "输入", node: reqVal != null ? codeBox(reqVal) : emptyBox("暂无输入") },
+          { title: "输出", node: respVal != null ? codeBox(respVal) : emptyBox("暂无输出") },
+        ],
+      };
+      const row = node("div", "trace-tree-branch");
+      row.append(makeTreeBtn("tool", displayName, insightNumber(call.elapsed_ms, " ms"), call.status, toolEntry));
+      children.append(row);
+    }
+
+    const agentBlocks = [
+      { title: "模型与消耗", node: textBox([
+        `模型：${[turn.provider, turn.model].filter(Boolean).join(" · ") || "未记录"}`,
+        `等待耗时：${turn.first_audio_ms != null ? `${turn.first_audio_ms} ms` : "未记录"} · 总耗时：${insightNumber(turn.elapsed_ms, " ms")}`,
+        `Token：${tokText}`,
+        turn.error_code ? `错误码：${turn.error_code}` : null,
+      ].filter(Boolean).join("\n")) },
+      { title: "用户输入", node: turn.user_text ? textBox(turn.user_text) : emptyBox("暂无输入") },
+      { title: "输出", node: turn.reply_text ? textBox(turn.reply_text) : emptyBox("暂无输出") },
+    ];
+    if (kbSnapshots.length) {
+      const ul = node("ul", "insight-sources");
+      for (const s of kbSnapshots) {
+        const li = node("li");
+        li.append(node("span", "", `${insightSourceText(s)} · ${insightScoreText(s)}`), node("span", "small-note", s.sent_to_model ? "已送入模型" : "未送入模型"));
+        ul.append(li);
+      }
+      agentBlocks.push({ title: `知识库命中片段（${kbSnapshots.length}）`, node: ul });
+    }
+    const agentEntry = {
+      subtitle: `第 ${idx + 1} 轮 · 智能体`,
+      status: turn.status,
+      metaLeft: `时间：${insightTime(turn.ts)} · 模型：${turn.model || "未记录"}`,
+      metaRight: `耗时：${insightNumber(turn.elapsed_ms, " ms")} · Token：${tokText}`,
+      blocks: agentBlocks,
+    };
+    const agentRow = node("div", "trace-tree-branch");
+    agentRow.append(makeTreeBtn("agent", "智能体", turn.model || "", turn.status, agentEntry));
+    children.append(agentRow);
+
+    group.append(children);
+    treePane.append(group);
   }
-  area.append(timeline);
+  if (firstAction) firstAction();
 }
 function renderInsightDetail(item) {
   const area = el("insights-detail"), kind = insightDetailState.kind; area.replaceChildren();
