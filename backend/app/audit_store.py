@@ -444,3 +444,192 @@ class AuditStore:
         with closing(self._connect()) as connection, connection:
             cursor = connection.execute("DELETE FROM turn_traces WHERE trace_id = ?", (trace_id,))
             return cursor.rowcount > 0
+
+    def list_trace_sessions(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        q: str = "",
+        source: str | None = None,
+        status: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        session_titles: dict[str, str] | None = None,
+    ) -> dict:
+        since_value = _normalize_time(since, end=False)
+        until_value = _normalize_time(until, end=True)
+        needle = (q or "").strip().lower()
+        titles = session_titles or {}
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT trace_id, ts, session_id, source, voice_mode, model, user_text, reply_text,
+                       status, elapsed_ms, first_audio_ms, total_tokens, tool_calls
+                FROM turn_traces
+                ORDER BY ts ASC, rowid ASC
+                """
+            ).fetchall()
+        grouped: dict[str, dict] = {}
+        for row in rows:
+            sid = (row["session_id"] or "").strip()
+            group_id = sid or f"trace:{row['trace_id']}"
+            calls = json.loads(row["tool_calls"] or "[]")
+            entry = grouped.get(group_id)
+            if entry is None:
+                entry = {
+                    "session_id": group_id,
+                    "title": titles.get(group_id, ""),
+                    "turn_count": 0,
+                    "tool_call_count": 0,
+                    "total_tokens": None,
+                    "total_elapsed_ms": 0,
+                    "models": [],
+                    "sources": [],
+                    "latest_status": row["status"],
+                    "started_at": row["ts"],
+                    "ts": row["ts"],
+                    "_search_parts": [],
+                }
+                grouped[group_id] = entry
+            entry["turn_count"] += 1
+            entry["tool_call_count"] += len(calls) if isinstance(calls, list) else 0
+            if row["total_tokens"] is not None:
+                entry["total_tokens"] = (entry["total_tokens"] or 0) + int(row["total_tokens"])
+            entry["total_elapsed_ms"] += int(row["elapsed_ms"] or 0)
+            entry["latest_status"] = row["status"]
+            entry["ts"] = row["ts"]
+            model = (row["model"] or "").strip()
+            if model and model not in entry["models"]:
+                entry["models"].append(model)
+            src = (row["source"] or "").strip()
+            if src and src not in entry["sources"]:
+                entry["sources"].append(src)
+            user_text = (row["user_text"] or "").strip()
+            if not entry["title"] and user_text:
+                entry["title"] = user_text[:40]
+            if user_text:
+                entry["_search_parts"].append(user_text.lower())
+            if row["reply_text"]:
+                entry["_search_parts"].append(str(row["reply_text"]).lower())
+            if model:
+                entry["_search_parts"].append(model.lower())
+
+        items = []
+        for entry in grouped.values():
+            if not entry["title"]:
+                entry["title"] = "未命名对话"
+            if source and source not in entry["sources"]:
+                continue
+            if status and entry["latest_status"] != status:
+                continue
+            if since_value and entry["ts"] < since_value:
+                continue
+            if until_value and entry["ts"] > until_value:
+                continue
+            if needle:
+                haystack = entry["title"].lower() + "\n" + "\n".join(entry["_search_parts"])
+                if needle not in haystack:
+                    continue
+            entry.pop("_search_parts", None)
+            items.append(entry)
+        items.sort(key=lambda item: item["ts"], reverse=True)
+        total = len(items)
+        start = max(0, int(offset))
+        end = start + max(1, min(int(limit), 200))
+        return {"items": items[start:end], "total": total}
+
+    def session_trace_detail(self, session_id: str, title: str | None = None) -> dict | None:
+        key = (session_id or "").strip()
+        if not key:
+            return None
+        with closing(self._connect()) as connection:
+            if key.startswith("trace:"):
+                rows = connection.execute(
+                    "SELECT * FROM turn_traces WHERE trace_id = ? ORDER BY ts ASC, rowid ASC",
+                    (key[6:],),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM turn_traces WHERE session_id = ? ORDER BY ts ASC, rowid ASC",
+                    (key,),
+                ).fetchall()
+            if not rows:
+                return None
+            trace_ids = [row["trace_id"] for row in rows]
+            placeholders = ",".join("?" for _ in trace_ids)
+            audits = connection.execute(
+                f"""
+                SELECT a.id, a.ts, a.surface, a.tool_name, a.status, a.error_code, a.elapsed_ms,
+                       d.answer_type, d.calls, d.snapshots, d.parse_errors, d.turn_id
+                FROM kb_audit a
+                JOIN kb_audit_details d ON d.audit_id = a.id
+                WHERE d.turn_id IN ({placeholders})
+                ORDER BY a.id ASC
+                """,
+                trace_ids,
+            ).fetchall()
+        by_turn: dict[str, list[dict]] = {}
+        for audit in audits:
+            entry = dict(audit)
+            turn_key = str(entry.pop("turn_id", "") or "")
+            for col in ("calls", "snapshots", "parse_errors"):
+                entry[col] = json.loads(entry.get(col) or "[]")
+            by_turn.setdefault(turn_key, []).append(entry)
+
+        turns = []
+        models: list[str] = []
+        sources: list[str] = []
+        resolved_title = (title or "").strip()
+        total_tokens: int | None = None
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
+        total_elapsed_ms = 0
+        tool_call_count = 0
+        for row in rows:
+            turn = self._public_trace(row)
+            turn["audits"] = by_turn.get(str(turn["trace_id"]), [])
+            turns.append(turn)
+            tool_call_count += len(turn["tool_calls"])
+            total_elapsed_ms += int(turn.get("elapsed_ms") or 0)
+            if turn.get("total_tokens") is not None:
+                total_tokens = (total_tokens or 0) + int(turn["total_tokens"])
+            if turn.get("prompt_tokens") is not None:
+                prompt_tokens = (prompt_tokens or 0) + int(turn["prompt_tokens"])
+            if turn.get("completion_tokens") is not None:
+                completion_tokens = (completion_tokens or 0) + int(turn["completion_tokens"])
+            model = (turn.get("model") or "").strip()
+            if model and model not in models:
+                models.append(model)
+            src = (turn.get("source") or "").strip()
+            if src and src not in sources:
+                sources.append(src)
+            if not resolved_title and (turn.get("user_text") or "").strip():
+                resolved_title = str(turn["user_text"]).strip()[:40]
+        return {
+            "session_id": key,
+            "title": resolved_title or "未命名对话",
+            "turn_count": len(turns),
+            "tool_call_count": tool_call_count,
+            "total_tokens": total_tokens,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_elapsed_ms": total_elapsed_ms,
+            "models": models,
+            "sources": sources,
+            "latest_status": turns[-1]["status"],
+            "started_at": turns[0]["ts"],
+            "ts": turns[-1]["ts"],
+            "turns": turns,
+        }
+
+    def delete_trace_session(self, session_id: str) -> int:
+        key = (session_id or "").strip()
+        if not key:
+            return 0
+        with closing(self._connect()) as connection, connection:
+            if key.startswith("trace:"):
+                cursor = connection.execute("DELETE FROM turn_traces WHERE trace_id = ?", (key[6:],))
+            else:
+                cursor = connection.execute("DELETE FROM turn_traces WHERE session_id = ?", (key,))
+            return cursor.rowcount

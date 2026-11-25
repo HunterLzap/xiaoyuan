@@ -764,3 +764,86 @@ def test_insights_kb_only_filters_out_non_rag_records(tmp_path):
         assert all_kb["total"] == 2
         assert filtered_kb["total"] == 1
         assert filtered_kb["items"][0]["question"] == "AtomS3R 引脚怎么接"
+
+
+def test_insights_sessions_group_turns_and_trajectory_detail(tmp_path):
+    cfg = Settings(
+        _env_file=None,
+        api_key="test-key",
+        model="qwen3.8-max-0902",
+        history_db_path=tmp_path / "conversations.sqlite3",
+        personal_kb_db_path=tmp_path / "personal_kb.sqlite3",
+        assistant_db_path=tmp_path / "assistant_state.sqlite3",
+        usage_log_path=None,
+    )
+    app = create_app(cfg, settings_store=SettingsStore(tmp_path / ".env"))
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        service = client.app.state.service
+        sid = str(service.new_session())
+        service.get_session(UUID(sid)).title = "打开飞书找 FRIDAY"
+        audit: AuditStore = client.app.state.audit
+        assert audit is not None
+        audit.record_trace(
+            trace_id="turn-1",
+            session_id=sid,
+            source="text",
+            voice_mode="pipeline",
+            provider="百炼",
+            model="qwen3.8-max-0902",
+            user_text="帮我打开飞书",
+            reply_text="确认打开飞书吗？",
+            status="complete",
+            elapsed_ms=3326,
+            prompt_tokens=200,
+            completion_tokens=30,
+            total_tokens=230,
+            tool_calls=[{"call_id": "c1", "tool_name": "desktop_open", "status": "ok", "elapsed_ms": 0}],
+        )
+        audit.record_trace(
+            trace_id="turn-2",
+            session_id=sid,
+            source="text",
+            voice_mode="pipeline",
+            provider="百炼",
+            model="qwen3.8-max-0902",
+            user_text="确认执行",
+            reply_text="已经打开并在输入框打好了你好。",
+            status="complete",
+            elapsed_ms=8497,
+            prompt_tokens=400,
+            completion_tokens=50,
+            total_tokens=450,
+            tool_calls=[
+                {"call_id": "c2", "tool_name": "desktop_inspect_screen", "status": "ok", "elapsed_ms": 700},
+                {"call_id": "c3", "tool_name": "desktop_gui_action", "status": "ok", "elapsed_ms": 1200},
+            ],
+        )
+        audit.record(
+            "tool_call",
+            session_id=sid,
+            query_summary="desktop_inspect_screen",
+            tool_name="desktop_inspect_screen",
+            elapsed_ms=700,
+            calls=[{"call_id": "c2", "tool_name": "desktop_inspect_screen", "request": {"question": "看屏"}, "response": {"ok": True}}],
+            turn_id="turn-2",
+        )
+
+        listed = client.get("/api/insights/sessions?q=飞书").json()
+        assert listed["total"] == 1
+        row = listed["items"][0]
+        assert row["session_id"] == sid
+        assert row["title"] == "打开飞书找 FRIDAY"
+        assert row["turn_count"] == 2
+        assert row["tool_call_count"] == 3
+        assert row["total_tokens"] == 680
+
+        detail = client.get(f"/api/insights/sessions/{sid}").json()
+        assert detail["turn_count"] == 2
+        assert [t["trace_id"] for t in detail["turns"]] == ["turn-1", "turn-2"]
+        assert len(detail["turns"][1]["tool_calls"]) == 2
+        assert len(detail["turns"][1]["audits"]) == 1
+
+        assert client.delete(f"/api/insights/sessions/{sid}", headers=HEADERS).status_code == 422
+        assert client.delete(f"/api/insights/sessions/{sid}", params={"confirm": "true"}, headers=HEADERS).status_code == 204
+        assert client.get(f"/api/insights/sessions/{sid}").status_code == 404
+        assert client.get("/api/insights/sessions").json()["total"] == 0

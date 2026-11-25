@@ -3218,7 +3218,7 @@ function renderInsightRecords(kind, data) {
       ? ["问题","回答类型","得到的答案","时间","操作"]
       : kind === "tools"
         ? ["工具","状态","请求摘要","耗时","时间","操作"]
-        : ["渠道/模式","模型 / ASR / TTS","问题","状态","耗时","时间","操作"];
+        : ["对话标题","轮次 / 工具","模型","状态","最后活跃","操作"];
   for (const label of columns) {const th = node("th","",label); th.scope = "col"; hr.append(th);}
   head.append(hr); table.append(head,body);
   for (const item of data.items) {
@@ -3236,11 +3236,11 @@ function renderInsightRecords(kind, data) {
       continue;
     }
     const detail = node("div","insight-row-actions");
-    const itemId = kind === "traces" ? item.trace_id : item.id;
+    const itemId = kind === "traces" ? item.session_id : item.id;
     const view = capabilityButton("详情",() => openInsightDetail(kind, itemId));
     const remove = node("button","icon-button insight-remove"); remove.type = "button"; remove.append(icon("trash"));
     remove.setAttribute("aria-label",`删除${kind === "kb" ? "知识库" : kind === "tools" ? "工具调用" : "对话历史"}记录 ${itemId}`); remove.title = "删除记录";
-    const delTarget = kind === "traces" ? {...item, id: item.trace_id, question: item.user_text || item.trace_id} : item;
+    const delTarget = kind === "traces" ? {...item, id: item.session_id, question: item.title || item.session_id} : item;
     remove.addEventListener("click",() => openInsightDelete(kind, delTarget)); detail.append(view,remove);
     if (kind === "kb") {
       tr.append(insightEllipsisCell(item.question ?? item.query_summary ?? "未记录"),insightTableTag(insightAnswerType(item.answer_type),"type"),insightEllipsisCell(item.answer || "暂无生成回答"),insightTableNode(time),insightTableNode(detail));
@@ -3248,11 +3248,10 @@ function renderInsightRecords(kind, data) {
       const status = node("span","insight-status",INSIGHT_STATUS_LABELS[item.status] || item.status || "未提供"); status.dataset.state = item.status || "unknown";
       tr.append(insightEllipsisCell(item.tool_name || "未提供"),insightTableNode(status),insightEllipsisCell(item.query_summary || "未提供"),insightTableCell(insightNumber(item.elapsed_ms," ms")),insightTableNode(time),insightTableNode(detail));
     } else {
-      const status = node("span","insight-status",INSIGHT_STATUS_LABELS[item.status] || item.status || "未提供"); status.dataset.state = item.status || "unknown";
-      const channel = `${sourceLabels[item.source] || item.source || "未记录"} · ${item.voice_mode || "pipeline"}`;
-      const stack = [item.model || null, item.asr_provider ? `ASR:${item.asr_provider}` : null, item.tts_provider ? `TTS:${item.tts_provider}` : null].filter(Boolean).join(" · ") || "未提供";
-      const latency = item.first_audio_ms != null ? `${item.first_audio_ms} / ${insightNumber(item.elapsed_ms," ms")}` : insightNumber(item.elapsed_ms," ms");
-      tr.append(insightTableCell(channel),insightEllipsisCell(stack),insightEllipsisCell(item.user_text || "未记录"),insightTableNode(status),insightTableCell(latency),insightTableNode(time),insightTableNode(detail));
+      const status = node("span","insight-status",INSIGHT_STATUS_LABELS[item.latest_status] || item.latest_status || "未提供"); status.dataset.state = item.latest_status || "unknown";
+      const counts = `${item.turn_count || 0} 轮${item.tool_call_count ? ` · ${item.tool_call_count} 次工具` : ""}`;
+      const models = Array.isArray(item.models) && item.models.length ? item.models.join(" / ") : "未提供";
+      tr.append(insightEllipsisCell(item.title || "未命名对话"),insightTableCell(counts),insightEllipsisCell(models),insightTableNode(status),insightTableNode(time),insightTableNode(detail));
     }
     body.append(tr);
   }
@@ -3280,64 +3279,114 @@ async function openInsightDetail(kind, id) {
   el("insights-list-view").hidden = true; el("insights-detail-view").hidden = false;
   el("insights-detail-meta").textContent = ""; el("insights-detail").replaceChildren(node("p","insight-empty","正在加载详情…"));
   try {
-    const data = await request(`/api/insights/${kind}/${encodeURIComponent(id)}`);
+    const endpoint = kind === "traces" ? `/api/insights/sessions/${encodeURIComponent(id)}` : `/api/insights/${kind}/${encodeURIComponent(id)}`;
+    const data = await request(endpoint);
     insightDetailState.kind = kind; insightDetailState.item = data;
-    if (kind === "traces") renderTraceDetail(data);
+    if (kind === "traces") renderSessionTraceDetail(data);
     else renderInsightDetail(data);
   }
   catch (error) {el("insights-detail").replaceChildren(node("p","insight-error",error.status === 404 ? "未找到该记录，或详情接口尚未加载。" : `详情加载失败：${error.message}`));}
 }
-function renderTraceDetail(item) {
+function renderSessionTraceDetail(data) {
   const area = el("insights-detail"); area.replaceChildren();
-  el("insights-detail-meta").textContent = `${insightTime(item.ts)} · Turn ${item.trace_id}`;
+  const sourceLabels = {text:"网页文字",voice:"网页语音",web_voice:"网页语音",device:"硬件设备",device_voice:"硬件设备"};
+  el("insights-detail-meta").textContent = `${insightTime(data.started_at)} ~ ${insightTime(data.ts)} · 共 ${data.turn_count || 0} 轮`;
   const head = node("div","insight-detail-head");
-  const sourceLabels = {text:"网页文字",voice:"网页语音",device:"硬件设备"};
-  const channelLabel = `${sourceLabels[item.source] || item.source || "文字"} · ${item.voice_mode || "realtime"}`;
-  head.append(node("h2","",item.user_text || "对话详情"));
+  head.append(node("h2","",data.title || "完整对话记录"));
   const meta = node("div","insight-detail-tags");
-  meta.append(node("span","insight-tag",channelLabel));
-  const statusText = INSIGHT_STATUS_LABELS[item.status] || item.status || "未记录";
-  const statusTag = node("span","insight-status",statusText); statusTag.dataset.state = item.status || "unknown";
-  meta.append(statusTag);
-  if (item.model) meta.append(node("span","insight-tag",`${item.provider || ""} ${item.model}`.trim()));
-  if (item.asr_provider) meta.append(node("span","insight-tag",`ASR: ${item.asr_provider}`));
-  if (item.tts_provider) meta.append(node("span","insight-tag",`TTS: ${item.tts_provider}`));
-  if (item.first_audio_ms != null) meta.append(node("span","small-note",`首包 ${item.first_audio_ms} ms`));
-  meta.append(node("span","small-note",`总耗时 ${insightNumber(item.elapsed_ms," ms")}`));
-  if (item.total_tokens != null) meta.append(node("span","small-note",`Tokens ${item.total_tokens}`));
-  if (item.error_code) meta.append(node("span","insight-tag",`错误 ${item.error_code}`));
+  const latestText = INSIGHT_STATUS_LABELS[data.latest_status] || data.latest_status || "未记录";
+  const latestTag = node("span","insight-status",latestText); latestTag.dataset.state = data.latest_status || "unknown";
+  meta.append(latestTag);
+  meta.append(node("span","insight-tag",`共 ${data.turn_count || 0} 轮`));
+  meta.append(node("span","insight-tag",`工具调用 ${data.tool_call_count || 0} 次`));
+  if (data.total_tokens != null) meta.append(node("span","insight-tag",`合计 Token ${data.total_tokens.toLocaleString("zh-CN")}`));
+  for (const m of (data.models || [])) meta.append(node("span","insight-tag",m));
   head.append(meta); area.append(head);
-  const userCard = node("div","insight-answer-card");
-  userCard.append(node("h3","","用户提问"),node("p","insight-answer-text",item.user_text || "（无用户输入文本）"));
-  area.append(userCard);
-  const summaryCard = node("div","insight-answer-card");
-  summaryCard.append(node("h3","","小圆 助理"),node("p","insight-answer-text",item.reply_text || "暂无回复正文。"));
-  area.append(summaryCard);
-  const tools = item.tool_calls || [];
-  if (tools.length) {
-    const toolBox = node("div","insight-answer-card");
-    toolBox.append(node("h3","",`工具调用（${tools.length}）`));
-    for (const call of tools) {
-      const det = node("details");
-      const name = `${toolDisplayName(call.tool_name || call.name)} (${call.tool_name || call.name || "tool"})`;
-      const callStatus = INSIGHT_STATUS_LABELS[call.status] || call.status || "-";
-      det.append(node("summary","",`${name} · ${callStatus} · ${insightNumber(call.elapsed_ms," ms")}${call.error_code ? ` · ${call.error_code}` : ""}`),node("pre","insight-json",insightJson(call)));
-      toolBox.append(det);
+
+  const timeline = node("div", "trace-session-list");
+  for (const [idx, turn] of (data.turns || []).entries()) {
+    const card = node("article", "trace-turn-card");
+    const userBox = node("div", "trace-turn-user");
+    const userMeta = node("div", "trace-turn-head");
+    const channel = `${sourceLabels[turn.source] || turn.source || "文字"} · ${turn.voice_mode || "realtime"}`;
+    userMeta.append(node("strong", "", `第 ${idx + 1} 轮 · 用户`), node("span", "small-note", `${channel} · ${insightTime(turn.ts)}`));
+    userBox.append(userMeta, node("div", "trace-turn-text", turn.user_text || "（无用户输入文本）"));
+    card.append(userBox);
+
+    const traj = node("div", "trace-trajectory");
+    const trajHead = node("div", "trace-trajectory-head");
+    const turnStatus = INSIGHT_STATUS_LABELS[turn.status] || turn.status || "未记录";
+    const statusBadge = node("span", "insight-status", turnStatus); statusBadge.dataset.state = turn.status || "unknown";
+    const tokBits = [];
+    if (turn.prompt_tokens != null) tokBits.push(`输入 ${turn.prompt_tokens}`);
+    if (turn.completion_tokens != null) tokBits.push(`输出 ${turn.completion_tokens}`);
+    if (turn.total_tokens != null) tokBits.push(`合计 ${turn.total_tokens}`);
+    const metrics = [
+      [turn.provider, turn.model].filter(Boolean).join(" ") || null,
+      turn.first_audio_ms != null ? `首响 ${turn.first_audio_ms} ms` : null,
+      `总耗时 ${insightNumber(turn.elapsed_ms, " ms")}`,
+      tokBits.length ? `Token（${tokBits.join(" / ")}）` : null,
+      turn.error_code ? `错误 ${turn.error_code}` : null,
+    ].filter(Boolean).join(" · ");
+    trajHead.append(node("span", "trace-trajectory-title", "Agent 执行轨迹"), statusBadge, node("span", "small-note", metrics));
+    traj.append(trajHead);
+
+    const auditByCallId = new Map();
+    const extraAudits = [];
+    for (const audit of (turn.audits || [])) {
+      let matched = false;
+      for (const ac of (audit.calls || [])) {
+        if (ac.call_id) { auditByCallId.set(ac.call_id, ac); matched = true; }
+      }
+      if (!matched || (audit.snapshots || []).length) extraAudits.push(audit);
     }
-    area.append(toolBox);
-  }
-  const audits = item.audits || [];
-  if (audits.length) {
-    const auditBox = node("div","insight-answer-card");
-    auditBox.append(node("h3","",`关联检索与工具明细（${audits.length}）`));
-    for (const audit of audits) {
-      const det = node("details");
-      const auditStatus = INSIGHT_STATUS_LABELS[audit.status] || audit.status || "-";
-      det.append(node("summary","",`${audit.surface} · ${audit.tool_name || "-"} · ${auditStatus} (${insightNumber(audit.elapsed_ms," ms")})`),node("pre","insight-json",insightJson(audit)));
-      auditBox.append(det);
+
+    const calls = turn.tool_calls || [];
+    if (!calls.length) {
+      traj.append(node("p", "small-note trace-no-steps", "本轮由模型直接生成回复，未调用工具。"));
+    } else {
+      const stepsList = node("ol", "trace-step-list");
+      for (const [sIdx, call] of calls.entries()) {
+        const li = node("li", "trace-step-item");
+        const stepHead = node("div", "trace-step-head");
+        const rawName = call.tool_name || call.name || "tool";
+        const displayName = `${toolDisplayName(rawName)} (${rawName})`;
+        const callState = INSIGHT_STATUS_LABELS[call.status] || call.status || "-";
+        const callTag = node("span", "insight-status", callState); callTag.dataset.state = call.status || "unknown";
+        stepHead.append(
+          node("span", "trace-step-index", `步骤 ${sIdx + 1}`),
+          node("strong", "trace-step-name", displayName),
+          callTag,
+          node("span", "small-note", `${insightNumber(call.elapsed_ms, " ms")}${call.detail ? ` · ${call.detail}` : ""}${call.error_code ? ` · ${call.error_code}` : ""}`),
+        );
+        li.append(stepHead);
+        const fullAudit = call.call_id ? auditByCallId.get(call.call_id) : null;
+        const payload = fullAudit
+          ? { request: fullAudit.request, response: fullAudit.response }
+          : (call.request || call.response ? { request: call.request, response: call.response } : call);
+        const det = node("details", "trace-step-details");
+        det.append(node("summary", "small-note", "查看输入参数与返回明细"), node("pre", "insight-json", insightJson(payload)));
+        li.append(det);
+        stepsList.append(li);
+      }
+      traj.append(stepsList);
     }
-    area.append(auditBox);
+
+    for (const audit of extraAudits) {
+      const det = node("details", "trace-step-details");
+      const aStatus = INSIGHT_STATUS_LABELS[audit.status] || audit.status || "-";
+      const snapInfo = (audit.snapshots || []).length ? ` · 命中片段 ${(audit.snapshots || []).length} 条` : "";
+      det.append(node("summary", "small-note", `关联检索 / 审计：${audit.surface} · ${audit.tool_name || "-"} · ${aStatus} (${insightNumber(audit.elapsed_ms, " ms")})${snapInfo}`), node("pre", "insight-json", insightJson(audit)));
+      traj.append(det);
+    }
+    card.append(traj);
+
+    const replyBox = node("div", "trace-turn-reply");
+    replyBox.append(node("div", "trace-turn-head", node("strong", "", "小圆 助理")), node("div", "trace-turn-text", turn.reply_text || "暂无回复正文。"));
+    card.append(replyBox);
+    timeline.append(card);
   }
+  area.append(timeline);
 }
 function renderInsightDetail(item) {
   const area = el("insights-detail"), kind = insightDetailState.kind; area.replaceChildren();
@@ -3465,7 +3514,8 @@ async function loadInsightRecords(kind, offset = 0) {
     const filters = insightFilterValues(kind);
     const params = new URLSearchParams({limit:String(INSIGHT_PAGE), offset:String(offset), ...filters});
     if (kind === "kb") params.set("kb_only", "true");
-    const data = await request(`/api/insights/${kind}?${params.toString()}`,"GET",undefined,controller.signal);
+    const endpoint = kind === "traces" ? "/api/insights/sessions" : `/api/insights/${kind}`;
+    const data = await request(`${endpoint}?${params.toString()}`,"GET",undefined,controller.signal);
     if (id !== panel.requestId) return;
     if (!Array.isArray(data.items) || !Number.isInteger(data.total) || data.total < 0) throw new Error("审计记录格式无法读取，请更新服务后重试。");
     if (offset > 0 && !data.items.length && data.total > 0) return loadInsightRecords(kind,Math.floor((data.total - 1) / INSIGHT_PAGE) * INSIGHT_PAGE);
@@ -3613,7 +3663,12 @@ el("insight-delete-form").addEventListener("submit",async event => {
   el("insight-delete-status").textContent = "正在删除…";
   try {
     let deleted = 1;
-    if (pending.id !== null) await request(`/api/insights/${pending.kind}/${encodeURIComponent(pending.id)}?confirm=true`,"DELETE");
+    if (pending.id !== null) {
+      const deleteUrl = pending.kind === "traces"
+        ? `/api/insights/sessions/${encodeURIComponent(pending.id)}?confirm=true`
+        : `/api/insights/${pending.kind}/${encodeURIComponent(pending.id)}?confirm=true`;
+      await request(deleteUrl, "DELETE");
+    }
     else {const body = {...pending.filters,confirm:true,expected_total:pending.total}; if (pending.kind === "kb") body.kb_only = true; const result = await request(`/api/insights/${pending.kind}/clear`,"POST",body); deleted = result.deleted;}
     el("insight-delete-dialog").close();
     await loadInsightRecords(pending.kind,insightState[pending.kind].offset);

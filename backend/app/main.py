@@ -1426,6 +1426,50 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             raise ProviderError(404, "insight_not_found", "追踪记录不存在。")
         return Response(status_code=204)
 
+    def _insight_session_titles() -> dict[str, str]:
+        titles = {str(item.session_id): item.title for item in app.state.service.list_sessions()}
+        for sid, session in app.state.service.sessions.items():
+            if session.title and str(sid) not in titles:
+                titles[str(sid)] = session.title
+        return titles
+
+    @app.get("/api/insights/sessions")
+    async def insights_sessions(limit: int = Query(default=50, ge=1, le=200),
+                                offset: int = Query(default=0, ge=0),
+                                q: str = Query(default="", max_length=200),
+                                source: str | None = Query(default=None, max_length=40),
+                                status: str | None = Query(default=None, max_length=40),
+                                since: str | None = Query(default=None, max_length=40),
+                                until: str | None = Query(default=None, max_length=40)):
+        if app.state.audit is None:
+            return {"items": [], "total": 0}
+        titles = await asyncio.to_thread(_insight_session_titles)
+        return await asyncio.to_thread(
+            app.state.audit.list_trace_sessions, limit, offset, q=q,
+            source=source, status=status, since=since, until=until,
+            session_titles=titles,
+        )
+
+    @app.get("/api/insights/sessions/{session_id}")
+    async def insights_session_detail(session_id: str):
+        if app.state.audit is None:
+            raise ProviderError(404, "insight_not_found", "对话记录不存在。")
+        titles = await asyncio.to_thread(_insight_session_titles)
+        detail = await asyncio.to_thread(app.state.audit.session_trace_detail, session_id, title=titles.get(session_id))
+        if detail is None:
+            raise ProviderError(404, "insight_not_found", "对话记录不存在。")
+        return detail
+
+    @app.delete("/api/insights/sessions/{session_id}", status_code=204)
+    async def delete_insight_session(session_id: str, confirm: bool = Query(default=False)):
+        if app.state.audit is None:
+            raise ProviderError(404, "insight_not_found", "对话记录不存在。")
+        if not confirm:
+            raise ProviderError(422, "confirm_required", "删除记录需明确确认。")
+        if not await asyncio.to_thread(app.state.audit.delete_trace_session, session_id):
+            raise ProviderError(404, "insight_not_found", "对话记录不存在。")
+        return Response(status_code=204)
+
     @app.get("/api/insights/errors")
     async def insights_errors(limit: int = Query(default=50, ge=1, le=200),
                               offset: int = Query(default=0, ge=0),
