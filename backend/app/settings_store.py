@@ -13,7 +13,7 @@ from .ack_cache import ack_cache_status
 from .config import ROOT, Settings
 from .llm import ProviderError
 from .tts import CLONE_MODEL
-from .web_search import resolve_web_search_api_key
+from .web_search import resolve_web_search_provider
 
 
 _CONNECTION_KEYS = ("api_key", "tts_api_key", "rt_api_key", "asr_api_key", "web_search_api_key")
@@ -202,7 +202,8 @@ def public_settings(settings: Settings) -> dict:
         "embedding_enabled": settings.embedding_enabled,
         "weather_enabled": settings.weather_enabled,
         "web_search_enabled": settings.web_search_enabled,
-        "web_search_configured": bool(resolve_web_search_api_key(settings)),
+        "web_search_provider": resolve_web_search_provider(settings)[0],
+        "web_search_configured": bool(resolve_web_search_provider(settings)[0]),
         "web_search_separate_key_configured": bool(settings.web_search_api_key.get_secret_value().strip()),
         "weather_default_city": settings.weather_default_city,
         "desktop_enabled": settings.desktop_enabled,

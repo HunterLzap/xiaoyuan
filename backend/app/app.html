@@ -34,10 +34,14 @@
     <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 2v5M15 2v5M6 7h12v4a6 6 0 0 1-12 0V7ZM12 17v5"/></symbol>
     <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L3 18v3h3l6.4-6.4a4 4 0 0 0 5.3-5.3l-2.3 2.3-2-2 2.3-2.3Z"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5 2.5 20h19L12 3.5Z"/><path d="M12 9.5v4.5M12 17h.01"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M2 19h20"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
   </svg>
   <div id="app-shell" class="app-shell">
     <aside id="sidebar" class="sidebar" aria-label="导航和会话">
-      <div class="sidebar-brand"><a class="brand" href="__APP_BASE_PATH__/" data-view="chat"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></span><strong>小圆</strong></a><button class="icon-button" id="collapse-sidebar" aria-label="收起侧栏"><svg><use href="#i-panel"/></svg></button></div>
+      <div class="sidebar-brand"><a class="brand" href="__APP_BASE_PATH__/" data-view="chat"><span class="brand-dot" aria-hidden="true"></span><strong>小圆</strong></a><button class="icon-button" id="collapse-sidebar" aria-label="收起侧栏"><svg><use href="#i-panel"/></svg></button></div>
       <button id="new-session" class="nav-button"><svg><use href="#i-plus"/></svg><span>新对话</span><kbd>Ctrl Alt N</kbd></button>
       <div class="search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="session-search" maxlength="200" type="search" placeholder="搜索对话" aria-label="搜索对话" autocomplete="off"><kbd>Ctrl K</kbd></div>
       <div class="history-heading"><span>最近对话</span><button id="session-manage-toggle" type="button" class="text-button">批量删除</button></div>
@@ -84,7 +88,16 @@
       <span id="voice-session-title" class="voice-session-title">当前对话</span>
     </header>
     <div class="voice-center">
-      <div id="voice-orb" class="voice-orb" data-state="idle" aria-hidden="true"><span class="voice-orb-highlight"></span><span class="voice-wave"><i></i><i></i><i></i><i></i><i></i></span></div>
+      <div class="orb-stage">
+        <span class="orb-ring" aria-hidden="true"></span>
+        <span class="orb-ring ring-2" aria-hidden="true"></span>
+        <div id="voice-orb" class="voice-orb" data-state="idle" aria-hidden="true">
+          <span class="orb-blob orb-blob-1"></span>
+          <span class="orb-blob orb-blob-2"></span>
+          <span class="orb-blob orb-blob-3"></span>
+          <span class="voice-wave"><i></i><i></i><i></i><i></i><i></i></span>
+        </div>
+      </div>
       <p id="voice-stage" class="voice-stage" role="status" aria-live="polite">正在开启麦克风…</p>
       <div class="voice-transcript">
         <p id="voice-current-user" class="voice-user-line" hidden></p>
@@ -103,20 +116,18 @@
   <div id="settings-page" class="settings-page" hidden>
     <aside class="settings-sidebar" aria-label="设置导航">
       <div class="settings-sidebar-head"><h2 id="settings-page-title">设置</h2><button id="settings-close" type="button" class="icon-button" aria-label="关闭设置"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
-      <input id="settings-search" type="search" class="settings-search" placeholder="搜索设置" aria-label="搜索设置">
+      <input id="settings-search" type="search" class="settings-search" placeholder="搜索设置" aria-label="搜索设置" hidden>
       <nav id="settings-nav" class="settings-nav" aria-label="设置分类">
-        <p class="settings-group">Agent</p>
-        <button type="button" data-view="role">Agent 与档案</button>
-        <button type="button" data-view="connections">模型与连接</button>
-        <p class="settings-group">技能与知识</p>
-        <button type="button" data-view="capabilities">技能与知识</button>
-        <p class="settings-group">终端</p>
-        <button type="button" data-view="devices">终端节点（电脑 &amp; 硬件）</button>
-        <p class="settings-group">运行</p>
-        <button type="button" data-view="insights">执行洞察</button>
+        <button type="button" data-view="role"><svg aria-hidden="true"><use href="#i-user"/></svg><span>助手</span></button>
+        <button type="button" data-view="connections"><svg aria-hidden="true"><use href="#i-cpu"/></svg><span>模型</span></button>
+        <button type="button" data-view="capabilities"><svg aria-hidden="true"><use href="#i-wrench"/></svg><span>技能</span></button>
+        <button type="button" data-view="kb"><svg aria-hidden="true"><use href="#i-book"/></svg><span>知识库</span></button>
+        <button type="button" data-view="devices"><svg aria-hidden="true"><use href="#i-laptop"/></svg><span>设备</span></button>
+        <button type="button" data-view="insights"><svg aria-hidden="true"><use href="#i-list"/></svg><span>记录</span></button>
       </nav>
     </aside>
     <div class="settings-main">
+      <header class="settings-view-header"><h1 id="settings-view-heading">助手</h1></header>
       <div id="settings-notice" class="notice" role="status" aria-live="polite" hidden></div>
       <div class="settings-dialog-body">
       <section id="settings-view" class="page-view" aria-label="Agent 与档案" hidden><div class="page-content assistant-content">
@@ -230,7 +241,7 @@
 <div class="settings-row"><label for="rt_defer_response_until_transcript">按需发工具</label><label class="checkbox-control"><input id="rt_defer_response_until_transcript" type="checkbox"><span>转写后按任务选择工具，减少闲聊 Token</span></label></div>
 <div class="settings-row"><div><label for="rt_max_continuous_turns">连续轮换轮数</label><p>默认 6 轮，0 为关闭。</p></div><input id="rt_max_continuous_turns" type="number" min="0" max="50" value="6" required></div>
 <div class="settings-row"><div><label for="rt_max_continuous_seconds">连续轮换时长（秒）</label><p>默认 600 秒，0 为关闭。</p></div><input id="rt_max_continuous_seconds" type="number" min="0" max="3600" value="600" required></div>
-<div class="settings-row"><label for="rt_ack_enabled">工具等待播报首响（同音色）</label><div class="ack-config"><input id="rt_ack_enabled" type="checkbox"><span id="rt-ack-status" class="small-note" role="status"></span><button id="rt-ack-generate" type="button" class="secondary-button">生成首响语音（约 ¥0.01）</button></div></div>
+<div class="settings-row"><label for="rt_ack_enabled">工具等待播报首响（同音色）</label><div class="ack-config"><input id="rt_ack_enabled" type="checkbox"><span id="rt-ack-status" class="small-note" role="status"></span><button id="rt-ack-generate" type="button" class="secondary-button">生成首响缓存</button></div></div>
 </div></details></section>
           <section class="api-text-settings" id="text-services" hidden><h2 id="text-services-title" hidden>分模型</h2><section class="api-panel">
             <h2 class="api-panel-title">文字服务<span id="connection-summary" class="connection-label"></span></h2>
@@ -277,9 +288,9 @@
                 <div class="desktop-model-stack">
                   <select id="desktop-planner-preset" aria-label="电脑操控主控模型">
                     <option value="">自动推荐（qwen3.5-plus）</option>
-                    <option value="qwen3.5-plus">qwen3.5-plus · 推荐（¥0.8 / ¥4.8）</option>
-                    <option value="qwen3.5-flash">qwen3.5-flash · 省钱（¥0.2 / ¥2.0）</option>
-                    <option value="qwen3-vl-plus">qwen3-vl-plus · 视觉（¥1.0 / ¥10.0）</option>
+                    <option value="qwen3.5-plus">qwen3.5-plus（推荐）</option>
+                    <option value="qwen3.5-flash">qwen3.5-flash</option>
+                    <option value="qwen3-vl-plus">qwen3-vl-plus</option>
                     <option value="__manual__">手动填写模型 ID…</option>
                   </select>
                   <input id="desktop_planner_model" maxlength="200" autocomplete="off" placeholder="例如：qwen3.5-plus / qwen3.5-flash / deepseek-chat" hidden>
@@ -291,12 +302,12 @@
             </div></details>
           </section>
           <section class="api-panel" id="web-search-connection-panel" aria-label="联网搜索">
-            <h2 class="api-panel-title">联网搜索 <small>DeepSeek Search</small></h2>
+            <h2 class="api-panel-title">联网搜索 <small>百炼自带搜索（免额外 Key） / DeepSeek</small></h2>
             <div class="api-group">
               <div class="settings-row">
                 <label for="conn_web_search_api_key">DeepSeek API Key</label>
                 <div class="api-secret">
-                  <input id="conn_web_search_api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="填 DeepSeek API Key；主模型已是 DeepSeek 可留空">
+                  <input id="conn_web_search_api_key" type="password" autocomplete="new-password" spellcheck="false" placeholder="留空默认复用百炼自带联网搜索；如需改用 DeepSeek 可填 Key">
                   <small id="conn-web-search-key-state" role="status"></small>
                 </div>
               </div>
@@ -350,15 +361,14 @@
         </section>
       </div></section>
       <section id="capabilities-view" class="page-view" aria-label="技能与知识" hidden><div class="page-content capability-content">
-        <div class="insight-tabbar" role="tablist" aria-label="技能与知识分类">
-          <button id="capabilities-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="capabilities-panel-tools" data-capability-tab="tools"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-wrench"/></svg><span>技能中心</span></button>
-          <button id="capabilities-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="capabilities-panel-kb" data-capability-tab="kb" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>个人知识库</span></button>
-          <button id="capability-refresh" type="button" class="text-button tabbar-refresh">刷新</button>
+        <div class="insight-tabbar" role="tablist" aria-label="技能与知识分类" hidden>
+          <button id="capabilities-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="capabilities-panel-tools" data-capability-tab="tools"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-wrench"/></svg><span>技能</span></button>
+          <button id="capabilities-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="capabilities-panel-kb" data-capability-tab="kb" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>知识库</span></button>
         </div>
         <p id="capability-notice" class="small-note" role="status" aria-live="polite"></p>
         <section id="capabilities-panel-tools" class="capability-tabpanel" role="tabpanel" aria-labelledby="capabilities-tab-tools">
           <section class="capability-section" aria-labelledby="capability-tools-title">
-            <div class="capability-heading"><h2 id="capability-tools-title">Agent 可用技能</h2><button id="tool-new" type="button" class="secondary-button">+ 新建 HTTP 工具</button></div>
+            <div class="capability-heading"><h2 id="capability-tools-title">可用技能</h2><div class="capability-heading-actions"><button id="tool-new" type="button" class="secondary-button">+ 新建 HTTP 工具</button><button id="capability-refresh" type="button" class="text-button">刷新</button></div></div>
             <div class="cap-panes">
               <div class="cap-list" id="capability-tools" role="list" aria-live="polite"></div>
               <div class="cap-detail" id="capability-detail" aria-live="polite"></div>
@@ -404,10 +414,10 @@
         <div id="insights-list-view">
         <span id="insights-intro" class="sr-only">数据洞察</span>
         <div class="insight-tabbar" role="tablist" aria-label="数据洞察分类">
-          <button id="insights-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="insights-panel-kb" data-insight-tab="kb"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>知识库记录</span></button>
-          <button id="insights-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-tools" data-insight-tab="tools" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-plug"/></svg><span>API记录</span></button>
-          <button id="insights-tab-traces" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-traces" data-insight-tab="traces" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-panel"/></svg><span>全链路追踪</span></button>
-          <button id="insights-tab-errors" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-errors" data-insight-tab="errors" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-alert"/></svg><span id="insights-tab-errors-label">异常日志</span></button>
+          <button id="insights-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="insights-panel-kb" data-insight-tab="kb"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>问答</span></button>
+          <button id="insights-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-tools" data-insight-tab="tools" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-plug"/></svg><span>API</span></button>
+          <button id="insights-tab-traces" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-traces" data-insight-tab="traces" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-panel"/></svg><span>链路</span></button>
+          <button id="insights-tab-errors" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-errors" data-insight-tab="errors" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-alert"/></svg><span id="insights-tab-errors-label">异常</span></button>
           <button id="insights-refresh" type="button" class="text-button tabbar-refresh">刷新</button>
         </div>
         <p id="insights-notice" class="small-note" role="status" aria-live="polite"></p>
@@ -549,7 +559,7 @@
   </form></dialog>
   <dialog id="qwen-clone-dialog" aria-label="复刻实时音色"><form id="qwen-clone-form">
     <h2>复刻实时音色</h2>
-    <p class="small-note">上传 10–20 秒单人清录音，支持 WAV、MP3 或 M4A，最长 60 秒。创建约 ¥0.01；录音仅上传百炼用于生成本次音色，本机完成后不保留。</p>
+    <p class="small-note">上传 10–20 秒单人清录音，支持 WAV、MP3 或 M4A，最长 60 秒。录音仅上传百炼用于生成本次音色，本机完成后不保留。</p>
     <div class="settings-row"><label for="qwen-clone-name">音色名字</label><input id="qwen-clone-name" maxlength="24" required placeholder="例如：我的声音"></div>
     <div class="settings-row"><label for="qwen-clone-file">参考录音</label><input id="qwen-clone-file" type="file" accept=".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4" required></div>
     <p id="qwen-clone-status" class="small-note" role="status" aria-live="polite"></p>

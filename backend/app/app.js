@@ -117,7 +117,8 @@ function navigate(view, push = true, deviceTab = "desktop") {
   if (state.view !== view) { stopTtsPreview(); stopRealtimeSample(); }
   state.view = view;
   if (view !== "chat") remember("atoms3r.settingsSection", view);
-  for (const name of ["settings", "connections", "devices", "capabilities", "insights"]) el(`${name}-view`).hidden = name === "settings" ? view !== "role" : name !== view;
+  const panelView = view === "kb" ? "capabilities" : view;
+  for (const name of ["settings", "connections", "devices", "capabilities", "insights"]) el(`${name}-view`).hidden = name === "settings" ? panelView !== "role" : name !== panelView;
   el("chat-view").hidden = false;
   el("test-panel").hidden = true;
   el("settings-page").hidden = view === "chat";
@@ -125,17 +126,21 @@ function navigate(view, push = true, deviceTab = "desktop") {
   if (view !== "chat") el("api-workbench").hidden = true;
   document.querySelectorAll("[data-view]").forEach(link => { const active = (link.dataset.view === view) && view !== "chat"; link.classList.toggle("active", active); link.setAttribute("aria-current", active ? "page" : "false"); });
   el("settings-button").classList.toggle("active", view !== "chat");
-  const title = view === "chat" ? state.detail?.title || "新对话" : {settings:"Agent 与档案", connections:"模型与连接", role:"Agent 与档案", devices:"终端节点", capabilities:"技能与知识", insights:"执行洞察"}[view];
+  const title = view === "chat" ? state.detail?.title || "新对话" : {settings:"助手", connections:"模型", role:"助手", devices:"设备", capabilities:"技能", kb:"知识库", insights:"记录"}[view];
   el("view-title").textContent = title;
+  if (el("settings-view-heading") && view !== "chat") el("settings-view-heading").textContent = title;
   el("rename-form").hidden = true; el("view-title").hidden = false;
-  const path = appPath({settings:"/settings", connections:"/settings#api", role:"/settings#role", devices:"/devices", capabilities:"/settings#capabilities", insights:"/settings#insights", chat:"/"}[view]);
+  const path = appPath({settings:"/settings", connections:"/settings#api", role:"/settings#role", devices:"/devices", capabilities:"/settings#capabilities", kb:"/settings#kb", insights:"/settings#insights", chat:"/"}[view]);
   if (push && location.pathname + location.hash !== path) history.pushState({view}, "", path);
   document.title = `${title} · 小圆`;
   closeSidebar(); notice(); refreshControls(); renderSessions();
   if (view === "connections" && state.loaded && savedConfig?.voice_mode === "pipeline" && savedConfig?.api_key_configured && !modelsFetched && !state.busy) queueMicrotask(refreshModelChoices);
   if (view === "role" && state.loaded && !deviceData) loadDevices(true).catch(error => notice(error.message,"error"));
   if (view === "devices") showDeviceTab(deviceTab);
-  if (view === "capabilities") loadCapabilities().catch(error => capabilityNotice(error.message,true));
+  if (view === "capabilities" || view === "kb") {
+    showCapabilityTab(view === "kb" ? "kb" : "tools");
+    loadCapabilities().catch(error => capabilityNotice(error.message,true));
+  }
   if (view === "insights") loadInsights().catch(error => insightNotice(error.message,true));
 }
 let sessionManageMode = false;
@@ -332,11 +337,22 @@ function messageNode(message) {
   });
   footer.append(copy);
   const metadata = node("span", "", assistantInfo(message));
-  footer.append(metadata); article.append(footer);
+  footer.append(metadata);
+  const detailToggle = node("button", "msg-detail-toggle", "详情 ▾");
+  detailToggle.type = "button";
+  const detailPanel = node("div", "msg-detail-panel");
+  detailPanel.hidden = true;
+  detailToggle.addEventListener("click", () => {
+    detailPanel.hidden = !detailPanel.hidden;
+    detailToggle.textContent = detailPanel.hidden ? "详情 ▾" : "收起 ▴";
+  });
+  footer.append(detailToggle);
+  article.append(footer, detailPanel);
   if (message.knowledge) {
     const sources = node("details", "message-sources");
     sources.append(node("summary", "", message.knowledge.status === "empty" ? "未检索到匹配的官方资料" : `检索了 ${message.knowledge.documents.length} 个资料片段 · 查看来源`));
-    sources.append(sourceList(message.knowledge.sources)); article.append(sources);
+    sources.append(sourceList(message.knowledge.sources));
+    detailPanel.append(sources);
   }
   renderMessageReferences(article,message);
   return article;
@@ -467,8 +483,14 @@ function renderMessageReferences(article,message) {
     if (footer) footer.before(stepPreview); else article.append(stepPreview);
   }
   renderApprovalCard(article, message);
+  let detailPanel = article.querySelector(".msg-detail-panel");
+  if (!detailPanel) {
+    detailPanel = node("div", "msg-detail-panel");
+    detailPanel.hidden = true;
+    article.append(detailPanel);
+  }
   const usageDetails = tokenUsageDetails(message.usage);
-  article.append(usageDetails);
+  detailPanel.append(usageDetails);
   if (Array.isArray(message.sources) && message.sources.length) {
     const details = node("details","message-sources message-personal-sources");
     details.append(node("summary","",`已向模型提供 ${message.sources.length} 个资料片段 · 查看出处；实际引用以正文 [资料N] 为准`));
@@ -487,7 +509,7 @@ function renderMessageReferences(article,message) {
       if (source.document_version != null) entry.append(node("span","metadata",`资料版本 ${source.document_version}`));
       list.append(entry);
     }
-    details.append(list); article.append(details);
+    details.append(list); detailPanel.append(details);
   }
   if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
     const details = node("details","message-sources message-tool-calls");
@@ -507,7 +529,7 @@ function renderMessageReferences(article,message) {
       if (extra.length) entry.append(node("div", "metadata", extra.join(" ｜ ")));
       list.append(entry);
     }
-    details.append(list); article.append(details);
+    details.append(list); detailPanel.append(details);
   }
 }
 const SOURCE_LABELS = { text: "文字", web_voice: "网页语音", device_voice: "设备语音" };
@@ -553,22 +575,12 @@ function assistantInfo(message) {
   const info = [];
   if (message.source && message.source !== "text" && SOURCE_LABELS[message.source]) info.push(SOURCE_LABELS[message.source]);
   if (message.model) info.push(message.model);
-  const usage = message.usage;
-  if (usage && ["prompt_tokens", "completion_tokens", "total_tokens"].some(key => usage[key] !== null && usage[key] !== undefined)) {
-    const count = value => value === null || value === undefined ? "未报告" : value.toLocaleString("zh-CN");
-    info.push(`本轮 Token：输入 ${count(usage.prompt_tokens)} / 输出 ${count(usage.completion_tokens)} / 合计 ${count(usage.total_tokens)}`);
-  } else {
-    info.push("本轮 Token：供应商未报告");
-  }
-  if (message.estimated_cost !== null && message.estimated_cost !== undefined) info.push(`${message.estimated_cost} ${message.currency}`);
-  if (message.knowledge) info.push(message.knowledge.status === "empty" ? "资料未命中" : `资料检索 ${message.knowledge.documents?.length ?? 0} 段`);
   if (message.finish_reason === "length") info.push("回复达到长度上限");
   if (message.status === "interrupted") info.push("生成已停止");
   if (message.status === "failed") info.push("回答未完成");
   if (message.audio_status === "failed") info.push("语音未完成");
   else if (message.audio_status === "interrupted") info.push("语音已停止");
   else if (message.audio_status === "played") info.push("已播放");
-  else if (message.audio_status) info.push("语音未确认播完");
   return info.join(" · ");
 }
 window.atoms3rVoiceMessages = {
@@ -2068,7 +2080,8 @@ function renderCapabilityDetail(item) {
   detail.append(toolDetailCard(item.tool));
 }
 function webSearchKeyStateText(cfg) {
-  if (cfg?.web_search_separate_key_configured) return "已配置独立 Key";
+  if (cfg?.web_search_separate_key_configured) return "已配置独立 DeepSeek Key";
+  if (cfg?.web_search_provider === "bailian") return "已自动复用百炼自带联网搜索（免额外 Key）";
   if (cfg?.web_search_configured) return "自动复用 DeepSeek 主模型 Key";
   return "尚未配置密钥";
 }
@@ -2087,11 +2100,14 @@ async function runQuickWebSearchTest(query, resultEl, triggerBtn) {
     const res = await request("/api/tools/web_search/call", "POST", {arguments: {query: clean, count: 1}, confirmed: false});
     const ms = Math.round(performance.now() - started);
     const items = Array.isArray(res?.results) ? res.results : [];
-    const summary = items.length ? `搜索正常（${ms}ms，返回 ${items.length} 条）：${items[0].title || items[0].url || ""}` : `接口连通（${ms}ms），但本次未返回结果。`;
+    const snippet = (res?.answer || items[0]?.summary || items[0]?.title || items[0]?.url || "").trim();
+    const summary = snippet
+      ? `搜索正常（${ms}ms）：${snippet}`
+      : `接口连通（${ms}ms），但本次未返回结果。`;
     if (resultEl) resultEl.textContent = summary;
     return {ok: true, summary};
   } catch (error) {
-    const msg = error.code === "tool_not_found" ? "联网搜索尚未启用，请先到「技能与知识 → 技能中心」勾选“启用资源”。" : error.message;
+    const msg = error.code === "tool_not_found" ? "联网搜索尚未开启，请先到「技能与知识 → 技能中心」开启「联网搜索」。" : error.message;
     if (resultEl) { resultEl.textContent = msg; resultEl.dataset.kind = "error"; }
     return {ok: false, message: msg};
   } finally {
@@ -2104,6 +2120,7 @@ el("conn-web-search-clear")?.addEventListener("click", async () => {
   try {
     const {text} = await request("/api/settings/connections", "PUT", {web_search_api_key: ""});
     if (savedConfig) {
+      savedConfig.web_search_provider = text.web_search_provider;
       savedConfig.web_search_configured = text.web_search_configured;
       savedConfig.web_search_separate_key_configured = text.web_search_separate_key_configured;
     }
@@ -2124,6 +2141,7 @@ el("conn-web-search-test")?.addEventListener("click", async () => {
       const {text} = await request("/api/settings/connections", "PUT", {web_search_api_key: draftKey});
       el("conn_web_search_api_key").value = "";
       if (savedConfig) {
+        savedConfig.web_search_provider = text.web_search_provider;
         savedConfig.web_search_configured = text.web_search_configured;
         savedConfig.web_search_separate_key_configured = text.web_search_separate_key_configured;
       }
@@ -2143,7 +2161,7 @@ function webSearchToolCard(tool) {
   const card = node("div", "capability-item");
   const header = node("div", "capability-item-header");
   const title = node("div", "capability-item-title");
-  title.append(node("h3", "", "联网搜索"), node("p", "small-note", "DeepSeek Search"));
+  title.append(node("h3", "", "联网搜索"), node("p", "small-note", "百炼自带搜索 / DeepSeek（选填）"));
   header.append(title);
 
   const toggleLabel = node("label", "checkbox-control"), toggle = node("input");
@@ -2160,7 +2178,7 @@ function webSearchToolCard(tool) {
 
   const keySection = node("div", "search-key-config");
   const keyHead = node("div", "search-key-head");
-  const label = node("label", "", "DeepSeek API Key");
+  const label = node("label", "", "DeepSeek API Key（可选）");
   label.htmlFor = "web_search_api_key";
   const status = node("p", "small-note", webSearchKeyStateText(savedConfig));
   status.id = "web-search-key-status";
@@ -2169,7 +2187,7 @@ function webSearchToolCard(tool) {
   const keyRow = node("div", "search-key-row");
   const field = node("input");
   field.id = "web_search_api_key"; field.type = "password"; field.autocomplete = "off"; field.spellcheck = false;
-  field.placeholder = "填 DeepSeek API Key；主模型已是 DeepSeek 可留空";
+  field.placeholder = "留空默认复用百炼自带联网搜索；如需改用 DeepSeek 可填 Key";
   field.setAttribute("aria-describedby", status.id);
   const separate = Boolean(savedConfig?.web_search_separate_key_configured);
 
@@ -2182,6 +2200,7 @@ function webSearchToolCard(tool) {
     field.value = "";
     const {text} = await request("/api/settings/connections", "PUT", {web_search_api_key:value});
     if (savedConfig) {
+      savedConfig.web_search_provider = text.web_search_provider;
       savedConfig.web_search_configured = text.web_search_configured;
       savedConfig.web_search_separate_key_configured = text.web_search_separate_key_configured;
     }
@@ -3874,7 +3893,7 @@ setInterval(() => {
 }, 3000);
 function routeView() {
   const path = window.assistantPaths.routePath();
-  if (path === "/settings") return {"#api":"connections", "#tts":"connections", "#role":"role", "#capabilities":"capabilities", "#insights":"insights"}[location.hash] || recalled("atoms3r.settingsSection") || "role";
+  if (path === "/settings") return {"#api":"connections", "#tts":"connections", "#role":"role", "#capabilities":"capabilities", "#kb":"kb", "#insights":"insights"}[location.hash] || recalled("atoms3r.settingsSection") || "role";
   return {"/devices":"devices"}[path] || "chat";
 }
 window.addEventListener("popstate", () => navigate(routeView(),false));

@@ -612,6 +612,66 @@ def test_public_settings_report_search_key_source_and_realtime_options(connectio
     assert response.status_code == 422 and response.json()["detail"]["code"] == "key_required_for_new_url"
 
 
+def test_bailian_web_search_fallback_and_public_settings(connection_settings_client, monkeypatch):
+    client, _ = connection_settings_client
+
+    async def scenario():
+        clock = [200.0]
+        monkeypatch.setattr(web_search, "monotonic", lambda: clock[0])
+        payload = {
+            "choices": [{"message": {"content": "今天北京多云，最高气温 12°C。"}}],
+            "search_info": {
+                "search_results": [
+                    {"title": "北京今日天气预报", "url": "https://weather.example.invalid/bj", "summary": "多云 2~12°C"}
+                ]
+            },
+        }
+        post = AsyncMock(return_value=httpx.Response(200, json=payload))
+        monkeypatch.setattr(httpx.AsyncClient, "post", post)
+        settings = Settings(
+            _env_file=None,
+            voice_mode="realtime",
+            rt_provider="bailian",
+            rt_workspace="ws-123",
+            rt_api_key="bailian-test-key",
+            web_search_api_key="",
+        )
+        assert web_search.resolve_web_search_provider(settings) == ("bailian", "bailian-test-key")
+        try:
+            result = await web_search.search_web(settings, "  北京天气  ", count=3)
+            post.assert_awaited_once()
+            call = post.await_args
+            assert call.args[0] == "https://ws-123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions"
+            assert call.kwargs["headers"]["Authorization"] == "Bearer bailian-test-key"
+            assert call.kwargs["json"]["model"] == "qwen-flash"
+            assert call.kwargs["json"]["enable_search"] is True
+            assert call.kwargs["json"]["search_options"] == {"search_strategy": "turbo", "enable_source": True}
+            assert result["provider"] == "bailian"
+            assert result["answer"] == "今天北京多云，最高气温 12°C。"
+            assert result["results"] == [
+                {"title": "北京今日天气预报", "url": "https://weather.example.invalid/bj", "summary": "多云 2~12°C", "score": None}
+            ]
+            clock[0] += 100
+            assert await web_search.search_web(settings, "北京天气", count=3) == result
+            assert post.await_count == 1
+        finally:
+            await web_search.close_web_search_client()
+
+    asyncio.run(scenario())
+
+    saved = client.put(
+        "/api/settings/connections",
+        headers=HEADERS,
+        json={"voice_mode": "realtime", "rt_provider": "bailian", "rt_api_key": "bailian-conn-secret", "rt_workspace": "ws-123"},
+    )
+    assert saved.status_code == 200
+    pub = client.get("/api/settings").json()
+    assert pub["web_search_configured"] is True
+    assert pub["web_search_provider"] == "bailian"
+    assert pub["web_search_separate_key_configured"] is False
+    assert "bailian-conn-secret" not in str(pub)
+
+
 def test_health_reports_hardware_ready_boolean(connection_settings_client):
     client, _ = connection_settings_client
     devices = client.app.state.devices
