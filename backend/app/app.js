@@ -3812,14 +3812,33 @@ function renderPublicDesktopStatus(health) {
   const setupBox = document.querySelector(".desktop-setup-box");
   if (setupBox) setupBox.hidden = true;
   const list = el("desktop-nodes"); list.replaceChildren();
-  const card = node("div", `desktop-node-card desktop-readonly-card${online > 0 ? " online" : ""}`);
-  const head = node("div", "desktop-node-head");
-  const titleWrap = node("div", "desktop-node-title");
-  titleWrap.append(node("strong", "", "个人电脑节点管理仅限本机回环访问"));
-  head.append(titleWrap, node("span", `desktop-status-dot ${online > 0 ? "online" : "offline"}`, online > 0 ? `${online} 台在线` : "暂无在线"));
-  card.append(head, node("p", "small-note", "公网访问时已隐藏真实配对令牌与截屏预览；如需将个人电脑接入当前云端，按下面两步在对应电脑终端运行即可："));
+  const nodes = Array.isArray(health?.desktop_nodes) ? health.desktop_nodes : [];
+  if (!nodes.length) {
+    list.append(node("p", "small-note desktop-public-empty", "暂无在线或已接入的个人电脑；展开下方「接入新电脑」查看启动命令。"));
+  } else {
+    for (const item of nodes) {
+      const card = node("div", `desktop-node-card${item.online ? " online" : ""}`);
+      const head = node("div", "desktop-node-head");
+      const titleWrap = node("div", "desktop-node-title");
+      titleWrap.append(node("strong", "", item.name || item.node_id || "个人电脑"));
+      titleWrap.append(node("span", "desktop-os-badge", item.os === "macos" ? "macOS" : item.os === "windows" ? "Windows" : (item.os || "desktop")));
+      if (item.is_default) titleWrap.append(node("span", "desktop-default-badge", "默认"));
+      head.append(titleWrap, node("span", `desktop-status-dot ${item.online ? "online" : "offline"}`, item.online ? "在线" : "离线"));
+      card.append(head);
+      const screenInfo = item.screen?.width ? `${item.screen.width}×${item.screen.height}` : "未知分辨率";
+      const timeInfo = item.online && item.connected_at
+        ? `已连接 ${insightTime(item.connected_at)}`
+        : (item.last_seen_at ? `上次在线 ${insightTime(item.last_seen_at)}` : "");
+      card.append(node("p", "small-note", [screenInfo, timeInfo].filter(Boolean).join(" · ")));
+      list.append(card);
+    }
+  }
+  const details = node("details", "settings-advanced desktop-public-guide ui-card");
+  const summary = node("summary", "", "接入新电脑（查看连接命令）");
+  summary.append(icon("chevron"));
+  const body = node("section", "settings-section desktop-guide-steps");
+  body.append(node("p", "small-note", "公网访问时已隐藏真实配对令牌与截屏预览；如需将新电脑接入当前云端，按下面两步运行即可："));
   const wsUrl = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${appPath("/desktop/v1/")}`;
-  const guide = node("div", "desktop-guide-steps");
   const addStep = (labelText, cmdText) => {
     const block = node("div", "desktop-cmd-block");
     block.append(node("label", "", labelText));
@@ -3832,14 +3851,14 @@ function renderPublicDesktopStatus(health) {
     });
     row.append(input, copyBtn);
     block.append(row);
-    guide.append(block);
+    body.append(block);
   };
   addStep("1. 登录云端服务器查看配对令牌（取 gateway_token）", "sudo cat /opt/xiaodan/shared/data/desktop_nodes.json");
-  addStep("2. 在要操控的 Mac 电脑上运行（将 <gateway_token> 替换为上一步查到的令牌）", `.venv/bin/python -m desktop_node --server "${wsUrl}" --token "<gateway_token>"`);
-  addStep("2. 在要操控的 Windows 电脑上运行（将 <gateway_token> 替换为上一步查到的令牌）", `.venv\\Scripts\\python.exe -m desktop_node --server "${wsUrl}" --token "<gateway_token>"`);
-  guide.append(node("p", "small-note", "Mac 首次使用请在「系统设置 → 隐私与安全性」给终端开启「辅助功能」和「录屏与系统录音」权限；连接成功后右上角「电脑」绿点即亮起。"));
-  card.append(guide);
-  list.append(card);
+  addStep("2. 在 Mac 电脑项目目录运行（将 替换为上一步查到的令牌 直接换掉）", `.venv/bin/python -m desktop_node --server "${wsUrl}" --token "替换为上一步查到的令牌"`);
+  addStep("2. 在 Windows 电脑项目目录运行（将 替换为上一步查到的令牌 直接换掉）", `.venv\\Scripts\\python.exe -m desktop_node --server "${wsUrl}" --token "替换为上一步查到的令牌"`);
+  body.append(node("p", "small-note", "Mac 首次使用请在「系统设置 → 隐私与安全性」给终端开启「辅助功能」和「录屏与系统录音」权限；连接成功后右上角「电脑」绿点即亮起。"));
+  details.append(summary, body);
+  list.append(details);
 }
 async function loadDesktopNodes() {
   try {

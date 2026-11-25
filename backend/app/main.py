@@ -300,6 +300,20 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
     async def health():
         service = app.state.service
         connection = getattr(app.state.devices, "connection", None)
+        desktop = getattr(app.state, "desktop", None)
+        desktop_nodes = [
+            {
+                "node_id": item.get("node_id"),
+                "name": item.get("name"),
+                "os": item.get("os"),
+                "online": bool(item.get("online")),
+                "is_default": bool(item.get("is_default")),
+                "screen": item.get("screen") or {},
+                "connected_at": item.get("connected_at"),
+                "last_seen_at": item.get("last_seen_at"),
+            }
+            for item in (desktop.list_nodes() if desktop is not None and hasattr(desktop, "list_nodes") else ())
+        ]
         return {
             "status": "ok", "configured": not service.settings.missing_config,
             "missing_config": service.settings.missing_config,
@@ -311,7 +325,8 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
             "m5stack_enabled": service.settings.m5stack_enabled,
             "desktop_enabled": service.settings.desktop_enabled,
             "device_connected": bool(connection and connection.ready),
-            "desktop_online_nodes": len(app.state.desktop.active) if getattr(app.state, "desktop", None) else 0,
+            "desktop_online_nodes": len(desktop.active) if desktop else 0,
+            "desktop_nodes": desktop_nodes,
         }
 
     @app.post("/api/approvals/{approval_id}")

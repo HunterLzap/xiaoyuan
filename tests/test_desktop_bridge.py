@@ -101,6 +101,7 @@ def test_desktop_admin_blocks_public_proxy(tmp_path):
         "admin_proxy_token": proxy_key,
     })
     hub = DesktopHub(path=tmp_path / "desktop_nodes.json")
+    hub.saved_nodes["offline-node"] = {"node_id": "offline-node", "name": "My Mac", "os": "macos", "screen": {"width": 1470, "height": 956}}
     app = create_app(settings, provider=_ScriptedLLM([]), desktop_hub=hub,
                      settings_store=SettingsStore(tmp_path / ".env"))
     headers = {"X-Assistant-Admin": proxy_key, "X-Local-Settings": "1", "Origin": origin}
@@ -114,7 +115,15 @@ def test_desktop_admin_blocks_public_proxy(tmp_path):
     )
     token = hub.gateway_token
     with TestClient(app, base_url=origin, client=("127.0.0.1", 50000)) as client:
-        assert client.get("/health", headers=headers).status_code == 200
+        health_res = client.get("/health", headers=headers)
+        assert health_res.status_code == 200
+        assert token not in health_res.text
+        assert health_res.json()["desktop_nodes"] == [{
+            "node_id": "offline-node", "name": "My Mac", "os": "macos",
+            "online": False, "is_default": False,
+            "screen": {"width": 1470, "height": 956},
+            "connected_at": None, "last_seen_at": None,
+        }]
         for method, path, body in routes:
             response = client.request(method, path, headers=headers, json=body)
             assert response.status_code == 403, (method, path)
