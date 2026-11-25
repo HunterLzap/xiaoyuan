@@ -202,6 +202,7 @@ class ChatService:
                         tool_calls=summaries,
                         pending_approval=pending_approval,
                         elapsed_ms=elapsed_ms,
+                        first_response_ms=first_audio_ms,
                         audio_status=resolved_audio,
                     ))
                 session.updated_at = datetime.now(timezone.utc)
@@ -584,6 +585,7 @@ class ChatService:
             if using_shared_provider:
                 self.provider_users[id(provider)] = self.provider_users.get(id(provider), 0) + 1
             started = perf_counter()
+            first_response_ms: int | None = None
             success = False
             error_code = "interrupted"
             answer_added = False
@@ -646,6 +648,8 @@ class ChatService:
                         await self._persist_async(session_id)
                     elif kind == "warning":
                         answer.audio_status = "failed"
+                    if first_response_ms is None and ((kind == "text" and payload.get("full")) or kind == "audio"):
+                        first_response_ms = int((perf_counter() - started) * 1000)
                     yield kind, payload
                 success = True
                 error_code = None
@@ -688,6 +692,7 @@ class ChatService:
                 answer.pending_approval = tool_context.pending_approval
                 elapsed_ms = int((perf_counter() - started) * 1000)
                 answer.elapsed_ms = elapsed_ms
+                answer.first_response_ms = first_response_ms
                 self._sync_approval_statuses(session)
                 self.rebuild_context(session, self.settings.history_turns)
                 session.updated_at = datetime.now(timezone.utc)
@@ -746,6 +751,7 @@ class ChatService:
                 session_usage=session.usage.model_copy(), history_persisted=session.history_persisted,
                 knowledge=knowledge, sources=answer.sources, tool_calls=answer.tool_calls,
                 pending_approval=answer.pending_approval, elapsed_ms=elapsed_ms,
+                first_response_ms=first_response_ms,
             ).model_dump(mode="json")
             yield "done", {**response, "turn_id": str(identity),
                            "ms": int((perf_counter() - started) * 1000),

@@ -238,6 +238,7 @@ class ChatResponse(BaseModel):
     tool_calls: list[dict] = Field(default_factory=list)
     pending_approval: dict | None = None
     elapsed_ms: int | None = None
+    first_response_ms: int | None = None
 
 
 class TranscriptMessage(BaseModel):
@@ -255,6 +256,7 @@ class TranscriptMessage(BaseModel):
     tool_calls: list[dict] = Field(default_factory=list)
     pending_approval: dict | None = None
     elapsed_ms: int | None = None
+    first_response_ms: int | None = None
     source: Literal["text", "web_voice", "device_voice"] = "text"
     turn_id: UUID | None = None
     status: Literal["complete", "generating", "interrupted", "failed"] = "complete"

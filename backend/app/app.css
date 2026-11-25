@@ -1024,8 +1024,10 @@ body.voice-mode { overflow:hidden; }
 .desktop-model-stack {display:flex;flex-direction:column;gap:8px;min-width:0;width:100%}
 .desktop-planner-row select {flex:1;min-width:0}
 #desktop-model-test-result {margin:0}
-#desktop-model-test-result[data-kind="error"] {color:var(--error)}
-#desktop-model-test-result[data-kind="success"] {color:var(--success)}
+#desktop-model-test-result[data-kind="error"], .search-test-result[data-kind="error"] {color:var(--error)}
+#desktop-model-test-result[data-kind="success"], .search-test-result[data-kind="success"] {color:var(--success)}
+.search-test-bar {display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:4px}
+.search-test-result {margin:0}
 
 
 

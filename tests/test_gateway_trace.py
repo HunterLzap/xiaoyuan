@@ -253,9 +253,10 @@ def test_unified_traces_and_sqlite_business_state(tmp_path, monkeypatch):
         assert ok_call.json() == {"ok": True, "echo": "1"}
         assert not env_path.exists()
 
-        # 3. Text chat -> creates turn_traces entry.
+        # 3. Text chat -> creates turn_traces entry and reports first_response_ms.
         chat_res = client.post("/chat", json={"message": "你好，做个测试"})
         assert chat_res.status_code == 200
+        assert isinstance(chat_res.json()["first_response_ms"], int)
         session_id = chat_res.json()["session_id"]
 
         # 4. Browser voice ASR + pipeline voice turn -> creates web_voice pipeline turn_traces entry.
@@ -301,6 +302,8 @@ def test_unified_traces_and_sqlite_business_state(tmp_path, monkeypatch):
         rt_row = next(item for item in items if item["trace_id"] == str(rt_turn_id))
         assert rt_row["first_audio_ms"] == 85
         assert rt_row["total_tokens"] == 40
+        sess_msgs = client.get(f"/sessions/{session_id}").json()["messages"]
+        assert sess_msgs[-1]["first_response_ms"] == 85
 
         detail_res = client.get(f"/api/insights/traces/{rt_turn_id}")
         assert detail_res.status_code == 200

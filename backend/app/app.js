@@ -502,7 +502,8 @@ function renderMessageReferences(article,message) {
   };
   const sourceName = SOURCE_LABELS[message.source] || "文字";
   addMeta("模型与来源", [sourceName, message.provider, message.model].filter(Boolean).join(" · ") || "未记录");
-  addMeta("总耗时", message.elapsed_ms != null ? (message.elapsed_ms >= 1000 ? `${(message.elapsed_ms / 1000).toFixed(2)} s` : `${message.elapsed_ms} ms`) : "未记录");
+  const waitMs = message.first_response_ms;
+  addMeta("等待耗时", waitMs != null ? (waitMs >= 1000 ? `${(waitMs / 1000).toFixed(2)} s` : `${waitMs} ms`) : "未记录");
   const u = message.usage;
   const tokText = u && (u.total_tokens != null || u.prompt_tokens != null || u.completion_tokens != null)
     ? `输入 ${u.prompt_tokens ?? "-"} / 输出 ${u.completion_tokens ?? "-"} / 合计 ${u.total_tokens ?? "-"}`
@@ -586,7 +587,7 @@ function tokenUsageDetails(usage) {
     const entry = node("li", "", `第 ${index + 1} 次模型响应：输入 ${count(response.prompt_tokens)} / 输出 ${count(response.completion_tokens)} / 合计 ${count(response.total_tokens)}`);
     list.append(entry);
   }
-  details.append(list, node("p", "", "输入包含指令、工具定义、有效历史和当前消息，语音还可能含音频。供应商未逐项报告系统指令/工具/历史各占多少；这里不估造。缓存是输入的一部分，不重复相加。一次回答可能经过多次模型响应，各次输入会分别计量；Token 数不等于费用。缺项表示未报告，旧历史无法补算。"));
+  details.append(list);
   if (usage?.response_count > usage?.reported_response_count) {
     details.append(node("p", "", "本轮部分响应未报告用量，合计不完整；明细只在所有响应均报告同一项时累计。"));
   }
@@ -626,6 +627,7 @@ window.atoms3rVoiceMessages = {
       content:data.reply, model:data.model, provider:data.provider, usage:data.usage,
       estimated_cost:data.estimated_cost, currency:data.currency, finish_reason:data.finish_reason,
       elapsed_ms:data.elapsed_ms ?? data.ms ?? latest.elapsed_ms ?? null,
+      first_response_ms:data.first_response_ms ?? data.first_ms ?? latest.first_response_ms ?? null,
       status:"complete", audio_status:data.audio_status,
       sources:data.sources ?? latest.sources, tool_calls:data.tool_calls ?? latest.tool_calls,
       pending_approval:data.pending_approval ?? latest.pending_approval,
@@ -845,7 +847,7 @@ async function sendMessage(value, useKnowledge = state.useKnowledge) {
     state.active = data.session_id; remember("atoms3r.active", data.session_id);
     if (!state.detail) state.detail = {session_id:data.session_id, title:message.slice(0,40), messages:[]};
     const now = new Date().toISOString();
-    state.detail.messages.push({role:"user",content:message,created_at:now}, {role:"assistant",content:data.reply,created_at:now,model:data.model,provider:data.provider,usage:data.usage,estimated_cost:data.estimated_cost,currency:data.currency,finish_reason:data.finish_reason,elapsed_ms:data.elapsed_ms ?? data.ms ?? null,knowledge:data.knowledge,sources:data.sources,tool_calls:data.tool_calls,pending_approval:data.pending_approval || null});
+    state.detail.messages.push({role:"user",content:message,created_at:now}, {role:"assistant",content:data.reply,created_at:now,model:data.model,provider:data.provider,usage:data.usage,estimated_cost:data.estimated_cost,currency:data.currency,finish_reason:data.finish_reason,elapsed_ms:data.elapsed_ms ?? data.ms ?? null,first_response_ms:data.first_response_ms ?? null,knowledge:data.knowledge,sources:data.sources,tool_calls:data.tool_calls,pending_approval:data.pending_approval || null});
     state.pending = null; state.pendingSteps = []; state.pendingText = ""; state.failure = null; renderMessages();
     if (state.view === "chat") { el("view-title").textContent = state.detail.title; document.title = `${state.detail.title} · 小圆`; }
     if (data.history_persisted === false) notice("已收到回答，但历史记录未能写入本机；当前对话仅保留在内存。", "error");
@@ -2174,7 +2176,7 @@ async function runQuickWebSearchTest(query, resultEl, triggerBtn) {
     const summary = snippet
       ? `搜索正常（${ms}ms）：${snippet}`
       : `接口连通（${ms}ms），但本次未返回结果。`;
-    if (resultEl) resultEl.textContent = summary;
+    if (resultEl) { resultEl.textContent = summary; resultEl.dataset.kind = "success"; }
     return {ok: true, summary};
   } catch (error) {
     const msg = error.code === "tool_not_found" ? "联网搜索尚未开启，请先到「技能」开启「联网搜索」。" : error.message;
@@ -2228,12 +2230,10 @@ el("conn-web-search-test")?.addEventListener("click", async () => {
 });
 function webSearchToolCard(tool) {
   const active = isSkillActive(tool);
-  const rtModel = (savedConfig?.rt_model || el("rt_model")?.value || "").trim().toLowerCase();
-  const nativeRealtimeSearch = (savedConfig?.rt_provider || el("rt_provider")?.value) === "bailian" && rtModel.startsWith("qwen-audio-");
   const card = node("div", "capability-item");
   const header = node("div", "capability-item-header");
   const title = node("div", "capability-item-title");
-  title.append(node("h3", "", "联网搜索"), node("p", "small-note", nativeRealtimeSearch ? "已由实时模型原生支持（含天气、金价、新闻等，开启即生效）" : "百炼自带搜索 / DeepSeek（选填）"));
+  title.append(node("h3", "", "联网搜索"));
   header.append(title);
 
   const { label: toggleLabel } = makeSkillSwitch(active, (toggle, previous) => {
@@ -2245,87 +2245,20 @@ function webSearchToolCard(tool) {
   });
   header.append(toggleLabel);
 
-  const keySection = node("div", "search-key-config");
-  const keyHead = node("div", "search-key-head");
-  const label = node("label", "", "DeepSeek API Key（可选）");
-  label.htmlFor = "web_search_api_key";
-  const status = node("p", "small-note", webSearchKeyStateText(savedConfig));
-  status.id = "web-search-key-status";
-  keyHead.append(label, status);
-
-  const keyRow = node("div", "search-key-row");
-  const field = node("input");
-  field.id = "web_search_api_key"; field.type = "password"; field.autocomplete = "off"; field.spellcheck = false;
-  field.placeholder = "留空默认复用百炼自带联网搜索；如需改用 DeepSeek 可填 Key";
-  field.setAttribute("aria-describedby", status.id);
-  const separate = Boolean(savedConfig?.web_search_separate_key_configured);
-
-  const saveKey = clear => capabilityAction(async () => {
-    const value = clear ? "" : field.value.trim();
-    if (!clear && !value) {
-      capabilityNotice("请输入 DeepSeek API Key。", true);
-      return;
-    }
-    field.value = "";
-    const {text} = await request("/api/settings/connections", "PUT", {web_search_api_key:value});
-    if (savedConfig) {
-      savedConfig.web_search_provider = text.web_search_provider;
-      savedConfig.web_search_configured = text.web_search_configured;
-      savedConfig.web_search_separate_key_configured = text.web_search_separate_key_configured;
-    }
-    renderWebSearchConnectionState();
-    renderCapabilityTools();
-    capabilityNotice(clear ? "独立密钥已清除。" : "密钥已保存。");
+  const testBar = node("div", "search-test-bar");
+  const testBtn = node("button", "secondary-button", "测试");
+  testBtn.type = "button";
+  testBtn.disabled = !tool.enabled;
+  testBtn.dataset.requiresEnabled = String(tool.enabled);
+  const testResult = node("p", "small-note search-test-result");
+  testResult.hidden = true;
+  testBtn.addEventListener("click", () => {
+    runQuickWebSearchTest("今日新闻", testResult, testBtn).then(res => {
+      capabilityNotice(res.ok ? res.summary : res.message, !res.ok);
+    });
   });
-  const saveBtn = node("button", "secondary-button", "保存密钥");
-  saveBtn.type = "button"; saveBtn.addEventListener("click", () => saveKey(false));
-  keyRow.append(field, saveBtn);
-  if (separate) {
-    const clearBtn = node("button", "text-button", "清除");
-    clearBtn.type = "button"; clearBtn.addEventListener("click", () => saveKey(true));
-    keyRow.append(clearBtn);
-  }
-  field.addEventListener("keydown", event => {
-    if (event.key === "Enter" && !event.isComposing) {
-      event.preventDefault();
-      saveKey(false);
-    }
-  });
-  keySection.append(keyHead, keyRow);
-
-  const quickTest = node("div", "search-quick-test");
-  const testRow = node("div", "search-quick-test-row");
-  const testInput = node("input");
-  testInput.type = "text"; testInput.maxLength = 128; testInput.value = "今日新闻";
-  testInput.placeholder = "输入测试关键词，例如：今天金价";
-  testInput.setAttribute("aria-label", "测试搜索关键词");
-  const quickBtn = node("button", "secondary-button", "测试搜索");
-  quickBtn.type = "button";
-  quickBtn.disabled = !tool.enabled; quickBtn.dataset.requiresEnabled = String(tool.enabled);
-  const debugBtn = capabilityButton("JSON 调试", () => openToolCall(tool));
-  debugBtn.disabled = !tool.enabled; debugBtn.dataset.requiresEnabled = String(tool.enabled);
-  const quickResult = node("p", "small-note");
-  quickResult.hidden = true;
-  const runQuick = () => runQuickWebSearchTest(testInput.value, quickResult, quickBtn).then(res => {
-    capabilityNotice(res.ok ? res.summary : res.message, !res.ok);
-  });
-  quickBtn.addEventListener("click", runQuick);
-  testInput.addEventListener("keydown", event => {
-    if (event.key === "Enter" && !event.isComposing) {
-      event.preventDefault();
-      if (!quickBtn.disabled) runQuick();
-    }
-  });
-  testRow.append(testInput, quickBtn, debugBtn);
-  quickTest.append(node("label", "", "快速提问测试"), testRow, quickResult);
-
-  if (nativeRealtimeSearch) {
-    const fallback = node("details", "weather-city-config");
-    fallback.append(node("summary", "", "备用独立搜索配置（仅 DeepSeek / 手动测试时需要）"), keySection, quickTest);
-    card.append(header, fallback);
-  } else {
-    card.append(header, keySection, quickTest);
-  }
+  testBar.append(testBtn, testResult);
+  card.append(header, testBar);
   return card;
 }
 function toolDetailCard(tool) {
