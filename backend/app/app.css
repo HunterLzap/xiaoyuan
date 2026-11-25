@@ -1047,4 +1047,6 @@ body.voice-mode { overflow:hidden; }
 .search-quick-test-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .search-quick-test-row input { flex:1; min-width:160px; padding:8px 10px; border:1px solid var(--input-border); border-radius:9px; background:var(--surface-subtle); font:inherit; font-size:13px; }
 .desktop-readonly-card { grid-column:1 / -1; }
+.desktop-guide-steps { display:grid; gap:6px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border); }
+.desktop-guide-steps .desktop-cmd-block { margin:0; }
 @media (max-width:700px) { .search-conn-actions { padding-left:0; } }
