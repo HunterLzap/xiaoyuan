@@ -724,3 +724,40 @@ def test_text_tool_selection_excludes_native_web_search_and_prompt_keeps_concise
     assert loader is not None and "web_search" not in loader.spec.description
     prompt = build_system_prompt(settings, "text", ["get_weather"])
     assert "简洁自然的口语" in prompt and "不要长篇大论" in prompt
+
+
+def test_insights_kb_only_filters_out_non_rag_records(tmp_path):
+    cfg = Settings(
+        _env_file=None,
+        api_key="test-key",
+        model="test-chat-model",
+        history_db_path=tmp_path / "conversations.sqlite3",
+        personal_kb_db_path=tmp_path / "personal_kb.sqlite3",
+        assistant_db_path=tmp_path / "assistant_state.sqlite3",
+        usage_log_path=None,
+    )
+    app = create_app(cfg, settings_store=SettingsStore(tmp_path / ".env"))
+    with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 50000)) as client:
+        audit: AuditStore = client.app.state.audit
+        assert audit is not None
+        audit.record(
+            "kb_search",
+            query_summary="今日金价",
+            question="今日金价",
+            answer="模型回答",
+            answer_type="model_answer",
+        )
+        audit.record(
+            "kb_search",
+            query_summary="设备引脚",
+            question="AtomS3R 引脚怎么接",
+            answer="参考手册第 3 页",
+            answer_type="rag",
+            hit=True,
+            snapshots=[{"document_id": 1, "chunk_id": 1, "excerpt": "GPIO38"}],
+        )
+        all_kb = client.get("/api/insights/kb").json()
+        filtered_kb = client.get("/api/insights/kb?kb_only=true").json()
+        assert all_kb["total"] == 2
+        assert filtered_kb["total"] == 1
+        assert filtered_kb["items"][0]["question"] == "AtomS3R 引脚怎么接"

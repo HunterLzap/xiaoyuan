@@ -1356,11 +1356,12 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
                           status: str | None = Query(default=None, max_length=40),
                           tool_name: str | None = Query(default=None, max_length=80),
                           since: str | None = Query(default=None, max_length=40),
-                          until: str | None = Query(default=None, max_length=40)):
+                          until: str | None = Query(default=None, max_length=40),
+                          kb_only: bool = Query(default=False)):
         if app.state.audit is None:
             return {"items": [], "total": 0}
         return await asyncio.to_thread(app.state.audit.list_kb, limit, offset, q=q,
-            answer_type=answer_type, status=status, tool_name=tool_name, since=since, until=until)
+            answer_type=answer_type, status=status, tool_name=tool_name, since=since, until=until, kb_only=kb_only)
 
     @app.get("/api/insights/tools")
     async def insights_tools(limit: int = Query(default=50, ge=1, le=200),
@@ -1482,7 +1483,8 @@ def create_app(settings: Settings | None = None, provider: ChatProvider | None =
         try:
             deleted = await asyncio.to_thread(app.state.audit.delete_filtered, surfaces,
                 expected_total=body.expected_total, q=body.q, answer_type=body.answer_type,
-                status=body.status, tool_name=body.tool_name, since=body.since, until=body.until)
+                status=body.status, tool_name=body.tool_name, since=body.since, until=body.until,
+                kb_only=body.kb_only)
         except FilterRequired:
             raise ProviderError(422, "filter_required", "清空必须带筛选条件，不能删除全部记录。") from None
         except CountMismatch as error:

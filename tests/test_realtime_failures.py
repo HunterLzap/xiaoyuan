@@ -712,6 +712,69 @@ class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requests[1]["input"]["action"], "list_voice")
         self.assertEqual(requests[2]["input"], {"action": "delete_voice", "voice_id": "qwen-audio-3.1-realtime-flash-v1234-taffy"})
 
+    async def test_realtime_text_skips_loader_under_six_tools_uses_output_text_and_reports_error(self):
+        from backend.app.realtime_text import RealtimeTextProvider
+
+        cfg = Settings(
+            _env_file=None,
+            rt_provider="bailian",
+            rt_model="qwen-audio-3.1-realtime-flash",
+            rt_api_key="fixture-secret-key",
+        )
+        registry = ToolRegistry([
+            SimpleNamespace(spec=ToolSpec("get_weather", "weather", {"type": "object", "properties": {}})),
+            SimpleNamespace(spec=ToolSpec("web_search", "search", {"type": "object", "properties": {}})),
+        ])
+        ctx = SimpleNamespace(
+            session_id="s1", turn_id="t1", question="今日金价", history=(),
+            registry=registry, current_registry=lambda: registry, tool_gateway=None,
+            allowed={"get_weather", "web_search"}, outputs=[], secrets=["fixture-secret-key"],
+            order_state_text=lambda: "", mark_sent=lambda *_: None,
+            definitions=lambda **kw: registry.definitions(nested=kw.get("nested", False)),
+        )
+        socket = _RealtimeSocket()
+        socket.feed("response.output_text.delta", delta="今天黄金大约760元一克喵。")
+        socket.feed("response.done", response={"status": "completed", "usage": {"input_tokens": 10, "output_tokens": 5}})
+
+        @asynccontextmanager
+        async def connect(*args, **kwargs):
+            yield socket
+
+        provider = RealtimeTextProvider(cfg)
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "今天北京天气"},
+            {"role": "assistant", "content": "今天北京晴喵。"},
+            {"role": "user", "content": "今日金价"},
+        ]
+        chunks = []
+        with patch("backend.app.realtime_text.DirectConnect", connect):
+            async for item in provider.complete_stream(messages, tool_context=ctx):
+                chunks.append(item)
+
+        self.assertEqual(chunks[0], "今天黄金大约760元一克喵。")
+        session_cfg = socket.sent[0]["session"]
+        tool_names = [t["function"]["name"] for t in session_cfg["tools"]]
+        self.assertEqual(tool_names, ["get_weather"])
+        self.assertNotIn("_load_task_tools", tool_names)
+        created_items = [x["item"] for x in socket.sent if x["type"] == "conversation.item.create"]
+        self.assertEqual(created_items[1]["role"], "assistant")
+        self.assertEqual(created_items[1]["content"][0]["type"], "output_text")
+
+        err_socket = _RealtimeSocket()
+        err_socket.feed("error", error={"code": "InvalidParameter", "message": "bad item with fixture-secret-key"})
+
+        @asynccontextmanager
+        async def connect_err(*args, **kwargs):
+            yield err_socket
+
+        with patch("backend.app.realtime_text.DirectConnect", connect_err), self.assertRaises(ProviderError) as err:
+            async for _ in provider.complete_stream(messages, tool_context=ctx):
+                pass
+        self.assertIn("InvalidParameter", err.exception.message)
+        self.assertNotIn("fixture-secret-key", err.exception.message)
+        self.assertIn("[已隐藏]", err.exception.message)
+
 
 if __name__ == "__main__":
     unittest.main()

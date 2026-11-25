@@ -508,7 +508,6 @@ function renderMessageReferences(article,message) {
     ? `输入 ${u.prompt_tokens ?? "-"} / 输出 ${u.completion_tokens ?? "-"} / 合计 ${u.total_tokens ?? "-"}`
     : "未报告";
   addMeta("Token 用量", tokText);
-  addMeta("估算费用", message.estimated_cost != null ? `${message.estimated_cost} ${message.currency || "CNY"}` : "按平台账单");
   detailPanel.append(metaGrid);
   const usageDetails = tokenUsageDetails(message.usage);
   detailPanel.append(usageDetails);
@@ -3269,6 +3268,7 @@ function insightEllipsisCell(text) {
 }
 function insightTableNode(value) {const td = node("td"); td.append(value); return td;}
 function insightTableTag(text,variant) {const td = node("td"), tag = node("span","insight-tag",text); tag.dataset.variant = variant; td.append(tag); return td;}
+const INSIGHT_STATUS_LABELS = {complete:"成功",ok:"成功",empty:"未命中",error:"失败",unavailable:"不可用",not_requested:"未调用",cancelled:"已取消",failed:"执行失败",interrupted:"已打断"};
 function renderInsightRecords(kind, data) {
   const area = el(`insights-${kind}`), panel = insightState[kind]; area.replaceChildren();
   el(`insights-${kind}-meta`).textContent = `共 ${data.total} 条`;
@@ -3278,7 +3278,6 @@ function renderInsightRecords(kind, data) {
     if (labelEl) labelEl.textContent = data.total > 0 ? `异常 (${data.total})` : "异常";
   }
   if (!data.items.length) {area.append(node("p","insight-empty",panel.offset ? "本页已无记录，请返回上一页或刷新。" : insightFiltersActive(kind) ? "没有匹配的记录，试试调整搜索或筛选条件。" : kind === "errors" ? "暂无异常报错记录。" : "尚无记录。实际问答或调用后可在这里查看。")); return;}
-  const statusLabels = {complete:"成功",ok:"成功",empty:"未命中",error:"失败",unavailable:"不可用",not_requested:"未调用",cancelled:"已取消",failed:"执行失败",interrupted:"已打断"};
   const sourceLabels = {text:"文字",voice:"网页语音",device:"硬件设备"};
   const errSourceLabels = {device:"语音硬件",desktop:"桌面节点",model:"模型与语音",tool:"工具调用",system:"服务端"};
   const table = node("table","insight-table"), head = node("thead"), hr = node("tr"), body = node("tbody");
@@ -3309,16 +3308,16 @@ function renderInsightRecords(kind, data) {
     const itemId = kind === "traces" ? item.trace_id : item.id;
     const view = capabilityButton("详情",() => openInsightDetail(kind, itemId));
     const remove = node("button","icon-button insight-remove"); remove.type = "button"; remove.append(icon("trash"));
-    remove.setAttribute("aria-label",`删除${kind === "kb" ? "知识库" : kind === "tools" ? "API" : "追踪"}记录 ${itemId}`); remove.title = "删除记录";
+    remove.setAttribute("aria-label",`删除${kind === "kb" ? "知识库" : kind === "tools" ? "工具调用" : "对话历史"}记录 ${itemId}`); remove.title = "删除记录";
     const delTarget = kind === "traces" ? {...item, id: item.trace_id, question: item.user_text || item.trace_id} : item;
     remove.addEventListener("click",() => openInsightDelete(kind, delTarget)); detail.append(view,remove);
     if (kind === "kb") {
       tr.append(insightEllipsisCell(item.question ?? item.query_summary ?? "未记录"),insightTableTag(insightAnswerType(item.answer_type),"type"),insightEllipsisCell(item.answer || "暂无生成回答"),insightTableNode(time),insightTableNode(detail));
     } else if (kind === "tools") {
-      const status = node("span","insight-status",statusLabels[item.status] || item.status || "未提供"); status.dataset.state = item.status || "unknown";
+      const status = node("span","insight-status",INSIGHT_STATUS_LABELS[item.status] || item.status || "未提供"); status.dataset.state = item.status || "unknown";
       tr.append(insightEllipsisCell(item.tool_name || "未提供"),insightTableNode(status),insightEllipsisCell(item.query_summary || "未提供"),insightTableCell(insightNumber(item.elapsed_ms," ms")),insightTableNode(time),insightTableNode(detail));
     } else {
-      const status = node("span","insight-status",statusLabels[item.status] || item.status || "未提供"); status.dataset.state = item.status || "unknown";
+      const status = node("span","insight-status",INSIGHT_STATUS_LABELS[item.status] || item.status || "未提供"); status.dataset.state = item.status || "unknown";
       const channel = `${sourceLabels[item.source] || item.source || "未记录"} · ${item.voice_mode || "pipeline"}`;
       const stack = [item.model || null, item.asr_provider ? `ASR:${item.asr_provider}` : null, item.tts_provider ? `TTS:${item.tts_provider}` : null].filter(Boolean).join(" · ") || "未提供";
       const latency = item.first_audio_ms != null ? `${item.first_audio_ms} / ${insightNumber(item.elapsed_ms," ms")}` : insightNumber(item.elapsed_ms," ms");
@@ -3361,10 +3360,14 @@ function renderTraceDetail(item) {
   const area = el("insights-detail"); area.replaceChildren();
   el("insights-detail-meta").textContent = `${insightTime(item.ts)} · Turn ${item.trace_id}`;
   const head = node("div","insight-detail-head");
-  head.append(node("h2","",item.user_text || "（无用户输入文本）"));
+  const sourceLabels = {text:"网页文字",voice:"网页语音",device:"硬件设备"};
+  const channelLabel = `${sourceLabels[item.source] || item.source || "文字"} · ${item.voice_mode || "realtime"}`;
+  head.append(node("h2","",item.user_text || "对话详情"));
   const meta = node("div","insight-detail-tags");
-  meta.append(node("span","insight-tag",`${item.source || "text"} · ${item.voice_mode || "pipeline"}`));
-  meta.append(node("span","insight-tag",item.status || "未记录"));
+  meta.append(node("span","insight-tag",channelLabel));
+  const statusText = INSIGHT_STATUS_LABELS[item.status] || item.status || "未记录";
+  const statusTag = node("span","insight-status",statusText); statusTag.dataset.state = item.status || "unknown";
+  meta.append(statusTag);
   if (item.model) meta.append(node("span","insight-tag",`${item.provider || ""} ${item.model}`.trim()));
   if (item.asr_provider) meta.append(node("span","insight-tag",`ASR: ${item.asr_provider}`));
   if (item.tts_provider) meta.append(node("span","insight-tag",`TTS: ${item.tts_provider}`));
@@ -3373,34 +3376,46 @@ function renderTraceDetail(item) {
   if (item.total_tokens != null) meta.append(node("span","small-note",`Tokens ${item.total_tokens}`));
   if (item.error_code) meta.append(node("span","insight-tag",`错误 ${item.error_code}`));
   head.append(meta); area.append(head);
+  const userCard = node("div","insight-answer-card");
+  userCard.append(node("h3","","用户提问"),node("p","insight-answer-text",item.user_text || "（无用户输入文本）"));
+  area.append(userCard);
   const summaryCard = node("div","insight-answer-card");
-  summaryCard.append(node("h3","","助手回复"),node("p","insight-answer-text",item.reply_text || "暂无回复正文。"));
+  summaryCard.append(node("h3","","小圆 助理"),node("p","insight-answer-text",item.reply_text || "暂无回复正文。"));
   area.append(summaryCard);
   const tools = item.tool_calls || [];
-  const toolBox = node("div","insight-answer-card");
-  toolBox.append(node("h3","",`工具调用摘要（${tools.length}）`));
-  if (!tools.length) toolBox.append(node("p","small-note","本轮未调用工具。"));
-  else toolBox.append(node("pre","insight-json",insightJson(tools)));
-  area.append(toolBox);
-  const audits = item.audits || [];
-  const auditBox = node("div","insight-answer-card");
-  auditBox.append(node("h3","",`关联知识库与工具审计（${audits.length}）`));
-  if (!audits.length) auditBox.append(node("p","small-note","本轮无关联 KB / API 审计细节。"));
-  for (const audit of audits) {
-    const det = node("details");
-    det.append(node("summary","",`${audit.surface} · ${audit.tool_name || "-"} · ${audit.status || "-"} (${insightNumber(audit.elapsed_ms," ms")})`),node("pre","insight-json",insightJson(audit)));
-    auditBox.append(det);
+  if (tools.length) {
+    const toolBox = node("div","insight-answer-card");
+    toolBox.append(node("h3","",`工具调用（${tools.length}）`));
+    for (const call of tools) {
+      const det = node("details");
+      const name = `${toolDisplayName(call.tool_name || call.name)} (${call.tool_name || call.name || "tool"})`;
+      const callStatus = INSIGHT_STATUS_LABELS[call.status] || call.status || "-";
+      det.append(node("summary","",`${name} · ${callStatus} · ${insightNumber(call.elapsed_ms," ms")}${call.error_code ? ` · ${call.error_code}` : ""}`),node("pre","insight-json",insightJson(call)));
+      toolBox.append(det);
+    }
+    area.append(toolBox);
   }
-  area.append(auditBox);
+  const audits = item.audits || [];
+  if (audits.length) {
+    const auditBox = node("div","insight-answer-card");
+    auditBox.append(node("h3","",`关联检索与工具明细（${audits.length}）`));
+    for (const audit of audits) {
+      const det = node("details");
+      const auditStatus = INSIGHT_STATUS_LABELS[audit.status] || audit.status || "-";
+      det.append(node("summary","",`${audit.surface} · ${audit.tool_name || "-"} · ${auditStatus} (${insightNumber(audit.elapsed_ms," ms")})`),node("pre","insight-json",insightJson(audit)));
+      auditBox.append(det);
+    }
+    area.append(auditBox);
+  }
 }
 function renderInsightDetail(item) {
   const area = el("insights-detail"), kind = insightDetailState.kind; area.replaceChildren();
   el("insights-detail-meta").textContent = insightTime(item.ts);
   if (kind === "tools") {
     const head = node("div","insight-detail-head");
-    head.append(node("h2","",`${item.tool_name || "API 工具"} · ${item.query_summary || "请求记录"}`));
+    head.append(node("h2","",`${item.tool_name || "工具调用"} · ${item.query_summary || "请求记录"}`));
     const meta = node("div","insight-detail-tags");
-    const statusText = statusLabels[item.status] || item.status || "未记录";
+    const statusText = INSIGHT_STATUS_LABELS[item.status] || item.status || "未记录";
     const statusTag = node("span","insight-status",statusText); statusTag.dataset.state = item.status || "unknown";
     meta.append(statusTag);
     if (item.http_status != null) meta.append(node("span","insight-tag",`HTTP ${item.http_status}`));
@@ -3410,7 +3425,7 @@ function renderInsightDetail(item) {
     const calls = Array.isArray(item.calls) && item.calls.length ? item.calls : [item];
     for (const call of calls) {
       const card = node("article","insight-call"), header = node("div","insight-record-header");
-      header.append(node("h3","",call.tool_name || item.tool_name || "API 调用"),node("span","insight-status",statusLabels[call.status] || call.status || statusText)); card.append(header);
+      header.append(node("h3","",call.tool_name || item.tool_name || "工具调用"),node("span","insight-status",INSIGHT_STATUS_LABELS[call.status] || call.status || statusText)); card.append(header);
       card.append(node("p","small-note",`HTTP ${call.http_status ?? "未提供"} · ${insightNumber(call.elapsed_ms," ms")}${call.error_code ? ` · 错误码 ${call.error_code}` : ""}${call.trigger_question ? ` · 触发问题：${call.trigger_question}` : ""}`));
       const request = node("details"); request.open = true; request.append(node("summary","","请求（脱敏）"),node("pre","insight-json",insightJson(call.request))); card.append(request);
       const response = node("details"); response.open = true; response.append(node("summary","","响应（脱敏）"),node("pre","insight-json",insightJson(call.response))); card.append(response);
@@ -3434,7 +3449,7 @@ function renderInsightDetail(item) {
     if ((item.calls||[]).length) {
       for (const call of item.calls) {
         const card = node("article","insight-call"), header = node("div","insight-record-header");
-        header.append(node("h3","",call.tool_name || "工具调用"),node("span","insight-status",statusLabels[call.status] || call.status || "未提供")); card.append(header);
+        header.append(node("h3","",call.tool_name || "工具调用"),node("span","insight-status",INSIGHT_STATUS_LABELS[call.status] || call.status || "未提供")); card.append(header);
         card.append(node("p","small-note",`HTTP ${call.http_status ?? "未提供"} · ${insightNumber(call.elapsed_ms," ms")}${call.error_code ? ` · 错误码 ${call.error_code}` : ""}`));
         const request = node("details"); request.append(node("summary","","请求（脱敏）"),node("pre","insight-json",insightJson(call.request))); card.append(request);
         const response = node("details"); response.append(node("summary","","响应（脱敏）"),node("pre","insight-json",insightJson(call.response))); card.append(response);
@@ -3518,6 +3533,7 @@ async function loadInsightRecords(kind, offset = 0) {
   try {
     const filters = insightFilterValues(kind);
     const params = new URLSearchParams({limit:String(INSIGHT_PAGE), offset:String(offset), ...filters});
+    if (kind === "kb") params.set("kb_only", "true");
     const data = await request(`/api/insights/${kind}?${params.toString()}`,"GET",undefined,controller.signal);
     if (id !== panel.requestId) return;
     if (!Array.isArray(data.items) || !Number.isInteger(data.total) || data.total < 0) throw new Error("审计记录格式无法读取，请更新服务后重试。");
@@ -3537,10 +3553,10 @@ for (const kind of ["kb","tools","traces","errors"]) {
   el(`insights-${kind}-next`).addEventListener("click",() => loadInsightRecords(kind,insightState[kind].offset + INSIGHT_PAGE));
 }
 el("insights-refresh").addEventListener("click",loadInsights);
-let insightActiveTab = "kb", insightTipTimer = null;
+let insightActiveTab = "traces", insightTipTimer = null;
 function showInsightTab(tab) {
-  insightActiveTab = ["kb","tools","traces","errors"].includes(tab) ? tab : "kb";
-  for (const key of ["kb","tools","traces","errors"]) {
+  insightActiveTab = ["traces","kb","tools","errors"].includes(tab) ? tab : "traces";
+  for (const key of ["traces","kb","tools","errors"]) {
     const active = insightActiveTab === key;
     el(`insights-panel-${key}`).hidden = !active;
     el(`insights-tab-${key}`).setAttribute("aria-selected",String(active));
@@ -3582,9 +3598,9 @@ el("insights-view").addEventListener("keydown",event => {
   if (!event.target.classList || !event.target.classList.contains("insight-tab")) return;
   if (!["ArrowLeft","ArrowRight","Home","End"].includes(event.key)) return;
   event.preventDefault();
-  const order = ["kb","tools","traces","errors"];
+  const order = ["traces","kb","tools","errors"];
   const idx = order.indexOf(insightActiveTab);
-  const next = event.key === "Home" ? "kb" : event.key === "End" ? "errors"
+  const next = event.key === "Home" ? "traces" : event.key === "End" ? "errors"
     : order[(idx + (event.key === "ArrowLeft" ? order.length - 1 : 1)) % order.length];
   showInsightTab(next); el(`insights-tab-${next}`).focus();
 });
@@ -3596,7 +3612,7 @@ el("insights-view").addEventListener("scroll",hideInsightTooltip,true);
 window.addEventListener("resize",hideInsightTooltip);
 document.addEventListener("scroll",event => {const tip = document.getElementById("insight-tooltip"); if (!tip?.contains(event.target)) hideInsightTooltip();},true);
 document.addEventListener("keydown",event => {const tip = document.getElementById("insight-tooltip"); if (event.key === "Escape" && tip && !tip.hidden) {hideInsightTooltip(); event.preventDefault(); event.stopPropagation();}},true);
-showInsightTab("kb");
+showInsightTab("traces");
 for (const kind of ["kb","tools","traces","errors"]) {
   const panel = insightState[kind], search = el(`insights-${kind}-q`);
   const schedule = event => {if (event.isComposing) return; clearTimeout(panel.searchTimer); panel.searchTimer = setTimeout(() => loadInsightRecords(kind,0),300); insightControls(kind);};
@@ -3630,7 +3646,7 @@ async function openInsightDelete(kind, item = null) {
   if (!item && (!Object.keys(filters).length || panel.loading || !panel.total)) return;
   const pending = {kind,id:item?.id ?? null,filters,total:item ? 1 : 0,busy:false,ready:false};
   insightDeleteState = pending;
-  const label = kind === "kb" ? "知识库记录" : kind === "tools" ? "API记录" : "追踪记录";
+  const label = kind === "kb" ? "知识库记录" : kind === "tools" ? "工具调用记录" : "对话历史记录";
   el("insight-delete-title").textContent = item ? `删除${label}` : `清空筛选的${label}`;
   el("insight-delete-count").textContent = item ? "将删除 1 条记录" : "正在确认匹配数量…";
   el("insight-delete-status").textContent = ""; el("insight-delete-confirm").disabled = true;
@@ -3645,6 +3661,7 @@ async function openInsightDelete(kind, item = null) {
   try {
     if (!item) {
       const params = new URLSearchParams({limit:"1",offset:"0",...filters});
+      if (kind === "kb") params.set("kb_only", "true");
       const data = await request(`/api/insights/${kind}?${params}`);
       if (!Number.isInteger(data.total) || data.total < 0) throw new Error("无法确认匹配数量，请刷新后重试。");
       pending.total = data.total;
@@ -3666,7 +3683,7 @@ el("insight-delete-form").addEventListener("submit",async event => {
   try {
     let deleted = 1;
     if (pending.id !== null) await request(`/api/insights/${pending.kind}/${encodeURIComponent(pending.id)}?confirm=true`,"DELETE");
-    else {const result = await request(`/api/insights/${pending.kind}/clear`,"POST",{...pending.filters,confirm:true,expected_total:pending.total}); deleted = result.deleted;}
+    else {const body = {...pending.filters,confirm:true,expected_total:pending.total}; if (pending.kind === "kb") body.kb_only = true; const result = await request(`/api/insights/${pending.kind}/clear`,"POST",body); deleted = result.deleted;}
     el("insight-delete-dialog").close();
     await loadInsightRecords(pending.kind,insightState[pending.kind].offset);
     insightNotice(`已删除 ${deleted} 条记录。`);

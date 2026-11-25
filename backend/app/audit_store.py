@@ -163,7 +163,7 @@ class AuditStore:
 
     @staticmethod
     def _filter_parts(surfaces, q="", answer_type=None, status=None,
-                      tool_name=None, since=None, until=None):
+                      tool_name=None, since=None, until=None, kb_only=False):
         clauses = ["a.surface IN (" + ",".join("?" for _ in surfaces) + ")"]
         params = list(surfaces)
         needle = (q or "").strip()
@@ -176,6 +176,9 @@ class AuditStore:
         if answer_type:
             clauses.append("d.answer_type = ?")
             params.append(answer_type)
+        elif kb_only:
+            clauses.append("(d.answer_type IN ('rag', 'retrieval_only')"
+                           " OR (d.snapshots IS NOT NULL AND d.snapshots != '[]' AND d.snapshots != ''))")
         if status:
             clauses.append("a.status = ?")
             params.append(status)
@@ -199,9 +202,9 @@ class AuditStore:
         return bool((q or "").strip() or answer_type or status or tool_name or since or until)
 
     def _list(self, surfaces, limit, offset, q="", answer_type=None, status=None,
-              tool_name=None, since=None, until=None):
+              tool_name=None, since=None, until=None, kb_only=False):
         base, params = self._filter_parts(surfaces, q=q, answer_type=answer_type, status=status,
-                                          tool_name=tool_name, since=since, until=until)
+                                          tool_name=tool_name, since=since, until=until, kb_only=kb_only)
         with closing(self._connect()) as connection:
             rows = connection.execute("""SELECT a.*,substr(d.question,1,200) AS question,
                     substr(d.answer,1,500) AS answer,d.answer_type,d.source,d.turn_id,d.call_id """
@@ -230,12 +233,12 @@ class AuditStore:
         return True
 
     def delete_filtered(self, surfaces, expected_total=None, q="", answer_type=None, status=None,
-                        tool_name=None, since=None, until=None):
+                        tool_name=None, since=None, until=None, kb_only=False):
         if not self._has_filter(q=q, answer_type=answer_type, status=status,
                                 tool_name=tool_name, since=since, until=until):
             raise FilterRequired()
         base, params = self._filter_parts(surfaces, q=q, answer_type=answer_type, status=status,
-                                          tool_name=tool_name, since=since, until=until)
+                                          tool_name=tool_name, since=since, until=until, kb_only=kb_only)
         with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             ids = [row[0] for row in connection.execute("SELECT a.id " + base, params)]

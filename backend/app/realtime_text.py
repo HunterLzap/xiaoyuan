@@ -1,10 +1,12 @@
 import asyncio
 import json
+import logging
 from urllib.parse import urlencode
 from uuid import uuid4
 
 from websockets.exceptions import WebSocketException
 
+from .audit_store import _redact_text, redact_value
 from .llm import Completion, OpenAICompatibleProvider, ProviderError
 from .realtime import DirectConnect, is_qwen_audio_realtime
 from .schemas import TokenUsage
@@ -12,6 +14,26 @@ from .speech_text import function_call_output_payload
 from .prompt_builder import build_system_prompt
 from .text_tool_selection import TextToolSelection
 from .tool_dialogue import TOOL_LOADING_NAME
+
+logger = logging.getLogger(__name__)
+
+
+def _upstream_error_detail(event: dict, secrets: tuple | list = ()) -> str:
+    err = event.get("error") if isinstance(event.get("error"), dict) else None
+    if err is None:
+        status_details = (event.get("response") or {}).get("status_details")
+        if isinstance(status_details, dict) and isinstance(status_details.get("error"), dict):
+            err = status_details["error"]
+    if not err:
+        resp_status = (event.get("response") or {}).get("status")
+        if resp_status and resp_status != "completed":
+            return _redact_text(f"status={resp_status}", secrets)
+        return ""
+    code = str(err.get("code") or "").strip()
+    message = str(err.get("message") or "").strip()
+    parts = [part for part in (code, message) if part]
+    detail = " - ".join(parts) if parts else json.dumps(err, ensure_ascii=False)
+    return _redact_text(detail, secrets)[:260]
 
 
 class RealtimeTextProvider:
@@ -38,6 +60,26 @@ class RealtimeTextProvider:
             and is_qwen_audio_realtime(settings.rt_model)
             and "web_search" in allowed
         )
+        assistant_content_type = (
+            "output_text"
+            if settings.rt_provider == "bailian" and is_qwen_audio_realtime(settings.rt_model)
+            else "text"
+        )
+        secrets = [settings.rt_api_key.get_secret_value(), *(getattr(tool_context, "secrets", None) or ())]
+
+        def raise_upstream(event: dict):
+            detail = _upstream_error_detail(event, secrets)
+            logger.warning(
+                "realtime_text upstream error event=%s detail=%s",
+                event.get("type"),
+                detail or json.dumps(redact_value(event, secrets), ensure_ascii=False)[:400],
+            )
+            raise ProviderError(
+                502,
+                "realtime_text_failed",
+                f"实时模型文字请求失败：{detail}" if detail else "实时模型文字请求失败，请检查接入配置。",
+            )
+
         max_rounds, _ = turn_limits(allowed)
         timeout_budget = max(float(settings.timeout_seconds), 120.0) if (allowed & DESKTOP_TOOL_NAMES) else float(settings.timeout_seconds)
         try:
@@ -49,23 +91,50 @@ class RealtimeTextProvider:
                     async def send(kind, **fields):
                         await socket.send(json.dumps({"type": kind, "event_id": uuid4().hex, **fields}))
 
-                    if json.loads(await socket.recv()).get("type") != "session.created":
-                        raise ValueError()
+                    created = json.loads(await socket.recv())
+                    if created.get("type") != "session.created":
+                        raise_upstream(created)
                     joined = "\n".join(message["content"] for message in messages if message["role"] == "system")
-                    selection = TextToolSelection(tool_context, exclude={"web_search"} if use_native_search else ()) if tool_context is not None else None
+                    eligible_defs = (
+                        [item for item in tool_context.definitions(compact=True)
+                         if not (use_native_search and item.get("function", item).get("name") == "web_search")]
+                        if tool_context is not None else []
+                    )
+                    selection = (
+                        TextToolSelection(tool_context, exclude={"web_search"} if use_native_search else ())
+                        if (tool_context is not None
+                            and getattr(tool_context, "registry", None) is not None
+                            and getattr(settings, "rt_lazy_tools", True)
+                            and len(eligible_defs) > 5)
+                        else None
+                    )
                     turn_state = (tool_context.order_state_text()
                                   if tool_context is not None and hasattr(tool_context, "order_state_text") else "")
+
                     def selected_config():
-                        active_names = ([n for n in selection.active_names() if not (use_native_search and n == "web_search")]
-                                        if selection else [])
+                        nested = settings.rt_provider == "bailian"
+                        if selection is not None:
+                            active_names = [
+                                n for n in selection.active_names()
+                                if not (use_native_search and n == "web_search")
+                            ]
+                            defs = selection.definitions(nested=nested)
+                        elif tool_context is not None:
+                            defs = tool_context.definitions(nested=nested, compact=True)
+                            active_names = [
+                                item.get("function", item).get("name") for item in defs
+                                if item.get("function", item).get("name")
+                                and not (use_native_search and item.get("function", item).get("name") == "web_search")
+                            ]
+                        else:
+                            active_names, defs = [], []
+                        if use_native_search:
+                            defs = [item for item in defs if item.get("function", item).get("name") != "web_search"]
                         instructions = build_system_prompt(
                             settings, "text", active_names,
                             turn_state or None, assistant_prompt=joined, compact=True)
-                        if selection:
+                        if selection is not None:
                             instructions += selection.instructions()
-                        defs = selection.definitions(nested=settings.rt_provider == "bailian") if selection else []
-                        if use_native_search:
-                            defs = [item for item in defs if item.get("function", item).get("name") != "web_search"]
                         return {"instructions": instructions, "tools": defs}
 
                     session_config: dict = {"modalities": ["text"], "turn_detection": None, **selected_config()}
@@ -78,14 +147,17 @@ class RealtimeTextProvider:
                         if event.get("type") == "session.updated":
                             break
                         if event.get("type") == "error":
-                            raise ValueError()
+                            raise_upstream(event)
                     for message in messages:
                         if message["role"] == "system":
                             continue
+                        content_text = str(message.get("content") or "")
+                        if not content_text:
+                            continue
                         await send("conversation.item.create", item={
                             "type": "message", "role": message["role"],
-                            "content": [{"type": "input_text" if message["role"] == "user" else "text",
-                                         "text": message["content"]}],
+                            "content": [{"type": "input_text" if message["role"] == "user" else assistant_content_type,
+                                         "text": content_text}],
                         })
                     request_pending = True
                     await send("response.create")
@@ -95,10 +167,12 @@ class RealtimeTextProvider:
                         kind = event.get("type")
                         if kind == "response.created" and tool_context is not None:
                             tool_context.mark_sent(list(tool_context.outputs))
-                        if kind == "response.text.delta":
-                            yield event["delta"]
+                        if kind in ("response.text.delta", "response.output_text.delta"):
+                            delta = event.get("delta") or ""
+                            if delta:
+                                yield delta
                         elif kind == "error":
-                            raise ValueError()
+                            raise_upstream(event)
                         elif kind == "response.output_item.done" and event.get("item", {}).get("type") == "function_call":
                             item = event["item"]
                             function_calls[item["call_id"]] = item
@@ -107,7 +181,7 @@ class RealtimeTextProvider:
                         elif kind == "response.done":
                             response = event["response"]
                             if response.get("status") != "completed":
-                                raise ValueError()
+                                raise_upstream(event)
                             from dataclasses import replace
                             usage = response.get("usage") or {}
                             for item in response.get("output", []):
@@ -120,12 +194,12 @@ class RealtimeTextProvider:
                             if not function_calls:
                                 yield replace(result, usage=combine_usage(round_results))
                                 return
-                            if tool_context is None or selection is None:
+                            if tool_context is None:
                                 raise ProviderError(502, "tool_not_configured", "模型请求了未配置的工具。")
                             if round_index >= max_rounds:
                                 raise ProviderError(502, "tool_limit", "本轮工具调用已达上限，未继续执行。")
                             loading_only = True
-                            active_before = selection.active_names()
+                            active_before = selection.active_names() if selection is not None else ()
                             for call_id, call in function_calls.items():
                                 output = await tool_context.execute(call.get("name", ""), call.get("arguments", "{}"), call_id)
                                 if call.get("name") != TOOL_LOADING_NAME or output.get("error"):
@@ -136,21 +210,24 @@ class RealtimeTextProvider:
                             function_calls = {}
                             if not loading_only:
                                 round_index += 1
-                            if round_index == max_rounds or selection.active_names() != active_before:
+                            if round_index == max_rounds or (selection is not None and selection.active_names() != active_before):
                                 await send("session.update", session=(
                                     {"tools": []} if round_index == max_rounds else selected_config()))
                                 while True:
                                     update = json.loads(await socket.recv())
                                     if update.get("type") == "error":
-                                        raise ValueError()
+                                        raise_upstream(update)
                                     if update.get("type") == "session.updated":
                                         break
                             request_pending = True
                             await send("response.create")
+        except ProviderError:
+            raise
         except TimeoutError:
             raise ProviderError(504, "realtime_text_timeout", "实时模型文字回答超时。") from None
-        except (WebSocketException, OSError, ValueError, KeyError):
-            raise ProviderError(502, "realtime_text_failed", "实时模型文字请求失败，请检查接入配置。") from None
+        except (WebSocketException, OSError, ValueError, KeyError) as exc:
+            logger.warning("realtime_text connection/protocol error: %s", type(exc).__name__)
+            raise ProviderError(502, "realtime_text_failed", f"实时模型文字请求失败：{type(exc).__name__}") from None
         finally:
             if request_pending:
                 round_results.append(Completion(None, None, None))

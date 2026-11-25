@@ -423,18 +423,30 @@
       <section id="insights-view" class="page-view" aria-label="记录" hidden><div class="page-content capability-content">
         <div id="insights-list-view">
         <span id="insights-intro" class="sr-only">数据洞察</span>
-        <div class="insight-tabbar" role="tablist" aria-label="数据洞察分类">
-          <button id="insights-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="insights-panel-kb" data-insight-tab="kb"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>问答</span></button>
-          <button id="insights-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-tools" data-insight-tab="tools" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-plug"/></svg><span>API</span></button>
-          <button id="insights-tab-traces" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-traces" data-insight-tab="traces" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-panel"/></svg><span>链路</span></button>
+        <div class="insight-tabbar" role="tablist" aria-label="记录分类">
+          <button id="insights-tab-traces" class="insight-tab" type="button" role="tab" aria-selected="true" aria-controls="insights-panel-traces" data-insight-tab="traces"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-panel"/></svg><span>对话历史</span></button>
+          <button id="insights-tab-kb" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-kb" data-insight-tab="kb" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-book"/></svg><span>知识库</span></button>
+          <button id="insights-tab-tools" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-tools" data-insight-tab="tools" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-plug"/></svg><span>工具调用</span></button>
           <button id="insights-tab-errors" class="insight-tab" type="button" role="tab" aria-selected="false" aria-controls="insights-panel-errors" data-insight-tab="errors" tabindex="-1"><svg class="insight-tab-icon" aria-hidden="true"><use href="#i-alert"/></svg><span id="insights-tab-errors-label">异常</span></button>
           <button id="insights-refresh" type="button" class="text-button tabbar-refresh">刷新</button>
         </div>
         <p id="insights-notice" class="small-note" role="status" aria-live="polite"></p>
-        <section id="insights-panel-kb" class="capability-section insight-panel ui-card" role="tabpanel" aria-labelledby="insights-tab-kb">
+        <section id="insights-panel-traces" class="capability-section insight-panel ui-card" role="tabpanel" aria-labelledby="insights-tab-traces">
+          <div class="insight-filters">
+            <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-traces-q" type="search" maxlength="200" placeholder="搜索问题、回答或模型" aria-label="搜索对话历史"></label>
+            <select id="insights-traces-source" aria-label="按通道来源筛选"><option value="">全部来源</option><option value="text">网页文字</option><option value="voice">网页语音</option><option value="device">硬件设备</option></select>
+            <select id="insights-traces-status" aria-label="按状态筛选"><option value="">全部状态</option><option value="complete">成功</option><option value="interrupted">已打断</option><option value="failed">失败</option></select>
+            <div class="insight-daterange"><input id="insights-traces-since" type="date" aria-label="起始日期"><span>至</span><input id="insights-traces-until" type="date" aria-label="结束日期"></div>
+            <button id="insights-traces-reset" type="button" class="text-button insight-reset">重置</button>
+            <span id="insights-traces-meta" class="insight-count"></span>
+          </div>
+          <div id="insights-traces" class="insight-list" aria-live="polite"><p class="small-note">尚未加载记录。</p></div>
+          <div class="insight-pagination"><button id="insights-traces-prev" type="button" class="text-button" disabled>上一页</button><span id="insights-traces-page" class="small-note"></span><button id="insights-traces-next" type="button" class="text-button" disabled>下一页</button></div>
+        </section>
+        <section id="insights-panel-kb" class="capability-section insight-panel ui-card" role="tabpanel" aria-labelledby="insights-tab-kb" hidden>
           <div class="insight-filters">
             <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-kb-q" type="search" maxlength="200" placeholder="搜索问题或答案" aria-label="搜索知识库记录"></label>
-            <select id="insights-kb-type" aria-label="按回答类型筛选"><option value="">全部类型</option><option value="rag">资料辅助回答</option><option value="tool_answer">工具续答</option><option value="model_answer">模型回答</option><option value="retrieval_only">仅检索</option><option value="tool_only">仅工具调用</option></select>
+            <select id="insights-kb-type" aria-label="按回答类型筛选"><option value="">全部类型</option><option value="rag">资料辅助回答</option><option value="retrieval_only">仅检索</option></select>
             <div class="insight-daterange"><input id="insights-kb-since" type="date" aria-label="起始日期"><span>至</span><input id="insights-kb-until" type="date" aria-label="结束日期"></div>
             <button id="insights-kb-reset" type="button" class="text-button insight-reset">重置</button>
             <button id="insights-kb-clear" type="button" class="text-button insight-clear" disabled>清空筛选结果</button>
@@ -445,7 +457,7 @@
         </section>
         <section id="insights-panel-tools" class="capability-section insight-panel ui-card" role="tabpanel" aria-labelledby="insights-tab-tools" hidden>
           <div class="insight-filters">
-            <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-tools-q" type="search" maxlength="200" placeholder="搜索工具或请求摘要" aria-label="搜索 API 记录"></label>
+            <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-tools-q" type="search" maxlength="200" placeholder="搜索工具或请求摘要" aria-label="搜索工具调用记录"></label>
             <select id="insights-tools-status" aria-label="按状态筛选"><option value="">全部状态</option><option value="ok">成功</option><option value="empty">未命中</option><option value="error">失败</option><option value="unavailable">不可用</option><option value="not_requested">未调用</option><option value="cancelled">已取消</option><option value="failed">执行失败</option><option value="interrupted">已打断</option></select>
             <input id="insights-tools-name" class="insight-tool-filter" maxlength="80" placeholder="工具名称（精确）" aria-label="按工具名称精确筛选">
             <div class="insight-daterange"><input id="insights-tools-since" type="date" aria-label="起始日期"><span>至</span><input id="insights-tools-until" type="date" aria-label="结束日期"></div>
@@ -455,18 +467,6 @@
           </div>
           <div id="insights-tools" class="insight-list" aria-live="polite"><p class="small-note">尚未加载记录。</p></div>
           <div class="insight-pagination"><button id="insights-tools-prev" type="button" class="text-button" disabled>上一页</button><span id="insights-tools-page" class="small-note"></span><button id="insights-tools-next" type="button" class="text-button" disabled>下一页</button></div>
-        </section>
-        <section id="insights-panel-traces" class="capability-section insight-panel ui-card" role="tabpanel" aria-labelledby="insights-tab-traces" hidden>
-          <div class="insight-filters">
-            <label class="insight-search"><svg aria-hidden="true"><use href="#i-search"/></svg><input id="insights-traces-q" type="search" maxlength="200" placeholder="搜索问题、回答或模型" aria-label="搜索全链路追踪"></label>
-            <select id="insights-traces-source" aria-label="按通道来源筛选"><option value="">全部来源</option><option value="text">网页文字</option><option value="voice">网页语音</option><option value="device">硬件设备</option></select>
-            <select id="insights-traces-status" aria-label="按状态筛选"><option value="">全部状态</option><option value="complete">成功</option><option value="interrupted">已打断</option><option value="failed">失败</option></select>
-            <div class="insight-daterange"><input id="insights-traces-since" type="date" aria-label="起始日期"><span>至</span><input id="insights-traces-until" type="date" aria-label="结束日期"></div>
-            <button id="insights-traces-reset" type="button" class="text-button insight-reset">重置</button>
-            <span id="insights-traces-meta" class="insight-count"></span>
-          </div>
-          <div id="insights-traces" class="insight-list" aria-live="polite"><p class="small-note">尚未加载记录。</p></div>
-          <div class="insight-pagination"><button id="insights-traces-prev" type="button" class="text-button" disabled>上一页</button><span id="insights-traces-page" class="small-note"></span><button id="insights-traces-next" type="button" class="text-button" disabled>下一页</button></div>
         </section>
         <section id="insights-panel-errors" class="capability-section insight-panel ui-card" role="tabpanel" aria-labelledby="insights-tab-errors" hidden>
           <div class="insight-filters">

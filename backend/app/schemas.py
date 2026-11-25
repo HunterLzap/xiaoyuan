@@ -211,6 +211,7 @@ class InsightClearFilters(BaseModel):
     tool_name: str | None = Field(default=None, max_length=80)
     since: str | None = Field(default=None, max_length=40)
     until: str | None = Field(default=None, max_length=40)
+    kb_only: bool = False
     confirm: bool = False
     expected_total: int | None = Field(default=None, ge=0)
 
