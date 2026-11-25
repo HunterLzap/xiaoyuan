@@ -67,6 +67,10 @@ def _is_end_intent(text: str) -> bool:
     return False
 
 
+def is_qwen_audio_realtime(model: str) -> bool:
+    return (model or "").strip().lower().startswith("qwen-audio-")
+
+
 class DirectConnect(connect):
     def process_redirect(self, exc):
         return exc
@@ -151,16 +155,27 @@ class RealtimeTurn:
             self.reply = self.reply[: len(self.reply) - len(self._response_text)] + transcript
             self._response_text = transcript
 
+    def _uses_native_web_search(self) -> bool:
+        allowed = getattr(getattr(self, "tool_context", None), "allowed", None) or set()
+        return (
+            self.config.rt_provider == "bailian"
+            and is_qwen_audio_realtime(self.config.rt_model)
+            and "web_search" in allowed
+        )
+
     def _realtime_tool_definitions(self, nested=False):
         if self._voice_tool_selection is not None:
-            return self._voice_tool_selection.definitions(nested=nested)
-        registry = getattr(self.tool_context, "registry", None)
-        if registry is None:
-            return []
-        gateway = getattr(self.tool_context, "tool_gateway", None)
-        if gateway is not None:
-            return gateway.definitions(registry, nested=nested, include_side_effects=True)
-        return registry.definitions(nested=nested)
+            defs = self._voice_tool_selection.definitions(nested=nested)
+        else:
+            registry = getattr(self.tool_context, "registry", None)
+            if registry is None:
+                return []
+            gateway = getattr(self.tool_context, "tool_gateway", None)
+            defs = (gateway.definitions(registry, nested=nested, include_side_effects=True)
+                    if gateway is not None else registry.definitions(nested=nested))
+        if self._uses_native_web_search():
+            defs = [item for item in defs if item.get("function", item).get("name") != "web_search"]
+        return defs
 
     def tool_instructions(self):
         turn_state = "最近控制调用记录（仅供核对历史，不代表当前设备值）：" + control_history(self.session.history)
@@ -353,9 +368,25 @@ class RealtimeTurn:
             turn_detection.update({"create_response": False, "interrupt_response": True})
         if cfg.rt_provider == "bailian":
             asr_model = cfg.rt_asr_model.strip() if hasattr(cfg, "rt_asr_model") else ""
+            if is_qwen_audio_realtime(cfg.rt_model):
+                if not asr_model or asr_model in {"whisper-1", "qwen3-asr-flash-realtime"}:
+                    asr_model = "fun-asr"
+                session_config: dict = {
+                    "modalities": ["text", "audio"],
+                    "voice": (cfg.rt_voice or "").strip() or "longanqian_v3.1",
+                    "input_audio_format": "pcm",
+                    "output_audio_format": "pcm",
+                    "instructions": instructions,
+                    "input_audio_transcription": {"model": asr_model, "language": "zh"},
+                    "turn_detection": turn_detection,
+                }
+                if self._uses_native_web_search():
+                    session_config["enable_search"] = True
+                    session_config["search_options"] = {"enable_source": True}
+                return session_config
             if not asr_model or asr_model == "whisper-1":
                 asr_model = "qwen3-asr-flash-realtime"
-            session_config: dict = {
+            session_config = {
                 "modalities": ["text", "audio"],
                 "voice": cfg.rt_voice,
                 "instructions": instructions,

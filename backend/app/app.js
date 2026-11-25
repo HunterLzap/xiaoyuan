@@ -936,9 +936,13 @@ function resolveDesktopModelState() {
   const direct = Boolean(effectiveModel) && isNativeVisionModel(effectiveModel);
   return {effectiveModel, direct, routeNote, vision, rtMode, hasBailianKey, textModel};
 }
+function isBailianVoiceModel(model) {
+  const name = (model || "").trim().toLowerCase();
+  return name === "qwen3.8-omni-flash-realtime" || name.startsWith("qwen-audio-");
+}
 function updateModelOverview() {
   const st = resolveDesktopModelState();
-  const chatModel = st.rtMode ? (el("rt_model").value.trim() || "qwen3.8-omni-flash-realtime") : (st.textModel || "未配置");
+  const chatModel = st.rtMode ? (el("rt_model").value.trim() || "qwen-audio-3.1-realtime-flash") : (st.textModel || "未配置");
   const chatProvider = st.rtMode ? (el("rt_provider").value === "bailian" ? "阿里云百炼" : "自定义实时") : (el("provider").value.trim() || "文字服务");
   el("overview-chat-model").textContent = chatModel;
   el("overview-chat-meta").textContent = chatProvider;
@@ -1015,15 +1019,20 @@ document.querySelectorAll('input[name="voice-route"]').forEach(radio => radio.ad
 }));
 el("rt_provider").addEventListener("change", () => {
   stopRealtimeSample(); el("rt_api_key").value = "";
-  if (el("rt_provider").value === "compatible" && el("rt_model").value === "qwen3.8-omni-flash-realtime") {
+  if (el("rt_provider").value === "compatible" && isBailianVoiceModel(el("rt_model").value)) {
     el("rt_model").value = "gpt-realtime";
   } else if (el("rt_provider").value === "bailian" && ["gpt-realtime", "gpt-4o-realtime-preview"].includes(el("rt_model").value)) {
-    el("rt_model").value = "qwen3.8-omni-flash-realtime";
+    el("rt_model").value = "qwen-audio-3.1-realtime-flash";
   }
   restoreSavedProfileForCurrentTarget("realtime");
+  if (el("rt_provider").value === "bailian") loadQwenVoices();
   updateConnectionMode(); dirty();
 });
-el("rt_model").addEventListener("change", () => { restoreSavedProfileForCurrentTarget("realtime"); dirty(); });
+el("rt_model").addEventListener("change", () => {
+  restoreSavedProfileForCurrentTarget("realtime");
+  if (el("rt_provider").value === "bailian") loadQwenVoices();
+  dirty();
+});
 el("asr_provider").addEventListener("change", () => {
   if (el("asr_provider").value === "bailian" && (!el("asr_model").value || el("asr_model").value === "whisper-1")) {
     el("asr_model").value = "qwen3-asr-flash-realtime";
@@ -1350,7 +1359,9 @@ function stopRealtimeSample() {
 }
 async function loadQwenVoices() {
   try {
-    const data = await request("/api/voices/qwen");
+    const rtModel = el("rt_model")?.value.trim() || "";
+    const query = rtModel ? `?target_model=${encodeURIComponent(rtModel)}` : "";
+    const data = await request(`/api/voices/qwen${query}`);
     qwenVoices = Array.isArray(data.voices) ? data.voices : [];
   } catch (error) {
     qwenVoices = [];
@@ -1359,7 +1370,7 @@ async function loadQwenVoices() {
 }
 function syncRealtimeVoices() {
   const picker = el("rt-voice-picker"), field = el("rt_voice");
-  const system = el("rt_provider").value === "bailian" && el("rt_model").value.trim() === "qwen3.8-omni-flash-realtime";
+  const system = el("rt_provider").value === "bailian" && isBailianVoiceModel(el("rt_model").value);
   picker.hidden = !system; field.hidden = system;
   el("rt-voice-label").htmlFor = system ? picker.id : field.id;
   el("rt-sample-button").hidden = !system;
@@ -1380,7 +1391,7 @@ function syncRealtimeVoices() {
     current.dataset.unlisted = "1"; picker.add(current); picker.value = field.value;
   }
   const selected = picker.selectedOptions[0];
-  el("rt-sample-button").disabled = !selected?.dataset.sample && !selected?.dataset.qwenClone;
+  el("rt-sample-button").disabled = !selected?.dataset.sample && !selected?.dataset.qwenClone && !(selected?.dataset.unlisted && field.value);
   el("rt-delete-clone").hidden = !selected?.dataset.qwenClone;
 }
 el("rt-voice-picker").addEventListener("input", () => {
@@ -1449,7 +1460,8 @@ el("qwen-clone-form").addEventListener("submit", async event => {
     const response = await appFetch("/api/voices/qwen", {
       method:"POST",
       headers:{"Content-Type":"application/octet-stream","X-Local-Settings":"1",
-        "X-Voice-Name":encodeURIComponent(name),"X-Voice-Filename":encodeURIComponent(file.name)},
+        "X-Voice-Name":encodeURIComponent(name),"X-Voice-Filename":encodeURIComponent(file.name),
+        "X-Target-Model":encodeURIComponent(el("rt_model").value.trim())},
       body:await file.arrayBuffer(),
     });
     const data = await response.json().catch(() => null);
@@ -1495,9 +1507,10 @@ function updateConnectionMode() {
     (custom ? savedConfig.rt_endpoint === el("rt_endpoint").value.trim() : savedConfig.rt_workspace === el("rt_workspace").value.trim());
   el("rt-key-state").textContent = el("rt_api_key").value ? "待保存" : saved ? "已保存" : "";
   el("rt_api_key").placeholder = saved ? "••••••••" : "输入 API Key";
-  el("text-services").hidden = rt;
-  for (const control of el("text-services").querySelectorAll("input,select")) control.disabled = rt;
-  el("rt-fields").hidden = !rt;
+  el("text-services").hidden = true;
+  for (const control of el("text-services").querySelectorAll("input,select")) control.disabled = true;
+  el("rt-fields").hidden = false;
+  if (el("web-search-connection-panel")) el("web-search-connection-panel").hidden = true;
   el("rt-custom-row").hidden = el("rt_provider").value !== "compatible";
   el("rt-workspace-row").hidden = !el("rt-custom-row").hidden;
   const asrLocal = el("asr_provider").value === "local";
@@ -2166,10 +2179,12 @@ el("conn-web-search-test")?.addEventListener("click", async () => {
 });
 function webSearchToolCard(tool) {
   const active = isSkillActive(tool);
+  const rtModel = (savedConfig?.rt_model || el("rt_model")?.value || "").trim().toLowerCase();
+  const nativeRealtimeSearch = (savedConfig?.rt_provider || el("rt_provider")?.value) === "bailian" && rtModel.startsWith("qwen-audio-");
   const card = node("div", "capability-item");
   const header = node("div", "capability-item-header");
   const title = node("div", "capability-item-title");
-  title.append(node("h3", "", "联网搜索"), node("p", "small-note", "百炼自带搜索 / DeepSeek（选填）"));
+  title.append(node("h3", "", "联网搜索"), node("p", "small-note", nativeRealtimeSearch ? "已由实时模型原生支持（开启即生效）" : "百炼自带搜索 / DeepSeek（选填）"));
   header.append(title);
 
   const { label: toggleLabel } = makeSkillSwitch(active, (toggle, previous) => {
@@ -2255,7 +2270,13 @@ function webSearchToolCard(tool) {
   testRow.append(testInput, quickBtn, debugBtn);
   quickTest.append(node("label", "", "快速提问测试"), testRow, quickResult);
 
-  card.append(header, keySection, quickTest);
+  if (nativeRealtimeSearch) {
+    const fallback = node("details", "weather-city-config");
+    fallback.append(node("summary", "", "备用独立搜索配置（仅 DeepSeek / 手动测试时需要）"), keySection, quickTest);
+    card.append(header, fallback);
+  } else {
+    card.append(header, keySection, quickTest);
+  }
   return card;
 }
 function toolDetailCard(tool) {

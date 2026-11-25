@@ -160,22 +160,23 @@
       <section id="connections-view" class="page-view" aria-label="模型" hidden><div class="page-content">
         <form id="config-form"><fieldset id="config-fields" class="compact-api" disabled>
           <div id="model-overview-panel" class="model-route-bar">
-            <div class="api-segments" role="radiogroup" aria-label="接入模式">
+            <div class="api-segments" role="radiogroup" aria-label="接入模式" hidden>
               <label><input type="radio" name="voice-route" value="realtime" checked><span>实时对话</span></label>
               <label><input type="radio" name="voice-route" value="pipeline"><span>分模型</span></label>
             </div>
             <input id="voice_mode" type="hidden" value="realtime">
             <span class="model-route-summary">当前生效：<strong id="overview-chat-model">—</strong><small id="overview-chat-meta"></small><span hidden><strong id="overview-desktop-model"></strong><small id="overview-desktop-meta"></small></span></span>
           </div>
-<section class="api-panel" id="rt-fields"><h2 class="api-panel-title"><span id="rt-service-name">阿里云百炼</span><small id="rt-region">北京</small></h2>
+<section class="api-panel" id="rt-fields"><h2 class="api-panel-title">日常对话与语音 <small><span id="rt-service-name">阿里云百炼</span> <span id="rt-region">北京</span></small></h2>
 <div class="api-group">
 <div class="settings-row"><label for="rt_provider">服务</label><select id="rt_provider"><option value="bailian">百炼 · 北京</option><option value="compatible">自定义实时接口</option></select></div>
 <div class="settings-row" id="rt-custom-row"><label for="rt_endpoint">接口地址</label><input id="rt_endpoint" placeholder="wss://" maxlength="500"></div>
 <div class="settings-row" id="rt-workspace-row"><div><label for="rt_workspace">业务空间 ID</label> <a class="text-button" href="https://help.aliyun.com/zh/model-studio/obtain-the-app-id-and-workspace-id" target="_blank" rel="noopener noreferrer" aria-label="查看业务空间 ID 获取位置">在哪看</a></div><input id="rt_workspace" aria-label="北京业务空间 ID" placeholder="粘贴 Workspace ID" pattern="[a-z0-9][a-z0-9\-]{0,62}" title="请粘贴业务空间 ID，不是空间名称" maxlength="63" autocomplete="off"></div>
 <div class="settings-row"><label for="rt_api_key">API Key</label><div class="api-secret"><input id="rt_api_key" type="password" autocomplete="new-password" spellcheck="false"><small id="rt-key-state" role="status"></small></div></div>
-<div class="settings-row"><label for="rt_model">实时对话模型</label><input id="rt_model" list="rt-models" maxlength="200"><datalist id="rt-models"><option value="qwen3.8-omni-flash-realtime"><option value="gpt-realtime"><option value="gpt-4o-realtime-preview"></datalist></div>
+<div class="settings-row"><label for="rt_model">实时对话模型</label><input id="rt_model" list="rt-models" maxlength="200"><datalist id="rt-models"><option value="qwen-audio-3.1-realtime-flash"><option value="qwen3.8-omni-flash-realtime"><option value="gpt-realtime"><option value="gpt-4o-realtime-preview"></datalist></div>
 <div class="settings-row"><label id="rt-voice-label" for="rt-voice-picker">音色</label><div class="voice-inline">
-<select id="rt-voice-picker"><option value="Tina" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/qxmfgt/f6009_%E7%94%9C%E7%94%9C_Tina.wav">甜甜</option>
+<select id="rt-voice-picker"><option value="longanqian_v3.1">龙安浅（默认）</option>
+<option value="Tina" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/qxmfgt/f6009_%E7%94%9C%E7%94%9C_Tina.wav">甜甜</option>
 <option value="Cindy" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/qjtgkt/f1003_b_%E6%9E%97%E6%AC%A3%E5%AE%9C_Cindy.wav">林欣宜</option>
 <option value="Liora Mira" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/ltpizj/czr-f2810_%E6%B8%85%E6%AC%A2_LioraMira.wav">清欢</option>
 <option value="Raymond" data-sample="https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260323/jitmby/czr-m2831_%E6%9E%97%E5%B7%9D%E9%87%8E_Raymond.wav">林川野</option>
@@ -234,7 +235,7 @@
 </div></div><p id="rt-sample-error" class="small-note" role="status" hidden></p>
 <audio id="rt-sample" preload="none" hidden></audio></div>
 <details class="api-disclosure"><summary>高级设置</summary><div class="api-group">
-<div class="settings-row" id="rt-asr-row"><label for="rt_asr_model">转录模型</label><input id="rt_asr_model" maxlength="200" placeholder="whisper-1（百炼默认 qwen3-asr）"></div>
+<div class="settings-row" id="rt-asr-row"><label for="rt_asr_model">转录模型</label><input id="rt_asr_model" maxlength="200" placeholder="fun-asr（百炼默认；兼容接口 whisper-1）"></div>
 <div class="settings-row"><label for="rt_silence_gate_enabled">静音帧拦截</label><label class="checkbox-control"><input id="rt_silence_gate_enabled" type="checkbox"><span>减少底噪占用的音频用量</span></label></div>
 <div class="settings-row"><div><label for="rt_silence_gate_rms">人声灵敏度阈值</label><p id="rt-rms-hint">默认 120。吞字可调低至 80，底噪大可调高至 180。</p></div><input id="rt_silence_gate_rms" type="number" min="10" max="3000" step="10" value="120" aria-describedby="rt-rms-hint" required></div>
 <div class="settings-row"><label for="rt_defer_response_until_transcript">按需发工具</label><label class="checkbox-control"><input id="rt_defer_response_until_transcript" type="checkbox"><span>转写后按任务选择工具，减少闲聊 Token</span></label></div>
@@ -300,7 +301,7 @@
               <div class="settings-row"><label for="desktop_vision_model">纯视觉备用</label><input id="desktop_vision_model" list="desktop-vision-models" maxlength="200" autocomplete="off" placeholder="qwen3-vl-plus（主控非多模态时使用）"><datalist id="desktop-vision-models"><option value="qwen3-vl-plus"><option value="qwen3.5-plus"><option value="qwen-vl-max"></datalist></div>
             </div></details>
           </section>
-          <section class="api-panel" id="web-search-connection-panel" aria-label="联网搜索">
+          <section class="api-panel" id="web-search-connection-panel" aria-label="联网搜索" hidden>
             <h2 class="api-panel-title">联网搜索 <small>百炼自带搜索（免额外 Key） / DeepSeek</small></h2>
             <div class="api-group">
               <div class="settings-row">

@@ -74,7 +74,7 @@ class ConnectionsUpdate(BaseModel):
     rt_provider: Literal["bailian", "compatible"] = "bailian"
     rt_endpoint: str = Field(default="", max_length=500)
     rt_workspace: str = Field(default="", pattern=r"^(?:[a-z0-9][a-z0-9-]{0,62})?$")
-    rt_model: str = Field(default="qwen3.8-omni-flash-realtime", min_length=1, max_length=200)
+    rt_model: str = Field(default="qwen-audio-3.1-realtime-flash", min_length=1, max_length=200)
     rt_voice: str = Field(default="Tina", min_length=1, max_length=80)
     rt_asr_model: str = Field(default="whisper-1", max_length=200)
     rt_api_key: SecretStr | None = None

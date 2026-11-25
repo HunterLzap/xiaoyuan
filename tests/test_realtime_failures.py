@@ -537,7 +537,7 @@ class RealtimeBatch2(unittest.IsolatedAsyncioTestCase):
 
 class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
     async def test_ack_cache_generates_pcm_manifest_for_exact_bailian_voice(self):
-        cfg = Settings(_env_file=None, rt_api_key="fixture-bailian-key", rt_voice="test-voice")
+        cfg = Settings(_env_file=None, rt_api_key="fixture-bailian-key", rt_model="qwen3.8-omni-flash-realtime", rt_voice="test-voice")
         socket = _RealtimeSocket()
         pcm = bytes([1, 0]) * 240
         phrases = ["我帮你看看喵。", "稍等一下喵。"]
@@ -631,6 +631,49 @@ class RealtimeAcknowledgements(unittest.IsolatedAsyncioTestCase):
                 turn.output_blocked = Mock(return_value=blocked)
                 await turn.run_tools(items, turn.turn_id, context)
                 self.assertEqual(execution_order, [("tool", "web_search")])
+
+    async def test_qwen_audio_realtime_session_native_search_and_voice_support(self):
+        from backend.app import qwen_voices
+        from backend.app.tools import ToolRegistry, ToolSpec
+
+        self.assertTrue(qwen_voices.is_supported_target_model("qwen-audio-3.1-realtime-flash"))
+        cfg = Settings(_env_file=None, rt_provider="bailian", rt_model="qwen-audio-3.1-realtime-flash",
+                       rt_voice="longanqian_v3.1", rt_api_key="fixture-bailian-key")
+        service = ChatService(cfg, None)
+        turn = RealtimeTurn(service, None, "web_voice", AsyncMock(), False)
+        registry = ToolRegistry([
+            SimpleNamespace(spec=ToolSpec("get_weather", "weather", {"type": "object", "properties": {}})),
+            SimpleNamespace(spec=ToolSpec("web_search", "search", {"type": "object", "properties": {}})),
+        ])
+        turn.tool_context = SimpleNamespace(
+            registry=registry, tool_gateway=None,
+            allowed={"get_weather", "web_search"}, order_state_text=lambda: "",
+        )
+        session = turn._build_session_config()
+        self.assertEqual(session["voice"], "longanqian_v3.1")
+        self.assertEqual(session["input_audio_format"], "pcm")
+        self.assertEqual(session["output_audio_format"], "pcm")
+        self.assertEqual(session["input_audio_transcription"], {"model": "fun-asr", "language": "zh"})
+        self.assertTrue(session["enable_search"])
+        self.assertEqual(session["search_options"], {"enable_source": True})
+        self.assertNotIn("audio", session)
+        tool_names = [item["function"]["name"] for item in turn._realtime_tool_definitions(nested=True)]
+        self.assertEqual(tool_names, ["get_weather"])
+
+        socket = _RealtimeSocket()
+        pcm = bytes([1, 0]) * 120
+        socket.feed("response.audio.delta", delta=base64.b64encode(pcm).decode())
+        socket.feed("response.done", response={"status": "completed"})
+
+        @asynccontextmanager
+        async def connect(url, **kwargs):
+            yield socket
+
+        with TemporaryDirectory() as directory, patch("backend.app.realtime.DirectConnect", connect):
+            result = await ack_cache.synthesize_ack_phrases(cfg, ["稍等一下。"], cache_dir=Path(directory))
+            self.assertEqual(result["count"], 1)
+            self.assertEqual(socket.sent[0]["session"]["voice"], "longanqian_v3.1")
+            self.assertEqual(socket.sent[0]["session"]["output_audio_format"], "pcm")
 
 
 if __name__ == "__main__":

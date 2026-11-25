@@ -118,18 +118,28 @@ async def synthesize_ack_phrases(settings: Settings, phrases: list[str] | None =
     host = (f"{settings.rt_workspace}.cn-beijing.maas.aliyuncs.com" if settings.rt_workspace
             else "dashscope.aliyuncs.com")
     url = f"wss://{host}/api-ws/v1/realtime?" + urlencode({"model": settings.rt_model})
-    session: dict = {
-        "modalities": ["text", "audio"], "turn_detection": None,
-        "instructions": "只原样朗读用户提供的短句，不加任何前后缀，不解释。",
-        "audio": {
-            "input": {"format": {"type": "pcm", "sample_rate": 16000}},
-            "output": {"format": {"type": "pcm", "sample_rate": 24000}},
-        },
-    }
-    if settings.rt_model == "qwen3.8-omni-flash-realtime":
-        session["audio"]["output"]["voice"] = settings.rt_voice
+    if (settings.rt_model or "").strip().lower().startswith("qwen-audio-"):
+        session: dict = {
+            "modalities": ["text", "audio"],
+            "turn_detection": None,
+            "instructions": "只原样朗读用户提供的短句，不加任何前后缀，不解释。",
+            "voice": (settings.rt_voice or "").strip() or "longanqian_v3.1",
+            "input_audio_format": "pcm",
+            "output_audio_format": "pcm",
+        }
     else:
-        session["voice"] = settings.rt_voice
+        session = {
+            "modalities": ["text", "audio"], "turn_detection": None,
+            "instructions": "只原样朗读用户提供的短句，不加任何前后缀，不解释。",
+            "audio": {
+                "input": {"format": {"type": "pcm", "sample_rate": 16000}},
+                "output": {"format": {"type": "pcm", "sample_rate": 24000}},
+            },
+        }
+        if settings.rt_model == "qwen3.8-omni-flash-realtime":
+            session["audio"]["output"]["voice"] = settings.rt_voice
+        else:
+            session["voice"] = settings.rt_voice
 
     audio = []
     try:

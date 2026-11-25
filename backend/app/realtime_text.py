@@ -6,7 +6,7 @@ from uuid import uuid4
 from websockets.exceptions import WebSocketException
 
 from .llm import Completion, OpenAICompatibleProvider, ProviderError
-from .realtime import DirectConnect
+from .realtime import DirectConnect, is_qwen_audio_realtime
 from .schemas import TokenUsage
 from .speech_text import function_call_output_payload
 from .prompt_builder import build_system_prompt
@@ -22,13 +22,22 @@ class RealtimeTextProvider:
 
     async def complete_stream(self, messages, *, tool_context=None, results=None):
         settings = self.settings
-        address = settings.rt_endpoint if settings.rt_provider == "compatible" else (
-            f"wss://{settings.rt_workspace}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime")
+        if settings.rt_provider == "compatible":
+            address = settings.rt_endpoint
+        elif settings.rt_workspace:
+            address = f"wss://{settings.rt_workspace}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime"
+        else:
+            address = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime"
         endpoint = address + "?" + urlencode({"model": settings.rt_model})
         request_pending = False
         round_results = results if results is not None else []
         from .tool_dialogue import DESKTOP_TOOL_NAMES, combine_usage, turn_limits
         allowed = getattr(tool_context, "allowed", set()) or set()
+        use_native_search = (
+            settings.rt_provider == "bailian"
+            and is_qwen_audio_realtime(settings.rt_model)
+            and "web_search" in allowed
+        )
         max_rounds, _ = turn_limits(allowed)
         timeout_budget = max(float(settings.timeout_seconds), 120.0) if (allowed & DESKTOP_TOOL_NAMES) else float(settings.timeout_seconds)
         try:
@@ -47,15 +56,22 @@ class RealtimeTextProvider:
                     turn_state = (tool_context.order_state_text()
                                   if tool_context is not None and hasattr(tool_context, "order_state_text") else "")
                     def selected_config():
+                        active_names = ([n for n in selection.active_names() if not (use_native_search and n == "web_search")]
+                                        if selection else [])
                         instructions = build_system_prompt(
-                            settings, "text", selection.active_names() if selection else [],
+                            settings, "text", active_names,
                             turn_state or None, assistant_prompt=joined, compact=True)
                         if selection:
                             instructions += selection.instructions()
-                        return {"instructions": instructions,
-                                "tools": selection.definitions(nested=settings.rt_provider == "bailian") if selection else []}
+                        defs = selection.definitions(nested=settings.rt_provider == "bailian") if selection else []
+                        if use_native_search:
+                            defs = [item for item in defs if item.get("function", item).get("name") != "web_search"]
+                        return {"instructions": instructions, "tools": defs}
 
-                    session_config = {"modalities": ["text"], "turn_detection": None, **selected_config()}
+                    session_config: dict = {"modalities": ["text"], "turn_detection": None, **selected_config()}
+                    if use_native_search:
+                        session_config["enable_search"] = True
+                        session_config["search_options"] = {"enable_source": True}
                     await send("session.update", session=session_config)
                     while True:
                         event = json.loads(await socket.recv())

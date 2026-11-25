@@ -19,6 +19,9 @@ from .llm import ProviderError
 
 INDEX = ROOT / "data" / "qwen_voices.json"
 SUPPORTED_MODELS = {
+    "qwen-audio-3.1-realtime-flash",
+    "qwen-audio-3.1-realtime-plus",
+    "qwen-audio-3.0-realtime-flash",
     "qwen3.8-omni-flash-realtime",
     "qwen3.5-omni-flash-realtime",
     "qwen3.5-omni-plus-realtime",
@@ -28,7 +31,7 @@ SUPPORTED_MODELS = {
 
 def is_supported_target_model(model: str) -> bool:
     name = (model or "").strip()
-    return name in SUPPORTED_MODELS or name.startswith("qwen3-tts-vc-realtime")
+    return name in SUPPORTED_MODELS or name.startswith(("qwen3-tts-vc-realtime", "qwen-audio-"))
 
 
 def _active_target_model(settings: Settings) -> str:
@@ -219,17 +222,26 @@ async def preview(settings: Settings, voice: str, text: str) -> bytes:
             max_size=4 * 1024 * 1024,
         ) as socket:
             await socket.recv()
-            config = {
-                "modalities": ["text", "audio"],
-                "instructions": "只朗读用户提供的试听文字。",
-                "audio": {
-                    "output": {
-                        "voice": voice,
-                        "format": {"type": "pcm", "sample_rate": 24000},
+            if (settings.rt_model or "").strip().lower().startswith("qwen-audio-"):
+                config = {
+                    "modalities": ["text", "audio"],
+                    "voice": voice,
+                    "output_audio_format": "pcm",
+                    "instructions": "只朗读用户提供的试听文字。",
+                    "turn_detection": None,
+                }
+            else:
+                config = {
+                    "modalities": ["text", "audio"],
+                    "instructions": "只朗读用户提供的试听文字。",
+                    "audio": {
+                        "output": {
+                            "voice": voice,
+                            "format": {"type": "pcm", "sample_rate": 24000},
+                        },
                     },
-                },
-                "turn_detection": None,
-            }
+                    "turn_detection": None,
+                }
             await socket.send(json.dumps({
                 "type": "session.update", "event_id": uuid4().hex, "session": config,
             }))
@@ -249,7 +261,7 @@ async def preview(settings: Settings, voice: str, text: str) -> bytes:
             async with asyncio.timeout(20):
                 while True:
                     event = json.loads(await socket.recv())
-                    if event.get("type") == "response.audio.delta":
+                    if event.get("type") in {"response.audio.delta", "response.output_audio.delta"}:
                         audio.extend(base64.b64decode(event["delta"]))
                     elif event.get("type") == "error":
                         raise ValueError()

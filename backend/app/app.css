@@ -467,7 +467,7 @@ body.voice-mode { overflow:hidden; }
 @media(max-width:820px) {
   .settings-page #role-fields,.settings-page #config-fields.compact-api,.settings-page .page-content { padding:18px 18px 32px; }
 }
-.model-route-bar {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+.model-route-bar {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px}
 .model-route-summary {font-size:13px;color:var(--muted)}
 .model-route-summary strong {color:var(--text);font-weight:600}
 .model-route-summary small {margin-left:6px;color:var(--subtle)}
@@ -1013,6 +1013,7 @@ body.voice-mode { overflow:hidden; }
 .search-key-head label { font-size:12px; font-weight:500; }
 
 .ack-config { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; }
+.ack-config input[type="checkbox"] { width:16px; height:16px; padding:0; margin:0; flex:0 0 auto; accent-color:var(--primary); }
 .step-preview-details { max-width:320px; color:var(--muted); font-size:12px; }
 .step-preview-details summary { cursor:pointer; width:fit-content; }
 .step-preview-details img { display:block; width:100%; height:auto; margin-top:6px; border:1px solid var(--border); border-radius:8px; }
