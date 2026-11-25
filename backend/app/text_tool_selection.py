@@ -57,11 +57,12 @@ TOOL_PURPOSES = {
 
 
 class TextToolSelection:
-    def __init__(self, context):
+    def __init__(self, context, *, exclude=()):
         self.context = context
         self.base_registry = context.registry
         self.base_current_registry = context.current_registry
-        self.catalog = {item["name"]: item for item in context.definitions(compact=True)}
+        excluded = set(exclude or ())
+        self.catalog = {item["name"]: item for item in context.definitions(compact=True) if item["name"] not in excluded}
         self.loaded = self._initial_tools() & self.catalog.keys()
         if self.catalog:
             loader = TaskToolLoader(self)

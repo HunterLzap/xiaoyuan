@@ -699,3 +699,28 @@ def test_health_reports_hardware_ready_boolean(connection_settings_client):
         assert "device-token-for-tests" not in response.text
     finally:
         devices.connection = None
+
+
+def test_text_tool_selection_excludes_native_web_search_and_prompt_keeps_concise_style():
+    from backend.app.prompt_builder import build_system_prompt
+    from backend.app.text_tool_selection import TextToolSelection
+    from backend.app.tools import ToolSpec
+
+    registry = ToolRegistry([
+        SimpleNamespace(spec=ToolSpec("get_weather", "weather", {"type": "object", "properties": {}})),
+        SimpleNamespace(spec=ToolSpec("web_search", "search", {"type": "object", "properties": {}})),
+    ])
+    settings = Settings(_env_file=None, web_search_enabled=True, weather_enabled=True)
+    ctx = SimpleNamespace(
+        session_id="s1", turn_id="t1", question="查一下今天金价", history=(),
+        registry=registry, current_registry=lambda: registry, tool_gateway=None,
+        allowed={"get_weather", "web_search"},
+        definitions=lambda **kw: registry.definitions(nested=kw.get("nested", False)),
+    )
+    selection = TextToolSelection(ctx, exclude={"web_search"})
+    assert "web_search" not in selection.catalog
+    assert "web_search" not in selection.loaded
+    loader = ctx.registry.get("_load_task_tools")
+    assert loader is not None and "web_search" not in loader.spec.description
+    prompt = build_system_prompt(settings, "text", ["get_weather"])
+    assert "简洁自然的口语" in prompt and "不要长篇大论" in prompt

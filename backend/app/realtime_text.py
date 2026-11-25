@@ -52,7 +52,7 @@ class RealtimeTextProvider:
                     if json.loads(await socket.recv()).get("type") != "session.created":
                         raise ValueError()
                     joined = "\n".join(message["content"] for message in messages if message["role"] == "system")
-                    selection = TextToolSelection(tool_context) if tool_context is not None else None
+                    selection = TextToolSelection(tool_context, exclude={"web_search"} if use_native_search else ()) if tool_context is not None else None
                     turn_state = (tool_context.order_state_text()
                                   if tool_context is not None and hasattr(tool_context, "order_state_text") else "")
                     def selected_config():

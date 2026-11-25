@@ -201,6 +201,7 @@ class ChatService:
                         sources=sources,
                         tool_calls=summaries,
                         pending_approval=pending_approval,
+                        elapsed_ms=elapsed_ms,
                         audio_status=resolved_audio,
                     ))
                 session.updated_at = datetime.now(timezone.utc)
@@ -685,6 +686,8 @@ class ChatService:
                 answer.sources = tool_context.sources()
                 answer.tool_calls = tool_context.summaries()
                 answer.pending_approval = tool_context.pending_approval
+                elapsed_ms = int((perf_counter() - started) * 1000)
+                answer.elapsed_ms = elapsed_ms
                 self._sync_approval_statuses(session)
                 self.rebuild_context(session, self.settings.history_turns)
                 session.updated_at = datetime.now(timezone.utc)
@@ -742,7 +745,7 @@ class ChatService:
                 estimated_cost=answer.estimated_cost, currency=config.currency,
                 session_usage=session.usage.model_copy(), history_persisted=session.history_persisted,
                 knowledge=knowledge, sources=answer.sources, tool_calls=answer.tool_calls,
-                pending_approval=answer.pending_approval,
+                pending_approval=answer.pending_approval, elapsed_ms=elapsed_ms,
             ).model_dump(mode="json")
             yield "done", {**response, "turn_id": str(identity),
                            "ms": int((perf_counter() - started) * 1000),

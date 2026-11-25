@@ -263,6 +263,7 @@ class RealtimeTurn:
         await self.emit("done", {"reply": self.reply, "session_id": str(self.sid), "turn_id": str(self.turn_id),
             "model": self.config.rt_model, "provider": self.provider,
             "usage": self.usage.model_dump() if self.usage else None, "audio_status": "text_only",
+            "elapsed_ms": int(max(0.0, monotonic() - self.started) * 1000) if getattr(self, "started", None) is not None else None,
             "history_persisted": self.session.history_persisted,
             "order_guard_early_output": self.order_guard.early_output,
             "order_guard_discarded": self.order_guard.discarded,
@@ -764,6 +765,7 @@ class RealtimeTurn:
                         await self.persist("failed" if self.control_failure else "complete", audio_status="streamed")
                         await self.emit("done",{"reply":self.reply,"session_id":str(self.sid),"turn_id":str(self.turn_id),
                             "model":self.config.rt_model,"provider":self.provider,"usage":self.usage.model_dump() if self.usage else None,"audio_status":"streamed",
+                            "elapsed_ms": int(max(0.0, monotonic() - self.started) * 1000) if getattr(self, "started", None) is not None else None,
                             "history_persisted":self.session.history_persisted,
                             "order_guard_early_output": self.order_guard.early_output,
                             "order_guard_discarded": self.order_guard.discarded,

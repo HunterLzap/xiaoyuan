@@ -35,6 +35,11 @@ def build_system_prompt(settings, channel="text", tool_names=None, turn_state=No
         if compact else context_instruction())
     if channel == "voice":
         parts.append(SPEECH_OUTPUT_INSTRUCTION)
+    else:
+        parts.append(
+            "\n表达风格：你是语音助理，默认用简洁自然的口语直接回答，通常 2 到 4 句话说清核心结论与关键数据，"
+            "不要长篇大论，不要使用 Emoji、多级标题或冗长项目列表；除非用户明确要求写长文、代码、表格或详细清单。"
+        )
     parts.append(build_tool_instructions(tool_names, channel, compact=compact))
     if tool_names is not None and not compact:
         parts.append("\n再次强调：结合当前问题和有效对话上下文，判断用户是否有具体的查询或控制需求；"

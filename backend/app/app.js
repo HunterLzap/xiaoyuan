@@ -464,6 +464,7 @@ function renderMessageReferences(article,message) {
   article.querySelector(".message-personal-sources")?.remove();
   article.querySelector(".message-tool-calls")?.remove();
   article.querySelector(".message-token-usage")?.remove();
+  article.querySelector(".msg-meta-grid")?.remove();
   if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
     const visibleCalls = message.tool_calls.filter(call => (call.tool_name || call.name) !== "_load_task_tools");
     if (visibleCalls.length) {
@@ -493,6 +494,22 @@ function renderMessageReferences(article,message) {
     detailPanel.hidden = true;
     article.append(detailPanel);
   }
+  const metaGrid = node("div", "msg-meta-grid");
+  const addMeta = (label, value) => {
+    const item = node("div", "msg-meta-item");
+    item.append(node("span", "msg-meta-label", label), node("span", "msg-meta-val", value));
+    metaGrid.append(item);
+  };
+  const sourceName = SOURCE_LABELS[message.source] || "文字";
+  addMeta("模型与来源", [sourceName, message.provider, message.model].filter(Boolean).join(" · ") || "未记录");
+  addMeta("总耗时", message.elapsed_ms != null ? (message.elapsed_ms >= 1000 ? `${(message.elapsed_ms / 1000).toFixed(2)} s` : `${message.elapsed_ms} ms`) : "未记录");
+  const u = message.usage;
+  const tokText = u && (u.total_tokens != null || u.prompt_tokens != null || u.completion_tokens != null)
+    ? `输入 ${u.prompt_tokens ?? "-"} / 输出 ${u.completion_tokens ?? "-"} / 合计 ${u.total_tokens ?? "-"}`
+    : "未报告";
+  addMeta("Token 用量", tokText);
+  addMeta("估算费用", message.estimated_cost != null ? `${message.estimated_cost} ${message.currency || "CNY"}` : "按平台账单");
+  detailPanel.append(metaGrid);
   const usageDetails = tokenUsageDetails(message.usage);
   detailPanel.append(usageDetails);
   if (Array.isArray(message.sources) && message.sources.length) {
@@ -517,7 +534,8 @@ function renderMessageReferences(article,message) {
   }
   if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
     const details = node("details","message-sources message-tool-calls");
-    details.append(node("summary","",`调用了 ${message.tool_calls.length} 次工具 · 查看`));
+    details.open = true;
+    details.append(node("summary","",`调用了 ${message.tool_calls.length} 次工具`));
     const list = node("ul","message-reference-list");
     for (const call of message.tool_calls) {
       const entry = node("li");
@@ -608,6 +626,7 @@ window.atoms3rVoiceMessages = {
     if (latest) Object.assign(latest, {
       content:data.reply, model:data.model, provider:data.provider, usage:data.usage,
       estimated_cost:data.estimated_cost, currency:data.currency, finish_reason:data.finish_reason,
+      elapsed_ms:data.elapsed_ms ?? data.ms ?? latest.elapsed_ms ?? null,
       status:"complete", audio_status:data.audio_status,
       sources:data.sources ?? latest.sources, tool_calls:data.tool_calls ?? latest.tool_calls,
       pending_approval:data.pending_approval ?? latest.pending_approval,
@@ -827,7 +846,7 @@ async function sendMessage(value, useKnowledge = state.useKnowledge) {
     state.active = data.session_id; remember("atoms3r.active", data.session_id);
     if (!state.detail) state.detail = {session_id:data.session_id, title:message.slice(0,40), messages:[]};
     const now = new Date().toISOString();
-    state.detail.messages.push({role:"user",content:message,created_at:now}, {role:"assistant",content:data.reply,created_at:now,model:data.model,provider:data.provider,usage:data.usage,estimated_cost:data.estimated_cost,currency:data.currency,finish_reason:data.finish_reason,knowledge:data.knowledge,sources:data.sources,tool_calls:data.tool_calls,pending_approval:data.pending_approval || null});
+    state.detail.messages.push({role:"user",content:message,created_at:now}, {role:"assistant",content:data.reply,created_at:now,model:data.model,provider:data.provider,usage:data.usage,estimated_cost:data.estimated_cost,currency:data.currency,finish_reason:data.finish_reason,elapsed_ms:data.elapsed_ms ?? data.ms ?? null,knowledge:data.knowledge,sources:data.sources,tool_calls:data.tool_calls,pending_approval:data.pending_approval || null});
     state.pending = null; state.pendingSteps = []; state.pendingText = ""; state.failure = null; renderMessages();
     if (state.view === "chat") { el("view-title").textContent = state.detail.title; document.title = `${state.detail.title} · 小圆`; }
     if (data.history_persisted === false) notice("已收到回答，但历史记录未能写入本机；当前对话仅保留在内存。", "error");
@@ -3377,12 +3396,53 @@ function renderTraceDetail(item) {
 function renderInsightDetail(item) {
   const area = el("insights-detail"), kind = insightDetailState.kind; area.replaceChildren();
   el("insights-detail-meta").textContent = insightTime(item.ts);
+  if (kind === "tools") {
+    const head = node("div","insight-detail-head");
+    head.append(node("h2","",`${item.tool_name || "API 工具"} · ${item.query_summary || "请求记录"}`));
+    const meta = node("div","insight-detail-tags");
+    const statusText = statusLabels[item.status] || item.status || "未记录";
+    const statusTag = node("span","insight-status",statusText); statusTag.dataset.state = item.status || "unknown";
+    meta.append(statusTag);
+    if (item.http_status != null) meta.append(node("span","insight-tag",`HTTP ${item.http_status}`));
+    meta.append(node("span","small-note",`耗时 ${insightNumber(item.elapsed_ms," ms")}`));
+    if (item.error_code) meta.append(node("span","insight-tag",`错误 ${item.error_code}`));
+    head.append(meta); area.append(head);
+    const calls = Array.isArray(item.calls) && item.calls.length ? item.calls : [item];
+    for (const call of calls) {
+      const card = node("article","insight-call"), header = node("div","insight-record-header");
+      header.append(node("h3","",call.tool_name || item.tool_name || "API 调用"),node("span","insight-status",statusLabels[call.status] || call.status || statusText)); card.append(header);
+      card.append(node("p","small-note",`HTTP ${call.http_status ?? "未提供"} · ${insightNumber(call.elapsed_ms," ms")}${call.error_code ? ` · 错误码 ${call.error_code}` : ""}${call.trigger_question ? ` · 触发问题：${call.trigger_question}` : ""}`));
+      const request = node("details"); request.open = true; request.append(node("summary","","请求（脱敏）"),node("pre","insight-json",insightJson(call.request))); card.append(request);
+      const response = node("details"); response.open = true; response.append(node("summary","","响应（脱敏）"),node("pre","insight-json",insightJson(call.response))); card.append(response);
+      area.append(card);
+    }
+    return;
+  }
+  const isRag = item.answer_type === "rag" || item.answer_type === "retrieval_only" || (item.snapshots || []).length > 0;
   const head = node("div","insight-detail-head"); head.append(node("h2","",item.question ?? item.query_summary ?? "问题未记录"));
   const meta = node("div","insight-detail-tags");
   const typeTag = node("span","insight-tag",insightAnswerType(item.answer_type)); typeTag.dataset.variant = "type"; meta.append(typeTag);
-  meta.append(node("span","insight-tag",item.evaluation_score == null ? "未评测" : `得分 ${item.evaluation_score}`));
-  meta.append(node("span","insight-tag",item.hit === true ? "检索命中" : item.hit === false ? "未命中" : "命中未记录"));
+  if (isRag) {
+    meta.append(node("span","insight-tag",item.evaluation_score == null ? "未评测" : `得分 ${item.evaluation_score}`));
+    meta.append(node("span","insight-tag",item.hit === true ? "检索命中" : item.hit === false ? "未命中" : "命中未记录"));
+  }
   meta.append(node("span","small-note",`耗时 ${insightNumber(item.elapsed_ms," ms")}`)); head.append(meta); area.append(head);
+  if (!isRag) {
+    const botPanel = node("div","insight-answer-card");
+    botPanel.append(node("h3","","助手回答"),node("p","insight-answer-text",item.answer || "暂无最终回答。"));
+    area.append(botPanel);
+    if ((item.calls||[]).length) {
+      for (const call of item.calls) {
+        const card = node("article","insight-call"), header = node("div","insight-record-header");
+        header.append(node("h3","",call.tool_name || "工具调用"),node("span","insight-status",statusLabels[call.status] || call.status || "未提供")); card.append(header);
+        card.append(node("p","small-note",`HTTP ${call.http_status ?? "未提供"} · ${insightNumber(call.elapsed_ms," ms")}${call.error_code ? ` · 错误码 ${call.error_code}` : ""}`));
+        const request = node("details"); request.append(node("summary","","请求（脱敏）"),node("pre","insight-json",insightJson(call.request))); card.append(request);
+        const response = node("details"); response.append(node("summary","","响应（脱敏）"),node("pre","insight-json",insightJson(call.response))); card.append(response);
+        area.append(card);
+      }
+    }
+    return;
+  }
   const tabs = node("div","insight-tabs"), panels = {}, addTab = (key,label) => {const b = node("button","",label); b.type = "button"; b.dataset.tab = key; b.setAttribute("aria-pressed","false"); b.addEventListener("click",() => insightDetailTab(key)); tabs.append(b);}, makePanel = key => {const p = node("div","insight-tab-panel"); p.dataset.panel = key; p.hidden = true; panels[key] = p; return p;};
   area.append(tabs);
   addTab("answer","答案对比");
